@@ -54,6 +54,32 @@ Vorsicht** (oft schon parabolic), **Rank 2-7 priorisieren**.
 **Verdict**: Pole-7% bringt **keine Win-Rate-Verbesserung**. Reduziert Sample
 ohne Edge-Gewinn. → **Pole 5% bleibt optimal**.
 
+## Catalyst-Required-Test (EDGAR 8-K full-tagging)
+
+EDGAR-Tagging fertig (1903 candidates getaggt, **8-K-Match-Rate: 15,8 %**).
+
+→ **Nur 1 von 6 Candidate-Days hat ein SEC 8-K-Filing in ±1 Tag.**
+   Bestätigt: viele Cameron-Catalysts sind **Tweets/PR-Wire** (nicht in EDGAR).
+
+`--require-catalyst` Test (Top-10 + 8-K erforderlich):
+
+| Metric | Top-10 (kein Catalyst) | Top-10 + 8-K | Effekt |
+|---|---|---|---|
+| Trades | 130 | 16 | nur 12 % haben 8-K |
+| Win-Rate | 69,2 % | **75,0 %** | ↑ +5,8 % |
+| Avg R/R | 0,40 | **0,65** | ↑ |
+| Median R/R | 0,50 | **0,92** | ↑ deutlich |
+| Total ¢ | +19,1 | −2,83 | ↓ (n=16 zu klein, 1 Rank-1-Outlier) |
+
+**Per-Rank mit Catalyst:**
+- Rank-1 + Catalyst: 50 % WR, avg **−2,11 ¢** ← parabolic-Halt-Squeeze
+- Rank-4 + Catalyst: 83 % WR, +0,14 ¢ ✓
+- Rank-5/7/8 + Catalyst: 100 % WR ✓ (klein aber clean)
+
+→ Catalyst-Filter funktioniert, **Win-Rate steigt**, aber Sample n=16 zu klein
+für stabile Total-PnL-Aussage. Polygon-5-Jahre-Daten würden Sample auf
+~800-1.000 Catalyst-Trades hochsetzen.
+
 ## Cameron-Compliance-Check (constraints.yaml)
 
 Vollständige Audit-Tabelle in `CAMERON_COMPLIANCE.md`. Coverage-Score:
