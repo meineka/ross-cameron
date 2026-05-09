@@ -1,0 +1,777 @@
+# Ross Cameron — Hard Constraints (Master File)
+# Single Source of Truth. Code im Backtest/Adapter MUSS daraus laden.
+# Quellen: Warrior Trading Artikel, Buch (Kap.1-5), 10 YouTube-Transkripte.
+# Stand: 2026-05-09 (final, konsistenz-gecheckt).
+#
+# Konsolidierungs-Hinweise:
+# - `halt_mechanics` ist kanonisch; level2_rules, breaking_news, parabolic_momentum
+#   referenzieren via `halt_reference`.
+# - `pullback_count_rule` (Sektion 3b) ist kanonisch; bull_flag, ma_trading_rules,
+#   false_breakout_filter referenzieren via `pullback_count_reference`.
+# - Konflikte Buch (2015) vs Videos (2024) sind in book_notes.md / video_notes.md
+#   dokumentiert. YAML hält strict-Werte aus den Videos (= aktuellste Praxis).
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1) UNIVERSE / STOCK SELECTION  (5 Pillars)
+# ─────────────────────────────────────────────────────────────────────────────
+universe:
+  market: US_equities
+  exchanges: [NASDAQ, NYSE, AMEX]
+  exclude: [OTC, pink_sheets]
+
+  # Pillar 1: Preis  [Videos d0wt45LbvWo, 3rEakODkiEg]
+  price_min_usd: 2.00            # strict (Cameron sagt in Videos $2)
+  price_min_loose_usd: 1.00      # ältere Webartikel
+  price_max_usd: 20.00
+  price_sweet_spot_usd: [5.00, 10.00]   # 90% seiner Trades hier
+
+  # Pillar 2: Float
+  float_max_strict: 10_000_000   # 5-Pillars-Skript
+  float_max_loose:  20_000_000   # mehrere Videos: "<20M"
+  float_rocket_fuel: 5_000_000
+  float_extreme_low: 1_000_000   # < 1M ergibt 430%+ Tagesmoves real
+
+  # Pillar 3: Relative Volume
+  rvol_min: 5.0                  # vs. 30–50 Tage Avg
+
+  # Pillar 4: Daily % Change / Gap
+  daily_change_min_pct: 10.0     # 5 Pillars + d0wt45LbvWo + 3rEakODkiEg
+  gap_min_pct: 4.0               # Gap-and-Go Mindestschwelle
+  premarket_change_min_pct: 2.0  # absolute Untergrenze für Watchlist (10%+ bevorzugt)
+
+  # Pillar 5: News Catalyst (manuelle Verifikation)
+  catalyst_required: true
+  catalyst_types:
+    - earnings_surprise
+    - FDA_approval
+    - PR_partnership
+    - contract_award
+    - buyout_rumor
+    - short_squeeze
+    - sector_news
+
+  # Premarket-Liquidität
+  premarket_volume_min: 300_000
+  premarket_volume_safe: 1_000_000
+  volume_by_9am_min: 100_000
+  avg_daily_volume_min: 500_000   # Buch Ch.3: 500k Default-Threshold
+
+  # Float Rotation
+  prefer_if_volume_over_float_ratio_ge: 1.0     # 1× = volle Rotation
+  full_rotation_factor_strong_signal: 4.0       # Buch: 4× Rotation = 100–200% Move-Korrelat
+
+  # Buch Ch.3 + Masterclass: spezielle Stock-Klassen
+  former_runner_priority_boost: true
+  exclude_buyout_stocks: true
+  exclude_inside_days: true
+  prefer_follow_through_days: true
+  unconfirmed_news_treated_as_suspect: true
+
+  # Bonus-Criteria (Masterclass B81TMhUpz50) — wenn ja → Watchlist-Priority-Boost
+  bonus_criteria:
+    recent_ipo_within_days: 90
+    recent_reverse_split: true                  # Float-Drop macht oft erst tradeable
+    all_time_highs_blue_sky: true               # kein Resistance darüber
+    yesterday_volume_under_100k: true           # heute Big-Vol = automatisch hoher RVOL
+
+  # Catalyst-Timing (Masterclass)
+  catalyst_timing:
+    best_news_days: [Mon, Tue, Wed]
+    avoid_news_after: { day: Fri, time_local: "12:00" }
+    news_release_minute_marks: [0, 30]          # zur vollen + halben Stunde
+
+  # Tier-1-News-Quellen (vorzugsweise; alles andere = Suspect)
+  tier1_news_sources:
+    - company_press_release
+    - earnings_report
+    - sec_8k_filing
+    - fda_announcement
+    - government_contract_award
+    - top_tier_analyst_firm
+    - exchange_official_statement
+
+  # Profit-Distribution-Anchor (Camerons Live-Stats über $13M kumuliert)
+  profit_distribution_observed:
+    pct_from_under_2usd: 4
+    pct_from_over_10pct_movers: 99            # "if not 10%+ mover, don't trade it"
+    primary_winners_from_top_n_gainers: 4      # Top 3-4 Percent-Gainers/Tag
+
+  # SEC-Filings für Long-Holds zu prüfen
+  sec_filings_to_check:
+    quarterly: 10-Q
+    annual: 10-K
+    big_stake_acquisition: 13-D
+    passive_holding: 13-G
+    insider_buy_sell: Form-4
+    shelf_registration: [S-1, S-3]              # Verwässerungs-Risiko-Indikator
+
+  combine: AND
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2) TIME WINDOW  [Quelle: d0wt45LbvWo + Power-Hour-Artikel]
+# ─────────────────────────────────────────────────────────────────────────────
+session:
+  timezone: America/New_York
+  premarket_window: { start: "07:00", end: "09:30" }    # News-Releases ab 7 Uhr
+  primary_window:   { start: "09:30", end: "11:00" }    # Hauptzeit nach Open
+  power_hour:       { start: "09:30", end: "10:30" }    # höchste Edge
+  extended_window:  { start: "07:00", end: "11:00" }    # Camerons echtes Fenster
+  hard_stop:        "12:00"
+  avoid_after:      "13:00"     # nach 13 Uhr i.d.R. flat
+  news_release_minutes_to_watch: [0, 30]   # zur vollen + halben Stunde
+  no_trade_timeout_minutes: 30  # 30 Min ohne Trade → Session beenden
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3) CHART / INDICATOR SETUP  [Quelle: eTUYXkAr6Pc, mfGQr2tHoX0]
+# ─────────────────────────────────────────────────────────────────────────────
+charts:
+  primary_tf: 1m
+  context_tf: 5m
+  daily_tf:   1d
+  scalp_tf:   10s
+
+indicators:
+  ema_fast:   { period: 9,   color: gray,   tf: [1m, 5m, 1d], role: "buy_dips_to_this_line, primary_trail" }
+  ema_mid:    { period: 20,  color: blue,   tf: [1m, 5m, 1d], role: "secondary_support_target" }
+  ema_slow:   { period: 50,  color: red,    tf: [1d] }
+  ema_trend:  { period: 200, color: purple, tf: [1m, 5m, 1d], role: "primary_SR_trend_definition" }
+  sma_trend:  { period: 200, color: purple, tf: [1d], style: dotted }
+  vwap:       { tf: [1m, 5m], role: "intraday_equilibrium, trend_entry_anchor" }
+  macd:       { fast: 12, slow: 26, signal: 9, source: close, locked: true }
+  rsi:        { period: 14, smoothing: SMA, used_for: reversals_only, on_chart: false,
+                use_as_scanner_filter: true,
+                extreme_thresholds: { oversold: 20, overbought: 80 },
+                ultra_extreme:      { oversold: 5,  overbought: 95 } }
+  bollinger:  { period: 20, stddev: 2, only_on_tf: 5m, only_for: reversals,
+                trigger: "candle fully outside band" }
+  volume_bars: { critical: true, decreasing_in_trend: "warns_trend_change",
+                 spike_during_consolidation: "potential_breakout_signal" }
+
+# 3b) PULLBACK-COUNT-RULE — kanonische Definition (vorher dreifach mit Konflikten)
+# Referenziert von: bull_flag, ma_trading_rules, false_breakout_filter, vetos
+pullback_count_rule:
+  description: "Wieviele Pullbacks in einem Move tradeable sind"
+  pullback_1: aggressive_entry_ok
+  pullback_2: aggressive_entry_ok
+  pullback_3:
+    conditional_allow: true
+    conditions_all_required:
+      - "MACD positiv (above signal line)"
+      - "Volume profile grün-dominant"
+      - "keine False-Breakouts heute auf diesem Stock"
+      - "Stock nicht > 2 ATR off 9 EMA (= overextended)"
+    if_any_condition_fails: skip
+  pullback_4_plus: skip_always
+  rationale: "ab 3. Pullback steigt Trend-Erschöpfungs-Risiko stark; Buch sagt 'cautious', Cameron-2024 sagt 'skip'. Konservativer Konsens."
+
+# 3a) MA-Trading-Regeln  [Buch Kap. 5]
+ma_trading_rules:
+  prefer_9ema_trend: "stocks respecting 9EMA show more strength than 20EMA-trenders"
+  pullback_priority:
+    - { pullback_n: 1, take_aggressively: true }
+    - { pullback_n: 2, take_aggressively: true }
+    - { pullback_n: 3, action: "skip — trend-end risk" }
+  long_below_200ema_forbidden: true     # "rarely take longs below 200EMA"
+  short_above_200ema_forbidden: true    # "rarely take shorts above 200EMA"
+  reversal_setup_anchor: "stock extended away from 9EMA → revert-to-9EMA target"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4) ENTRY MODELS
+# ─────────────────────────────────────────────────────────────────────────────
+entries:
+
+  # 4.1 Bull Flag (5m+) / Micro Pullback (1m, 10s) — gleicher Pattern, andere TF
+  bull_flag_micro_pullback:
+    timeframe: [1m, 5m]
+    pole:
+      green_candles_min: 3
+      green_candles_max: 7
+      cumulative_move_pct_min: 5.0
+      candle_body_preference: "long_body_green"
+      no_topping_tail: { upper_wick_to_range_ratio_max: 0.4 }
+      volume_must_rise_during_pole: true
+    flag:
+      red_candles_min: 1
+      red_candles_max: 3                # 4+ rote Kerzen = SKIP (Schwäche)
+      retracement_pct_max: 50.0
+      retracement_pct_optimal: 25.0     # noch besser: nur ⅛–¼ retraced
+      volume_must_decline: true
+      must_hold_above_vwap: true
+    breakout:
+      trigger: "first green candle whose high > prev red candle high"
+      level2_confirmation: "green orders aggressing on bid/ask in T&S"
+      volume_factor_min: 1.5
+      confirm_on_candle_close: true
+    pullback_count_reference: "siehe pullback_count_rule (kanonische Definition in Sektion 3b)"
+    stop:    "min(flag_lows)"
+    target1: "entry + 1*(entry-stop), exit 50%"
+    target2: "next psychological level (whole/half dollar)"
+    target3: "trail under 9EMA"
+
+  # 4.2 Gap & Go (Open-Drive)
+  gap_and_go:
+    pre_open_filters:
+      gap_pct_min: 4.0
+      premarket_high_clean: true
+      catalyst_present: true
+    entry_trigger: "break of premarket high after open with volume"
+    alternative_entry: "1m bull flag in first 5–15 min over PM high"
+    stop:    "below opening range low or VWAP, whichever closer"
+    target:  "scale out at 2R, trail under 9EMA"
+
+  # 4.3 VWAP Bounce / Hold
+  vwap_bounce:
+    context: "uptrend, previous green run"
+    entry_trigger: "first 1m bullish candle that bounces off VWAP and reclaims 9EMA"
+    stop:    "below VWAP"
+    target:  "previous high or 2R"
+
+  # 4.4 Red-to-Green
+  red_to_green:
+    context: "stock opens below previous close, then reclaims open"
+    entry_trigger: "1m close > daily open with volume"
+    stop:    "below most recent 1m swing low"
+    target:  "high of day or 2R"
+
+  # 4.5 Halt Resumption (Long)
+  halt_resumption_long:
+    context: "trading halt to upside on news, high pre-halt volume"
+    entry_trigger: "first 1m candle after resume closes green with volume"
+    stop:    "low of first 1m post-resume candle"
+    target:  "scale into strength, trail under 9EMA"
+
+  # 4.6 ABCD Pattern
+  abcd:
+    leg_AB: "strong impulse up"
+    leg_BC: "pullback 38.2–78.6% of AB (typical 50–61.8% in trending)"
+    leg_CD: "127.2–161.8% of BC in direction of AB"
+    entry_trigger: "break of point B on volume"
+    stop:    "below point C"
+    target:  "measured move D, then trail"
+
+  # 4.7 Reversal (full spec aus YouTube jfe1Zl-5EQI Class 4/12)
+  reversal:
+    timeframe_primary: 5m              # 5m cleaner than 1m
+    timeframe_fallback_1m: { require_red_1m_candles_min: 20, require_red_5m_candles_min: 5 }
+    use_when: "stock at extreme, NOT for momentum entries"
+    pre_conditions_all_required:
+      consecutive_extreme_candles_min: 5
+      consecutive_extreme_candles_max: 10
+      volume_min_shares: 500_000
+      volume_preferred_shares: 1_000_000
+      volume_peaks_at_extreme_candle: true     # Best Signal: Volume-HOD auf finaler roter Kerze
+      candle_outside_bollinger: true           # 20/2.0 stddev, voll außerhalb
+      pin_bar_or_doji_final: true              # Wick > Body
+    long_setup:
+      rsi_threshold: "<10"                     # strict — RSI <20 ist sekundäre Schwelle
+      direction: bottom_bounce
+      pin_bar_type: [bottoming_tail, hammer, doji]
+      bonus_confluence: [daily_support_level, whole_dollar_anchor]
+    short_setup:
+      rsi_threshold: ">90"                     # strict
+      direction: top_reversal
+      pin_bar_type: [topping_tail, shooting_star, doji]
+      bonus_confluence: [daily_resistance_level, whole_dollar_anchor]
+    entry_trigger: "first 5m candle to make a new high (long) / new low (short)"
+    stop_priority: [low_of_day_long_or_high_of_day_short, "arbitrary 20-30c if LOD/HOD too far"]
+    abort_rule: "stock moves 30c against me → mis-timed entry → exit immediately"
+    targets:
+      t1: VWAP
+      t2: 9_EMA_or_20_EMA
+      trail: "below low of last closed 5m candle"
+    achievable_rr: 6.0                          # auf besten Setups
+    float_constraint: any                       # Reversals: Float egal (Buch Ch.3)
+    flip_to_momentum_if: "stock breaks through MA-resistance after consolidation → flip long"
+
+  # 4.8 Sub-VWAP-Trap (aus YouTube W3jXQlgGbBc)
+  sub_vwap_trap:
+    pre_conditions_all_required:
+      stock_pumped_today_pct_min: 10        # früher Squeeze ≥10%
+      currently_below_vwap: true
+      failed_vwap_reclaim_attempts_min: 2   # ≥2 gescheiterte Versuche
+      forming_base_higher_lows: true
+      news_catalyst_present: true
+    entry:
+      starter_at_base_hold:
+        trigger: "base holds + bid tightens + green burst in T&S"
+        size: starter_quarter_position
+      full_add_at_vwap_break:
+        trigger: "first 1m candle close > VWAP (sustained, not just wick)"
+        confirmation: ["green orders aggressing on ask", "level 2 ask shrinks"]
+    stop:
+      starter_phase: "base low"
+      after_vwap_break: "back below VWAP (failed reclaim)"
+      after_halt_up: "low of first resume candle"
+    targets:
+      t1: retest_of_HOD
+      t2: "halt_up_trigger_at_+10_pct"
+      trail_after_halt: below_9_EMA
+    typical_timing: "lunch or afternoon (surprise element)"
+    defended_level_warning: "50k+ sell wall at VWAP can break or hold — risk indicator, not skip"
+    devil_horns_abort: "two topping tails in a row on 1m before break → cancel setup"
+    pros: ["big moves", "halt-up likely", "clear entry", "low crowd"]
+    cons: ["inherent weakness", "tug-of-war phases", "rare", "warrant/insider dump risk"]
+
+  # 4.9 Parabolic Momentum (Stock-Type, nicht Pattern)
+  parabolic_momentum:
+    is_stock_state_not_pattern: true        # apply normal patterns within this state
+    qualifies_when_any:
+      - "stock up >100% in single day"
+      - "multi-day runner with 100%+ cumulative move"
+      - "halt-up triggered (10% in 5min)"
+      - "recent reverse-split + news catalyst"
+      - "low-float (<5M) on big news + sympathy momentum"
+    typical_triggers:
+      - recent_reverse_split
+      - recent_ipo
+      - SPAC_merger_news
+      - heavy_short_interest_plus_catalyst
+      - sympathy_to_other_parabolic_stock_in_sector
+    sympathy_momentum:
+      enabled: true
+      rule: "main stock parabolic → 2-4 sector peers squeeze without own news"
+      example_drys_2016: [GLBS, EC, TOPS, DCIX, SHIP]   # 100-1000% on no-news
+      caveat: "when main rolls, sympathy rolls HARDER → exit sympathy first"
+    halt_reference: "siehe halt_mechanics (kanonische Definition)"
+    risk_adjustments_when_parabolic:
+      use_mental_stops_not_live: true       # slippage on live stops too risky
+      max_size_reduced: true                # smaller size for $50+ stocks
+      strict_wheelhouse_2_to_20_usd: true   # skip $50+ stocks (spread issue)
+      no_market_orders: true                # marketable limits only
+
+# 4a) ORDER ROUTING (aus afNhgCc-LCw)
+order_routing:
+  hard_rules:
+    no_raw_market_orders: true
+    use_marketable_limit_with_offset: true
+    standard_offset_cents: 15            # +15¢ for buy-at-ask, -15¢ for sell-at-bid
+  preferred_broker: Lightspeed           # vs TD Ameritrade (finicky hotkeys per Cameron)
+  hotkey_setup:
+    buy_at_ask_plus_15c:                 # Shift+N where N = thousand-share-multiplier
+      shift_1: 1000
+      shift_2: 2000
+      shift_3: 3000
+      shift_4: 4000
+      shift_5: 5000
+      shift_6: 6000
+      shift_7: 7000
+      shift_8: 8000
+      shift_9: 9000
+    panic_exit_full_at_bid_minus_15c: "Ctrl+Z"
+    sell_into_strength_at_ask: ["Ctrl+L", "Ctrl+K"]
+    sell_half_ratio_based: true          # automatically halves current holding
+    cancel_orders: "Ctrl+(any)"
+  routing_choice_rule: "buy at ask, sell into ask (when bullish) — NEVER hit bid as planned exit"
+
+# 4b) FALSE-BREAKOUT-FILTER (aus YouTube 1FKu4LH0Xss) — wichtigster Defensive-Filter
+false_breakout_filter:
+  description: "5-Indikator-Checkliste; ≥2 Treffer → SKIP Long-Trade"
+  indicators:
+    - id: 1
+      name: macd_against_trade
+      check: "MACD line < Signal line on 1m bei Entry-Versuch"
+      severity: high
+    - id: 2
+      name: volume_profile_red_heavy
+      check: "rote Kerzen haben höheres Volumen als grüne"
+      severity: high
+    - id: 3
+      name: history_of_false_breakouts_today
+      check: "Stock hat heute bereits ≥1 Rejection-Candle produziert"
+      severity: medium
+    - id: 4
+      name: multiple_topping_tails
+      check: "≥2 Topping Tails in Folge ODER an gleicher Resistance"
+      severity: medium
+    - id: 5
+      name: too_long_consolidating
+      check: "Range-bound > 5-10 Kerzen ohne klare Direktion"
+      severity: medium
+  trigger_threshold: 2                        # ≥2 Treffer → skip
+  hard_skip_when_macd_against: true           # Indikator 1 alleine = strong skip-recommendation
+  algo_spike_flush_mechanic:
+    spike_phase: "buy orders surge → MMs pull sell orders → stock skips levels up"
+    flush_phase: "sellers come → MMs pull buy orders → stock skips levels down"
+    result: "jackknife candle in single bar"
+  whale_at_resistance_pattern:
+    setup: "1-5 Tap-Versuche an gleichem Level → finally breaks → second whale dumps"
+    detection: "≥3 attempts at same level + reject = warning"
+    rule: "do NOT enter on the 4th-5th attempt break — high false-breakout risk"
+  pullback_count_reference: "siehe pullback_count_rule (kanonische Definition in Sektion 3b)"
+  cleanest_phase: "pre-market + first 30-60 min after open"
+  reasons_for_breakdown:
+    - insider_dumping
+    - direct_offering_announced_later
+    - whale_at_resistance
+  emotional_trigger_words:                    # spiral-warning: wenn Trader das denkt
+    - "I can't believe it"
+    - "how does this keep happening to me"
+    - "another false breakout I'm so sick of this"
+
+# 4c) BOLLINGER BANDS — Detail (aus YouTube DgWn3egDGb0)
+bollinger_bands_detail:
+  settings_locked:
+    period: 20
+    stddev: 2.0
+    source: close
+    do_not_change: true                       # self-fulfilling prophecy via shared settings
+  use_only_on_tf: 5m                          # Buch-Konsistenz; Cameron switcht selten zu 1m
+  use_only_for: reversals                     # nicht für Momentum-Trades
+  inside_band_pct_of_price_action: 95         # 95% liegt innerhalb
+  candle_outside_band: high_reversal_probability
+  reversal_confirmation_rule: "next candle makes new high (long-bounce) or new low (top-reverse)"
+  long_bottom_bounce:
+    pre_conditions: [5_to_10_consecutive_red_candles, candle_fully_below_lower_band, rsi_below_10, pin_bar_or_doji_final, volume_peaks_on_final_candle]
+    entry: candle_over_candle_new_high
+    stop: low_of_day
+    targets_in_order: [9_ema, 20_ema, vwap, bb_midline]
+  short_top_reversal:
+    pre_conditions: [5_to_10_consecutive_green_candles, candle_fully_above_upper_band, rsi_above_90, topping_tail_or_doji_final, volume_peaks_on_final_candle]
+    entry: candle_over_candle_new_low
+    stop: high_of_day
+    targets_in_order: [9_ema, 20_ema, vwap, bb_midline]
+  bollinger_compression_then_expansion:
+    pattern: "BBs come close together → consolidation → expansion = breakout"
+    direction_hint: "position relative to VWAP determines likely break direction"
+  doji_outside_band: amplified_reversal_signal
+
+# 4d) PRE/AFTER-HOURS MECHANICS (aus YouTube PjVivCcM1B0)
+extended_hours_mechanics:
+  market_hours_et:
+    pre_market: { start: "04:00", end: "09:30", broker_typical_start: "07:00" }
+    regular: { start: "09:30", end: "16:00" }
+    after_hours: { start: "16:00", end: "20:00" }
+    twenty_four_hour: "limited stocks, select brokers only"
+  cameron_active_window:
+    sit_down_time: "06:30"
+    primary_trading_window: "07:00-11:00"
+    after_hours_not_profitable_for_cameron: true   # nicht traden!
+  forbidden_in_extended_hours:
+    - market_orders
+    - stop_orders                                  # buy-stop, sell-stop, all blocked
+    - options_trading
+    - "leverage_after_16:00"                       # margin must close by 15:45 or auto-liquidated
+  allowed_in_extended_hours:
+    - limit_orders_with_offset                     # einzige funktionierende Form
+    - leverage_pre_market                          # broker-spezifisch
+  gtc_orders_behavior: "sit passive, trigger only at 09:30 regular open"
+  broker_setup_required:
+    lightspeed: "limit + TIF=Day works automatically 04:00-20:00"
+    thinkorswim: "TIF must be set to 'Extended', 'Day' rejected pre/after"
+    webull: "Turbo Trader Settings: offset orders + percentage exits configurable"
+  hft_algo_pattern: "light switch — book fills at 09:30, empties at 16:00"
+  why_no_stop_orders_in_extended:
+    reason: "prevents stop hunting via flash crashes on light volume"
+    legal_status: "stop hunting technically illegal but enforcement weak"
+  daily_chart_caveat: "most daily charts show ONLY regular-hours candles → pre/after-hours moves invisible on daily"
+  leverage_after_close_warning: "margin must close by 15:45 ET — auto-liquidation at 16:00"
+
+# Zurück zu Entry-Models — die folgenden gehören zu `entries:` aus Sektion 4
+entries_extended:
+
+  # 4.10 Candlestick-basiertes Reversal (Buch Ch.4)
+  candlestick_reversal:
+    setup: "3 long red body candles + bottoming-tail/hammer at daily-support → confirmation candle breaks hammer-high"
+    entry_trigger: "candle-over-candle: next green candle's high > hammer high"
+    stop:    "below hammer low"
+    target:  "back to VWAP / 9EMA / next resistance"
+    veto:    "do NOT buy AT the top of a long-body green candle (chasing)"
+
+  # 4.11 Breaking-News-Trade (aus YouTube JMcaRfFThmg)
+  breaking_news:
+    workflow_order: "wait for stock to RESPOND to news, do NOT search for news first"
+    entry_pattern: "first pullback after initial pop (micro-pullback)"
+    stop_cents_typical: 8                     # 7-8c sehr eng
+    rr_target_min: 2.0
+    rr_achievable: 3.0
+    float_exception_allowed: true             # NBEV had 71M float — fresh news + clean pattern overrides 20M cap
+    initial_reaction_uncertainty: true        # positive news kann negative reaction triggern
+    self_fulfilling_prophecy: true            # initial reaction → tagesrichtung
+    halt_reference: "siehe halt_mechanics (kanonische Definition)"
+    rules:
+      - "You don't go broke taking profit"
+      - "Don't marry the stock"
+      - "Get in, get profit, get out"
+
+# 4e) HALT MECHANICS — kanonische Definition (vorher dreifach: level2_rules, breaking_news, parabolic_momentum)
+halt_mechanics:
+  source: "LULD circuit-breaker rules"
+  level_1_trigger_pct_in_5min: 10           # Standard-Tier-1
+  level_2_trigger_pct_above_5min_avg: 20    # Tier-2 (engere Bid-Toleranz)
+  bid_hold_seconds_required: 15
+  resume_pattern_up: "halt-up oft Resume höher (clean break) oder leicht tiefer (limp)"
+  resume_pattern_down: "halt-down oft Resume tiefer"
+  anti_pattern_pinning: "stock oszilliert um LULD ohne clean break → nicht traden"
+  t12_news_halt:
+    risk_higher_on: NYSE
+    risk_lower_on: NASDAQ
+    boilerplate_response: "no material developments — typische Exchange-Antwort"
+
+# 4f) LEVEL 2 / TAPE-READING RULES  (aus YouTube BaZ4R2ovI9k)
+level2_rules:
+  hidden_buyer_detection:
+    pattern: "sustained heavy selling at price-level, bid does not break"
+    threshold_visible_bid_max: 1000           # nur 400-500 Shares sichtbar
+    threshold_sells_through_min: 10_000       # aber 10k+ Sells gehen durch
+    interpretation: "iceberg/hidden long order — institutional accumulation"
+    action_long: "do NOT short against this; consider Long on break above"
+  whale_vs_short_cover_logic:
+    weak_chart_plus_big_buyer: "→ accumulation (whale), bullish Long-signal"
+    strong_chart_plus_big_buyer: "→ likely short-cover, momentum-long with whale"
+    rationale: "short-coverer wouldn't cover at apparent weakness — would wait for move-down"
+  big_seller_threshold_shares: 100_000        # 100k+ auf Ask = sofort Exit Long
+  spread_acceptability:
+    max_pct_of_price: 1.0                     # >1% Spread = wheelhouse-out
+    typical_high_price_spread_usd: [0.75, 1.90]  # bei $50+ Stocks
+  wheelhouse_for_small_account_usd: [3, 8]    # Camerons strikte Begrenzung in Small-Account-Mode
+  long_investor_tell: "stock ignores standard TA (red doji + high vol → no reversal) = institutional buying"
+  tape_confirmation_for_entry:
+    require: "burst of green orders in T&S before clicking Buy"
+    avoid: "entry without tape confirmation (false-breakout risk)"
+  halt_reference: "siehe halt_mechanics (kanonische Definition)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5) EXIT FRAMEWORK
+# ─────────────────────────────────────────────────────────────────────────────
+exits:
+  scale_out:
+    - { at: "1R or first resistance", fraction: 0.50, action: "move stop to breakeven" }
+    - { at: "2R or measured move",    fraction: 0.25, action: "trail under 9EMA" }
+    - { at: "trailing 9EMA break",    fraction: 0.25, action: "exit remainder" }
+
+  hard_exit_signals:
+    - "MACD line crosses below signal line on 1m"
+    - "1m close below 9EMA after extended move"
+    - "1m close below VWAP"
+    - "price drops 10c (or pre-defined Δ) without bid support"
+    - "BIG SELLER on Level 2: 100k+ shares on ask"
+    - "Jackknife candle (rapid up-down within one bar)"
+    - "Multiple rejections at 200EMA"
+    - "break below 200EMA on intraday TF (trend over)"
+    - "Time > 11:30 ET (cut runners)"
+    - "Time > 12:00 ET (hard flat)"
+    - "50% of day's profits given back (intraday drawdown rule)"
+
+  do_not_cap_winners: true
+
+  # Goldene Regel (Camerons O-Ton aus KzVbXzkoZkA)
+  correct_exit_feels_too_soon: true   # wenn Exit "obvious" → bereits zu spät; trade vor Offensichtlichkeit
+
+  # Scalp-Exit-Indikatoren (besonders bei 5-15¢ Stops, Scaling-In-Phase)
+  scalp_exit_indicators:
+    - "big seller on Level 2 right at entry price"
+    - "hidden seller appearance (sustained sells, ask doesn't shrink)"
+    - "burst of red on Time & Sales (selling surge)"
+    - "pop and dramatic reversal forming topping tail (false-breakout candle)"
+    - "candle goes red while in position (außer Starter-Dip-Buy)"
+    - "rejection at psychological level (whole/half dollar)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6) RISK MANAGEMENT
+# ─────────────────────────────────────────────────────────────────────────────
+risk:
+  reward_to_risk_min: 2.0
+  reward_to_risk_breakeven_accuracy: 0.33  # bei 2:1 R/R reicht 33% Win-Rate
+  accuracy_target: { min: 0.50, optimal: 0.65, stretch: 0.70 }
+
+  max_loss_per_trade_usd: 500           # Camerons typischer Wert (skaliert mit Konto)
+  max_loss_per_trade_pct_account: 1.0
+  daily_max_loss_equals_daily_goal: true # Cameron: max-loss = daily-goal (symmetrisch)
+  morning_cushion_rule:                  # NEU aus jfe1Zl-5EQI
+    target_morning_cushion_usd: 400
+    after_cushion_built_minimum_close_profit_usd: 100
+    rule: "with $400 cushion, if you give back $300, stop with $99 still profit — never green→red"
+    allow_larger_risk_with_cushion: true
+  daily_goal_usd: 1000                   # Default; an heißen Tagen bis $20k
+  intraday_drawdown_rule_pct_of_profits: 50  # 50% der Tagesgewinne zurückgegeben → STOP
+
+  red_streak_rule:
+    after_consecutive_red_days_2: { reduce_max_daily_loss_to_pct: 50 }
+    after_consecutive_red_days_4: { reduce_max_daily_loss_to_pct: 25 }
+    extreme:                       { limit_to_one_trade_per_day_for_days: 5 }
+  red_day_accuracy_observed: 0.46  # Camerons gemessen Acc an roten Tagen (vs. 0.70 grün)
+
+  position_sizing:
+    formula: "shares = max_loss_per_trade_usd / (entry - stop)"
+    cap_by_liquidity_pct_of_avg_1m_volume: 1.0
+    # Quarter-Size-Rule (Cameron-Discovery Juni 2024) — Masterclass B81TMhUpz50
+    quarter_size_rule:
+      enabled: true
+      start_pct_of_max_position: 25            # ¼ der Max-Größe in den ersten Trades
+      unlock_after_profit_per_share_cents: 20  # +20 ¢/Aktie kumuliert → Full Size freischalten
+      effect_observed: "45 consecutive green days Jul-Sep 2024"
+    increase_after_quarter_daily_goal: true    # legacy variant — älter
+    double_on_winners: true                    # bei laufendem Trade verdoppeln
+    move_stop_to_avg_breakeven_on_add: true
+    add_to_losers_forbidden: true              # Buch Ch.2 Hard-Rule
+    pdt_minimum_account_usd: 25000             # US PDT-Regel
+    leverage_us_margin: 4
+    leverage_international: 6
+    risk_balancing:
+      max_single_trade_risk_factor_of_avg: 1.5
+      adjustment_step_pct: [50, 75, 100, 125, 150]
+    share_size_progression: [50, 100, 200, 500, 1000, 2000, 4000, 6000, 20000]  # Beginner → Pro
+    desensitization_target_shares: 50000        # Camerons heutiges "cool as cucumber"-Niveau
+
+    # Scaling-Spec (aus YouTube KzVbXzkoZkA — Adding to Winners)
+    scaling:
+      enabled_when_consistent_with_one_in_one_out: true   # erst nach Konsistenz scalen
+      block_size_shares: 3000                             # Cameron's Standard-Block
+      starter_fraction_of_full_size: [0.20, 0.25]         # 1/4 - 1/5
+      starter_position_takes_anticipation_risk: true      # vor Bestätigung — kleiner aber riskanter
+      common_progression_examples:
+        moderate: [3000, 6000, 9000, 12000]               # additiv
+        aggressive: [6000, 12000, 15000]                  # erst doppeln, dann +¼-Block
+      hot_market_target_max_position: 20000               # Cameron typisch
+      cold_market_target_max_position: 6000               # halbiert
+      add_every_n_cents: 10                               # Continuation-Adds bei 10¢-Steps
+      add_at_micro_pullback: true                         # bei jedem bottoming tail
+      add_at_hod_break: true                              # HOD-Break = Trigger
+      requires_4_continue_signals_simultaneously:
+        - green_on_tape_buy_orders_dominant
+        - level2_ask_shares_decreasing_not_refilling
+        - price_moving_up
+        - stock_at_new_high_of_day
+      stop_adding_if_any_signal_missing: true
+      sell_half_hotkey_required: true                     # ratio-basiert, nicht fix
+      pyramid_smaller_adds_higher_up: true                # ¼-Block am Extension-Top
+
+    # Skalierungs-Bedingungen / -Verbote
+    scaling_requires:
+      bigger_moves_min_range_cents: 50                    # ≥50¢ Range im Stock
+      adequate_liquidity: true                            # 20k Pos unwindbar ohne große Slippage
+      volatility: true                                    # Hot Market
+      min_starter_shares_for_scaling_sense: 5000          # unter 5k = commissions/benefit-Verhältnis schlecht
+
+    # Trade-Around-Core (Variante)
+    trade_around_core_position:
+      allowed: true
+      caveat: "verschiebt Cost-Basis des Core; besser mit zwei Accounts"
+
+  trade_tracking:
+    required: true
+    fields: [setup, time, symbol, price, entry, exit, shares, pnl_usd, pnl_pct, notes]
+    review_cadence: monthly
+
+  discipline_practice:
+    daily_exercise_minutes: 30
+    daily_meditation_minutes: 15
+    rationale: "Disziplin als Muskel — schwer trainiert hilft beim Stop-Drücken"
+
+  # Camerons gemessene Live-Stats (51-Tage-Challenge) als Kalibrierungs-Anker
+  benchmark_stats:
+    accuracy_realized: 0.714
+    avg_winner_usd: 1800
+    avg_loser_usd: 761
+    avg_hold_winner_min: 3
+    avg_hold_loser_min: 2
+    avg_winner_cents_per_share: 11
+    avg_loser_cents_per_share: 8
+    avg_winner_position_shares: 16000
+    avg_loser_position_shares: 9500
+
+  # Live-Stats Winning-Day vs Losing-Day (Masterclass Sep 2024)
+  daily_stats_winning_vs_losing:
+    winning_day:
+      avg_pnl_usd: 10000
+      accuracy: 0.71
+      avg_winner_trade_usd: 1300
+      avg_loser_trade_usd: 1000
+    losing_day:
+      avg_pnl_usd: -8000
+      accuracy: 0.50      # !!! 50% — Indiz dass an Loser-Tagen Strategie verlassen wird
+      key_insight: "An Loser-Tagen weicht Cameron von Strategie ab. Quarter-Size-Rule adressiert genau das."
+
+  # A-Quality-Setup-Density pro Markt-Phase (Masterclass)
+  a_quality_setups_per_day:
+    hot_market:    [15, 25]
+    medium_market: [10, 15]
+    cold_market:   [0, 10]
+    quality_threshold_accuracy:
+      A: 0.70
+      B: 0.60
+      C: 0.50
+      below_C: [0.30, 0.50]
+    rule: "Niemals Quality-Threshold reduzieren, um Monatsziele zu treffen"
+
+  # Spiral-Mechanik (zur Erkennung) — Masterclass
+  spiral_mechanics:
+    stages:
+      - "1. Big unexpected loss"
+      - "2. Revenge Trading (versucht Loss schnell zurückzuholen)"
+      - "3. Reduzierung der Quality-Threshold (B/C-Setups)"
+      - "4. Average-Loser werden größer, Total-Loss wächst"
+      - "5. Confidence-Verlust + Account-Drawdown → noch mehr Pressure"
+    intervention: "An Stage 1-2 erkennen → STOP, Pause, kein weiterer Trade heute"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7) PSYCHOLOGICAL LEVELS  [Quelle: 3rEakODkiEg]
+# ─────────────────────────────────────────────────────────────────────────────
+psychological_levels:
+  whole_dollars: true            # $19, $20 = S/R
+  half_dollars:  true            # $19.50 etc. = häufige Entry/Exit
+  use_as_targets: true
+  use_as_resistance_filter: true # vor wichtigen Levels nicht initiieren
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8) HARD VETOS  (Trade NICHT nehmen, wenn …)
+# ─────────────────────────────────────────────────────────────────────────────
+vetos:
+  - "kein klarer News-Catalyst"
+  - "Float > 20M ohne außergewöhnlichen Catalyst"
+  - "Preis < $2 (strict) oder > $20"
+  - "RVOL < 5x"
+  - "Tagesbewegung < +10 % zum Watchlist-Eintrag"
+  - "Pole hat Topping-Tail (oberer Docht > 40 % Range)"
+  - "Konsolidierung bricht VWAP nach unten"
+  - "≥ 4 rote Pullback-Kerzen in Folge"
+  - "Pullback-3 ohne alle conditional_allow-Bedingungen erfüllt (siehe pullback_count_rule)"
+  - "Pullback-4+ (immer skip)"
+  - "Big Seller 100k+ auf Ask sichtbar"
+  - "Kauf in laufendem Volumen-Spike (FOMO)"
+  - "Kauf AM Top einer long-body green candle (Chasing)"
+  - "Long-Trade unter 200 EMA"
+  - "Short-Trade über 200 EMA"
+  - "Inside Day (komplett innerhalb Vortagesrange)"
+  - "Buyout-Stock (Preis bereits fixed)"
+  - "News-Quelle nicht Tier-1 (Company/Earnings/FDA/Gov/Top-Analyst)"
+  - "Trade während Peak-News-Volatilität (warten auf 'dust to settle')"
+  - "Adding to Loser (verboten)"
+  - "Single-Trade-Risk > 1.5× avg Risk-pro-Trade des Tages"
+  - "SPY/QQQ stark rot UND Setup nur durchschnittlich"
+  - "Zeit > 11:30 ET für neue Entries"
+  - "Konto bereits bei daily_max_loss"
+  - "50 % der Tages-Gewinne zurückgegeben"
+  - "30 Min ohne Trade-Setup → Session-Stop"
+  - "Aktie im Trading-Halt nach unten"
+  - "Emotional aktiviert (Frust/FOMO/Revenge)"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9) BEGINNER ROADMAP  [Quelle: m5zu_X-_51I, d0wt45LbvWo]
+# ─────────────────────────────────────────────────────────────────────────────
+beginner_roadmap:
+  phase_1_simulator:
+    duration_days: 90
+    goal: "konsistent grüne Wochen, Pattern-Recognition"
+  phase_2_micro_real:
+    starting_share_size: 10
+    daily_goal_usd: 0.10           # ja, 10 Cent/Tag — Konsistenzziel
+    trades_to_log: 1000
+    expected_profit_after_1000_trades_usd: 10000  # bei 160 avg shares
+  phase_3_scaling:
+    target_share_size: 160
+    next_milestone_trades: 2000
+  rules_throughout:
+    - "Skalieren NUR nach bewiesener Konsistenz, nicht nach Bauchgefühl"
+    - "Daily Goal verdoppeln nur wenn aktuelle Share-Size 30 Tage stabil"
+    - "Erst Accuracy fixen, dann P/L-Ratio, dann Größe"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10) META / DISKRETIONÄRES
+# ─────────────────────────────────────────────────────────────────────────────
+discretionary_notes:
+  - "Tape-Reading (Level 2 + Time&Sales) ersetzt einen sauberen Confirmation-Layer."
+  - "Stärkster-Stock-des-Tages: durch Scanner-Score (Float/RVOL/Gap/Catalyst-Composite) approximierbar."
+  - "Im Bear Market (SPY/QQQ rot) sizt Cameron stark herunter — SPY-Trend = impliziter Filter."
+  - "Manuelle Hotkey-Skalierung wird algorithmisch durch Limit-Order-Ladder ersetzt."
+  - "Camerons Hauptsoftware: DAS Trader + Day Trade Dash (Watchlist-Tool, eigene Marke)."

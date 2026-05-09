@@ -1,0 +1,1214 @@
+HOW TO DAY TRADE
+
+    A Detailed Guide to Day Trading Strategies,
+      Risk Management, and Trader Psychology
+
+                   ROSS CAMERON
+                                                                  AuthorHouseTM
+                                                               1663 Liberty Drive
+                                                            Bloomington, IN 47403
+                                                            www.authorhouse.com
+                                                           Phone: 1 (800) 839-8640
+
+                                                © 2015 Ross Cameron. All rights reserved.
+
+                             No part of this book may be reproduced, stored in a retrieval system, or
+                             transmitted by any means without the written permission of the author.
+
+                                                  Published by AuthorHouse 05/03/2018
+
+                                                        ISBN: 978-1-5049-5772-4 (sc)
+                                                         ISBN: 978-1-5049-5773-1 (e)
+
+                                           Library of Congress Control Number: 2015917812
+
+                                               Print information available on the last page.
+
+                                                  This book is printed on acid-free paper.
+
+Because of the dynamic nature of the Internet, any web addresses or links contained in this book may have changed
+since publication and may no longer be valid. The views expressed in this work are solely those of the author and do
+
+  QRWQHFHVVDULO\UH¡HFWWKHYLHZVRIWKHSXEOLVKHUDQGWKHSXEOLVKHUKHUHE\GLVFODLPVDQ\UHVSRQVLELOLW\IRUWKHP
+                 CONTENTS
+
+Introduction................................................................................................................................................................ vii
+Chapter 1 Why do most traders fail?............................................................................................................. 1
+Chapter 2 Risk Management ............................................................................................................................ 6
+Chapter 3 Stock Selection - Choosing the right stocks to trade.......................................................12
+Chapter 4 Introduction to Candlesticks......................................................................................................23
+Chapter 5 Setting Up Your Charts - Technical Indicators.....................................................................29
+Chapter 6 Support and Resistance...............................................................................................................43
+Chapter 7 Order Types, Level2, Time & Sales, Hotkeys ........................................................................53
+Chapter 8 Trend (momentum) Trading Strategies ..................................................................................64
+Chapter 9 Counter Trend (reversal) Trading Strategies.........................................................................95
+Chapter 10 Stock Scanning & Building a Watch List............................................................................. 104
+Chapter 11 Three Step Day Trading Plan....................................................................................................111
+Conclusion ................................................................................................................................................................115
+Biography ..................................................................................................................................................................117
+Dedication to Mom, Dad, Lisa and Lauren. Thank you for your love, support,
+         and understanding. You keep me focused, driven, and happy.
+              INTRODUCTION
+
+Success as a day trader will only come to 10% of those who try. It's important to understand
+why most traders fail so that you can avoid those mistakes. The day traders who lose money
+in the market are losing because of a failure to either choose the right stocks, manage risk,
+¿nd proper entries, or follow the rules of a proven strategy. In this book I will teach you
+trading techniques that I personally use to pro¿t from the market. Before diving into the
+trading strategies we will ¿rst build your foundation for success as a trader by discussing
+the two most important skills you can possess. I like to say that a day trader is two things,
+a hunter of volatility and a manager of risk. I'll explain how to ¿nd predictable volatility and
+how to manage your risk so you can make money and be right only 50% of the time. We
+turn the tables by putting the odds for success in your favor. By picking up this book you
+show dedication to improve your trading. This by itself sets you apart from the majority of
+beginner traders.
+
+The act of day trading is simply buying shares of a stock with the intention of selling those
+shares for a pro¿t, within minutes or hours. In order to pro¿t in such a short window of time,
+we trade shares of companies that have just released breaking news, made a big earnings
+announcement or have any type of fundamental catalyst that results in above average interest
+from retail traders and investors. The type of stocks a day trader will focus on are typically
+much different from what a long term investor would look for. Day traders acknowledge the
+high levels of risk associated with trading volatile markets, and they mitigate those risks by
+holding positions for very short periods of time.
+
+While investors typically look for 5-10% annual returns, day traders look for trades that
+have the potential to make 5-10% intraday returns. However, in order to pro¿t from intraday
+moves, most day traders will take large positions which can result in a high level of single
+stock exposure. Some will even engage in the high risk practice of trading on margin (money
+borrowed from your broker). For example, a day trader with a $25k trading account may use
+margin (buying power is 4x the cash balance) and trade as if he had $100k in equity. This
+is considered leveraging your account. By aggressively trading on margin, if the trader can
+produce 5% daily returns on the $100k buying power, the trader will grow the $25k initial
+equity at a rate of 20% per day. The risk of course is that the trader will make a mistake that
+can cost him everything. Unfortunately, this is the fate for 9 out of 10 traders. The cause of
+these career ending mistakes result from a failure to manage risk.
+
+Imagine a trader who has just taken 9 successful trades. In each trade there was a $50 risk
+and $100 pro¿t potential. This means each trade had the potential to double the risk for a
+2:1 pro¿t loss ratio. The ¿rst 9 successful trades produce $900 in pro¿t. On the 10th trade,
+when the position is down $50, instead of accepting the loss, the untrained trader purchases
+more shares at a lower price to reduce his cost basis. Once he is down $100, he continues
+to hold and is unsure of whether to hold or sell. The trader ¿nally takes the loss when he is
+down $1k. This is a trader who has a 90% success rate, but is still a losing trader because he
+
+                                                                  vii
+                                                     ROSS CAMERON
+
+failed to manage his risk. We will discuss in detail how to identify stocks and ¿nd good trade
+opportunities, but ¿rst we will focus on developing your understanding of risk management.
+Traders that don't utilize risk management techniques stand a good chance of being among
+the 90% of retail traders who lose money in the market.
+
+Over my years as a trader and as a trading coach, I have worked with thousands of students.
+The majority of those students experienced a devastating loss at some point due to avoidable
+mistakes. It is easy to understand how a trader can fall into the position of a margin call (a
+debt to your broker). The money to trade on margin is easily available, and the allure of
+quick pro¿ts can lead both new and seasoned traders to ignore commonly accepted rules
+of risk management. The 10% of traders who consistently pro¿t from the market share one
+common skill. They cap their losses. They accept that each trade has a predetermined level of
+risk and they adhere to the rules they set for that trade. This is part of a well-de¿ned trading
+strategy. It's common for an untrained trader to adjust their risk parameters mid-trade to
+accommodate a losing position. For instance, if they said their stop loss is at -$50, and the
+trade goes down to -$60, they might say they'll hold for just a few more minutes to see if it
+comes back up. Before you know it, they are looking at an $80-100 loss, or worse, and they
+are wondering how it happened. I'll admit that it's extremely dif¿cult to achieve the level
+of discipline to sell when you hit your max loss on a trade. Nobody wants to lose, but the
+best traders are great losers. They accept their losses with grace and move on to the next
+trade. They never allow one trade the ability to destroy their account or their career. This
+characteristic will keep them in business as a day trader for a long time.
+
+The skill to take losses and not allow them to cause you to lose focus is an act of mindfulness.
+Our human emotions often work against us while we are in trades. The emotions of fear
+and greed are present in every trader. The successful traders are able to experience those
+emotions without acting on them. When you allow emotions to overtake your rational
+thought process, you run the risk of over trading, exposing yourself to unnecessary risk, and
+unplanned losses. It takes years of emotional conditioning to be able to sit for eight hours
+watching the computer screens while maintaining composure the whole time. For new traders,
+we encourage starting with shorter blocks of time and maintaining a constant focus on the
+idea of thinking like a risk manager.
+
+                                 Buying Long or Selling Short
+
+If you are new to trading you may not be familiar with the concept of selling short. Traders
+who sell short are borrowing shares from their broker to sell those shares at a high price, with
+the intention of buying the shares back at a lower price, and pro¿ting from the drop. When
+you sell short, your account will show in your open positions window, a negative position
+(e.g. -1000 shares). You have borrowed 1000 shares from your broker and sold them. The
+broker expects that you will buy back those shares. When you buy back those shares, it is
+called covering your position. Some traders have a short bias and prefer to trade as stocks
+drop. One of the risks with short selling is that if the stock goes up, you will eventually be
+
+                                                                  viii
+                                                 HOW TO DAY TRADE
+
+forced to cover your position. Since theoretically prices can climb in¿nitely, a trader could
+experience an in¿nite loss if they do not cover their open short position.
+
+Conversely, when you buy stock to the long side, your maximum loss is capped to the amount
+of shares you purchased. The worst case scenario is the stock goes to $0. With a short
+position, if you short 1000 shares of a stock at $5.00, and it goes up to $100.00, your $5k
+position becomes a $95k loss. Throughout this book, we will discuss examples of momentum
+trades that involve buying stock to the long side, but these patterns could be equally applied
+to the inverse pattern in order to short stocks.
+
+Whether you are a short seller or a long biased trader, it is important to know about the Short
+Sale Restriction (SSR). This was designed to reduce downward volatility and help prevent
+potential stock crashes. When Short Sale Restriction has been activated on a stock, you can
+only short the stock when the price is moving up. This prevents people fueling a crash by
+shorting as the price is dropping. SSR is turned on when a stock drops more than 10% in
+price versus the previous days close. The SSR is an example of an indicator that tells us the
+markets have a built in bias for trading to the long side. There is no such thing as a long buy
+restriction. A stock can surge up 100% and you can continue to buy as it surges. This is one
+of the reasons I prefer to be a long biased trader.
+
+It's also important to note that shorting is not available for all stocks. The ability to short a
+stock requires your broker to have shares available to borrow. If they have a small inventory,
+you may not be able to short that stock.
+
+                                       What you will learn
+
+If you have tried day trading or watched somebody else day trade, you already know the
+concepts are simple, but being successful at day trading is like walking a tightrope. If you watch
+somebody doing it they make it look easy, but when you try it, it seems nearly impossible.
+This is the experience most new day traders will go through. In fact, it's the same experience
+I went through when I was learning to trade. I have found that the best trades are the ones
+that have the most obvious setups and start to work in our favor almost immediately. If I ¿nd
+myself in the position of holding trades that aren't performing or I start trying to force trades
+to work under less than ideal setups, I usually get into trouble. I'd encourage traders to focus
+on the obvious setups we teach rather than overcomplicating things.
+
+In this book we will teach you the fundamental concepts required for day trading. You will
+learn how to manage risk, how to choose stocks worth trading, how to identify potential
+setups, how to enter and exit trades, and how to manage your emotions while you are
+trading. By taking the time to educate yourself, you are already proving a willingness to
+learn, and that puts you ahead of the majority of new traders. Most new traders will trade
+unproven strategies and then wonder why they are losing money. While you are in training,
+it is important that you only trade in a simulated account. You have to practice the strategies
+we teach and work on building your skills before ever trading in a live account. In our live
+trading courses, we review the performance of all our students to ensure they are meeting the
+
+                                                                   ix
+                                                     ROSS CAMERON
+metrics and statistics of a pro¿table trader. This means we evaluate accuracy rates, average
+losses versus average winners, how much risk they take in their trades and how they behave
+under stress of dif¿cult markets or losing positions. Once students have proven they can be
+pro¿table in a simulated environment, they will be ready to switch to live trading with strict
+size and risk restrictions. Students in our live day trading chat room bene¿t from being able
+to trade side by side with me, and hundreds of other professional traders. We have trained
+the students in our community to be the best possible traders, thus increasing the overall
+skill of our trading group.
+
+                                                                   x
+                                CHAPTER 1
+
+     WHY DO MOST TRADERS FAIL?
+
+If you are considering a career as a day trader, you cannot ignore the statistics that show only
+1 in 10 traders will be able to make a living at it. I am not saying this to discourage you from
+trading. We are going to talk about the reasons why most traders fail so you can avoid making
+those same mistakes. I believe failure is an option, one that is often chosen without the trader
+realizing it. Just as failure is an option, so is success, if you make the right decisions. Most traders
+that I have seen fail were unable to follow simple rules of risk management. We will be discussing
+the rules of risk management in the next chapter, but let us ¿rst talk about the reason why it is
+so dif¿cult to follow the rules. Trading becomes extremely emotional when we are faced with
+losses and even wins. Being a day trader puts you in the unique position of having to experience
+a ¿nancial loss every single day. On a good day, you will win more than you lose and end the day
+with a net pro¿t. But, even on the best days there will still typically be at least a few losing trades.
+There is no such thing as a strategy or a trader who is 100% successful on every trade they take.
+The best traders may be pro¿table every month out of the year, but it would be unreasonable
+and statistically improbable to expect 100% accuracy. Even investors who make billions of dollars
+have losing investments. This means you will have to face loss and become comfortable with it.
+The traders I have known who have failed were never able to cope with loss. They allowed the
+fear of loss to guide their trading decisions.
+
+                                  The hunt for the Holy Grail
+
+If you are a trader who is constantly jumping from strategy to strategy or technical indicator to
+technical indicator, you may be suffering from the Holy Grail syndrome. These traders will spend
+tremendous amounts of time and energy searching for the perfect combination of indicators
+and strategies that will always give them winning trades. On the surface, it makes sense to search
+for the best strategy, but that's not the motivation of these traders. Just below the surface is a
+deep fear of loss. It is a fear so strong that it motivates these traders to search endlessly for that
+perfect strategy in hopes of preventing them from having to experience any more losses. These
+traders sometimes work to create automated trading systems, search out other traders they can
+mirror trade (following trade for trade), or simply jump from strategy to strategy until they have
+exhausted their ¿nancial resources and give up. If you are in the group of traders hunting for the
+Holy Grail, I would encourage you to read this carefully: you can lose 50% of the time and still
+make money just as easily as you can be right 90% of the time and still lose money. You have to
+focus not on your percentage of success, but on your pro¿t loss ratios.
+
+                                                                   1
+                                                     ROSS CAMERON
+
+                                         Pro¿t Loss Ratios
+
+Pro¿t loss ratios are often overlooked by novice traders. We have our students trading with a
+minimum 2:1 pro¿t loss ratio (every trade has the pro¿t potential of 2x the risk). With a 2:1 pro¿t
+loss ratio, our students can make money and be pro¿table with only 50% success rate. When
+I work with students, the ¿rst thing I look at is their trade history. I want to know their pro¿t
+loss ratios and their average percentage of success. These numbers will tell me if they have a
+sustainable strategy. If you can trade with a 2:1 pro¿t loss ratio, it becomes much easier for you
+to succeed. Most traders who fail will be trading with negative pro¿t loss ratios. Meaning they
+lose more on average than they win. Regardless of their percentage of success, they will have set
+the bar so high, it becomes almost impossible to succeed. The odds are stacked against them.
+From a purely statistical standpoint, a negative pro¿t loss ratio of 1:2 (you lose 2x what you
+win on average) is an unsustainable strategy unless you maintain 75% success rate. After years
+of trading, I can assure you that maintaining a 75% success is not easy. Often times the failed
+traders will exit the market having never realized they were destined for failure because they did
+not learn about the pro¿t loss ratios required in order to be pro¿table.
+
+                                   Pro¿t Loss Ratio Statistics
+
+                  2:1 Pro¿t Loss Ratio = 33% is your Break Even before commissions
+
+                  1:1 Pro¿t Loss Ratio = 50% is your Break Even before commissions
+
+                  1:2 Pro¿t Loss Ratio = 66% is your Break Even before commissions
+
+                                     Fear of Loss in Trading
+
+Fear is a natural emotion, but it's dif¿cult when your job requires you to experience fear on a
+regular basis. Many traders will experience fear in a number of ways. The most obvious is the
+fear of ¿nancial loss. We acknowledge that investing in the market and day trading in particular
+is high risk, but when we are faced with the decision to take a trade and expose ourselves to a
+potential loss, fear can begin to guide our decisions. A less obvious form of fear is the fear of
+missing a big move in the markets. If you suddenly see a stock start to jump up on what might
+appear to be breaking news, or you see a reversal begin to take shape, you may feel inclined
+to jump into the market out of fear of missing a potential winner. The fear has guided your
+decision and led you into an unplanned trade. You may have purchased at a price too far away
+from your stop or taken more shares than your risk tolerance allows. In a split second you made
+a decision and broke your rules. The result when these trades go badly will be a larger loss than
+your strategy and rules allow for. When I speak with a trader about a massive loss, they often say
+"it happened so fast." They made a quick decision and it was the wrong decision. In reviewing
+my own trading performance, my biggest losses were spontaneous trades I jumped into on an
+impulse. I see the markets starting to move and jump into a stock without fully analyzing my
+risk. Unfortunately, when emotions are guiding a trader's decisions, big mistakes are common.
+
+                                                                   2
+                                                 HOW TO DAY TRADE
+
+We will discuss techniques for managing emotions while trading, but ¿rst let's review a few other
+examples of erratic trading brought on by emotions.
+
+                                   Holding Losers Too Long
+
+As you can see, our fear of loss in trading can manifest itself in some unusual and outright
+counterproductive ways. Many beginner traders and most failed traders will experience the
+tendency to hold their losers too long and sell their winners too soon. The driving emotion that
+leads to this behavior is a fear of loss. Why does a trader hold losers too long? It is because a
+trade is not a loss until you have hit the sell button. There is always the chance that the price
+could pop back up until you hit the sell button. The fear of making the loss real keeps you in the
+trade because it makes you think about ¿nding a way to turn the trade around instead of just
+taking the loss and moving on to a different trade. The reality is that small losses are not a big
+deal, but a trader in an emotional state does not think that way. Sometimes traders will make a
+bad trade worse by averaging down, adding shares at a lower price to reduce their cost basis.
+This typically results in bigger losses when it is not part of a proven strategy that involves scaling
+in and out of trades by averaging. I have worked with traders who set $200 max losses, and on a
+trade when they were down $200, instead of simply cutting the loss, they decided to add more
+shares so they could trade out of the loss. These trades would often end in losses of -$1000 or
+more. In hindsight, it is easy to say the right thing to do was simply cut the loss at -$200 and
+follow the rules you made for yourself. Unfortunately, in the heat of the moment, emotions take
+control and your rational thought processes get thrown out the window. In those cases, the fear
+of loss actually resulted in the trader taking bigger losses than the rules of trading would allow
+for. This is the exact opposite of what you want! The most important skill for a new trader to
+understand and adopt is the ability to cap their losses.
+
+                                   Selling Winners Too Soon
+
+If you enter a trade that had a good pro¿t potential and it ¿t into your trading strategy, the last
+thing you want to do is sell the trade before it has had a chance to work. If you are up 10 cents
+on a trade that has the potential to make 50 cents, there is no reason to sell it. Why do so many
+traders sell their winners too soon? It is because the fear of loss has guided their decisions. It
+is the fear of the small winner turning into a loser that convinces us to sell the trade too soon.
+Just as a loser isn't real until you hit the sell button, a winner isn't real until you've hit the sell
+button and locked it up. In the short term we feel happy to have locked up some pro¿t, even
+if only a small one, but the big picture is that you are forming a habit of capping your winners.
+To be a successful trader you have to cap your losers and let your winners run. You will want
+that occasional big winner, because those will tide you over during periods of slow trading. A
+trader that sells winners too soon and holds losers too long has the habits of a failing trader.
+To avoid failure these traders must address how their emotions are in¡uencing their trading.
+Instead of selling the full position when sitting on a small pro¿t, I combat that urge by selling
+a partial position and adjusting my stop. This means I will walk away with a small pro¿t (not a
+loss), but still have a position in the trade to let it realize its full potential. This is called scaling
+out. Scaling out is a great trade management method of keeping partial positions with a good
+
+                                                                   3
+                                                     ROSS CAMERON
+
+cost average. To maintain discipline, I refuse to sell my ¿nal position until I get stopped out by
+a valid exit indicator.
+
+                          Embrace Loss as a Part of the Business
+
+Instead trying to search for the Holy Grail, or give in to the urge to hold losers and sell winners,
+we must simply accept loss as part of the business of day trading. We cannot ¿ght it. Every day
+trader will experience losses. Becoming a good day trader means being a good loser. The trick
+to being a good loser is learning to cap your losses at a set dollar amount and sticking with
+it. The hard part is holding yourself to the rules. Day trading requires a tremendous amount
+of discipline and self-control. It is a job that will challenge you in more ways than you would
+imagine. In the example of the trader with a 90% success rate that was still losing money, he
+failed to cap his losses. Being that type of trader is a choice. By teaching you about pro¿t loss
+ratios and the importance of capping your loses, we are empowering you to make the choice
+to be a successful trader.
+
+                                     Discipline as a Practice
+
+In our trading courses, we spend a great deal of time working with students to help them improve
+their discipline. Many of our students found us after taking other trading courses and ¿nding
+themselves still stuck in a cycle of poor trading habits, trading losses, and disappointment. We
+realized that textbook concepts of trading, which are important and will be covered later on,
+are not enough. Understanding fundamental concepts of trading on their own are not enough
+to be a successful trader. You must also think and act like a successful trader. This means selling
+losers quickly and holding partial positions in your winners as long as possible. In order to help
+our students improve their ability to be disciplined, we require a min of 30 minutes of exercise
+and 15 minutes of meditation every day. I use exercise and meditation to help train my mind to
+cope with stress. By forcing myself to do these two things every day, I am practicing discipline. In
+the moment when I am in a trade and need to make a hard decision, I need to be able to ¿ght
+the urge to sell the winners too soon and hold the losers too long. By practicing discipline in
+others areas of our life, we strengthen that muscle memory and improve our ability to maintain
+composure while trading. Practicing discipline is a way of conditioning our minds to become
+accustomed to a feeling of discomfort. Rather than taking steps to alleviate the feeling, we can
+train ourselves to withstand it. When we sell a winner too soon or hold a loser too long, we are
+allowing the uncomfortable emotion of fear to guide our decision. Most of the successful traders
+I know have strict exercise regimens because it helps improve their trading performance. We
+know it is impossible to block out the emotions such as fear, they will still surface within every
+trader. However, the difference between winning traders and losing traders is that winning
+traders will not subject their strategy to the emotion. They recognize the emotion and allow it
+to exist without acting on those feelings. This is a critical step in the emotional development
+of any trader. I would encourage you to begin journaling your emotions while trading. The ¿rst
+step to changing your behavior is becoming aware of your emotional patterns and their impact
+on your trading performance. As we discussed earlier, you can have a deep understanding of
+all the textbook concepts of trading, but still fail to succeed because you have not achieved
+
+                                                                   4
+                                                 HOW TO DAY TRADE
+the emotional training to be a trader. We focus on providing our students with a well-rounded
+education that includes both textbook and emotional development.
+It is important to remember that discipline is not like learning to ride a bike or learning to swim.
+Discipline is very much like a muscle that can be strengthened when exercised or atrophy when
+ignored. Even after years of trading, I still ¿nd myself occasionally giving in to my instinct to
+chase a stock for fear of missing the move, to sell a winner too soon, or hold a loser a little too
+long. Every day when I trade I have to ¿ght against my natural instincts. Unfortunately many
+of our natural human instincts do not encourage healthy trading patterns. If I had to guess I
+would say almost all successful traders have spent thousands of hours training their minds to
+¿ght against counterproductive impulses. I am sure there are some traders that have a natural
+aptitude for the mindset required to be pro¿table, but I believe the majority of us have to
+really work at it. It took me years to become successful, and looking back I have realized it was
+because of the emotional obstacles that stood in my way. I had a great concept of stocks, chart
+patterns, basic strategies, but I kept falling into the cycle of big losers and small winners. It took
+a long time before I developed the self-awareness to realize what was causing those actions.
+My hope is that by reading this, you will avoid the years of trial and error it took me to learn
+these important lessons.
+
+                                                                   5
+                                CHAPTER 2
+
+           RISK MANAGEMENT
+
+One of the ¿rst things I told you was that day traders are hunters of volume and managers of risk.
+In this chapter we are going to discuss risk management. As an aspiring day trader, you already
+understand that day trading is one of the riskiest investment techniques. The reason traders
+choose to day trade instead of make more traditional, longer term investments is because day
+trading can produce much larger gains in a faster time frame. Day trading is one of the fastest
+ways to grow a small account, when it is done properly. The problem is most people will not
+trade properly. Successful traders can utilize $25k accounts to produce over $50k per year, or
+200% in returns. It would not be realistic, however, for a trader to utilize a $250 million account
+to produce $500 million per year. The markets typically do not have the liquidity to support a
+trader entering or exiting a multi-million dollar position within minutes, but positions of tens of
+thousands or even hundreds of thousands of dollars can be executed almost immediately. This
+allows day traders with accounts under $1 million and as low as $25,000, to utilize leverage and
+high speed trading techniques to produce large percentage gains. When a trader reaches a point
+where they are managing more money than they can ef¿ciently day trade, they would typically
+begin to branch out by adding longer term investments to diversify the portfolio.
+
+While understanding that day trading is one of the highest risk trading techniques, the potential
+for a big reward captures our interest. We can acknowledge that within the realm of day trading,
+there will be relatively higher risk day trading strategies and relatively lower risk day trading
+strategies. Our goal is to develop a trading strategy to maximize pro¿t potential while taking
+steps to minimize risk. Every time you take a trade, you must evaluate the risk of the trade and
+weigh that against the reward. Often times our judgment can be clouded by our emotional state
+or previous trading experiences. If we recently experienced a loss, we may decide to take more
+risk on the next trade to compensate for the previous loss. Or a more conservative trader may
+decide to reduce position sizes or even skip good trade opportunities because the last time they
+traded that setup they lost money. It takes a heightened level of self-awareness to recognize
+when we are making clear risk reward decisions and when our judgment is clouded. This is a
+skill that is learned over time. You can develop a sense of mindfulness by journaling while you
+trade and then reviewing your notes after the market closes.
+
+                                     Different Types of Risk
+
+When we talk about risk there are a few different types of risk you need to understand. As day
+traders we are primarily concerned about the distance between our entry and our stop (the price
+where we will sell for a loss). Your stop loss should be based on a recent support or resistance
+area on the chart and should always fall within your maximum dollar loss amount. The majority
+of losses we experience will be when a trade drops down and hits the stop price.
+
+                                                                   6
+                                                 HOW TO DAY TRADE
+
+The second type of risk we have to be mindful of is the volatility in the market. As day traders we
+love volatility, but it also presents a risk because extremely volatile markets can result in larger
+losses than we may have originally planned for. Since we know that there is a spectrum of risk
+in day trading, we choose to avoid day trading during moments of unpredictable volatility, such
+as breaking news. When news is realized, individual stocks or the market at large can trade in a
+very wide and volatile range. Instead of jumping into the market during that peak in volatility,
+we wait for the dust to settle before determining a potential trade opportunity.
+
+The third type of risk is your exposure risk. Exposure is calculated by multiplying the share price
+by the number of shares you are holding. As an investor, you have to factor in exposure risk
+since positions are held for a long time. An investor typically will not allocate more than 10%
+of the portfolio to any single stock. In contrast, day traders who use leverage may experience
+particularly high levels of exposure risk. While this level of risk has to be carefully monitored,
+most day traders are able to mitigate that risk by holding shares for short periods of time.
+
+                                             Stock Halts
+
+A type of risk that can be a nightmare for day traders using large positions are stock halts. Trading
+can be halted by the exchanges at any time. There are a number of different types of stock halts.
+There are market wide stock halts which only occur when there is a technical glitch or some type
+of computer errors in the exchange. These halts can last for a few minutes, hours or potentially
+longer. These are rare. The more common stock halts are volatility halts and halts pending the
+release of material news. Anytime a stock is halted, it can reopen at a much different price. The
+risk is that a stock could reopen far below your maximum loss amount. We can take certain steps
+to avoid halts by understanding what causes halts. The market has created what are called circuit
+breaker halts. If a stock rises or falls more than 10% in a 5min period, the stock can be halted for
+¿ve minutes. This is a volatility pause to give traders a chance to get their bearings, analyze news,
+and slow down. This is a measure to prevent ¡ash crash situations. In volatile markets, these types
+of halts can be fairly common. Often times if some type of news about the company is leaked
+it can result in a rapid move and then a volatility halt. When stocks are halted going up, they
+often open higher. Conversely, when they are halted going down, they often open lower. When
+stocks are halted pending news, it means the company is releasing signi¿cant, material news.
+Once the news has been released, the stock will be scheduled to reopen. If the news is bad, the
+stock can open signi¿cantly lower. This is one of the greatest risks in trading. Stocks susceptible
+to being halted pending news include stocks surging up rapidly for no apparent reason. In these
+cases it is not uncommon for the company to issue a statement regarding the price action, or to
+address the rumors that may be causing the price action. Although stocks can be halted at any
+time pending news, news is typically released when the market is closed.
+
+Another type of stock halt which is common with penny stocks, but not as common with higher
+priced stocks is a halt pending government investigation. This is typically the result of a stock
+being used for market manipulation and fraud. Stocks halted pending an investigation can
+remain halted for weeks or even months.
+
+                                                                   7
+                                                     ROSS CAMERON
+
+As day traders, we have to be mindful of the potential for stock halts and limit our positions
+on stocks that are at risk for being halted. High risk stocks include penny stock companies and
+stocks trading on uncon¿rmed news that has not been released by the company itself. Despite
+our best efforts to avoid being caught in a halt, it can happen. This is one of the reasons trading
+on margin can be so dangerous. In the event you are caught in a halt and the stock reopens
+down 20%, if you were trading on margin, it could result in a massive loss or even a margin call
+from your broker.
+
+           A Day Traders Statistical Advantage (2:1 Pro¿t Loss Ratios)
+
+When I was a new trader, I would take extremely large positions without any real understanding
+of the level of risk I was taking. I would enter trades without a predetermined max loss, and if the
+trade went against me, I would become paralyzed by fear. I would be unable to think or make a
+decision as I would watch the loss get bigger and bigger. The ¿rst mistake was entering a trade
+without ¿rst outlining the risk versus the reward. As an example, I would often buy stocks as they
+approached whole dollar levels. So I might buy 1000 shares of a stock at $8.90 with the target
+of selling it at $9.10 for 20 cents pro¿t. Unfortunately, when the stock would pullback, I would
+often hold until it broke below the nearest half dollar of $8.50. In this example, I would be risking
+40 cents to make 20 cents. This is a negative pro¿t loss ratio which requires a 66% accuracy rate
+in order to break even before commissions. This is not a sustainable ratio, especially for a new
+trader. When I was a new trader I did not know anything about pro¿t loss ratios, and I continued
+to make these uneducated trades and then wonder why I was losing money. Using a 2:1 pro¿t
+loss ratio, my proper stop on that trade should have been $8.80 instead of $8.50. With a 10 cent
+stop and a 20 cent pro¿t target, I could justify taking that trade. That means my proper stop was
+only 25% of the loss I was taking as an untrained trader. That's a huge difference! This meant
+that by using proper risk management, I could potentially reduce my losses on those types of
+trades by over 75%. It is extremely important to understand, regardless of your strategy or the
+setups you trade, that every trade has the potential to double what you are risking. If you do not
+have the potential to win twice as much you risk, you should not be taking the trade. By simply
+understanding pro¿t loss ratios and the huge statistical advantage of a 2:1 pro¿t loss ratio, you
+have set yourself ahead of the majority of new traders.
+
+                                Data Mine Your Trade History
+
+If you are not already tracking all of your trades in an excel document, I suggest you start doing
+this now. The information you want to track is the type of setup, time, symbol, price, entry, exit,
+amount made, amount lost and notes. I have been tracking all of my trades for years and have
+the bene¿t of thousands and thousands of trades available for review. I can sort my data based
+on the strategy, the pro¿ts or losses, or the time of day. I dig into the analytics of my trading
+performance to get a deeper understanding of where I have strengths and where I need to make
+adjustments. If for example you recognize that the majority of your pro¿ts are in the morning,
+and your biggest losses are in the afternoon, you can begin to become more mindful during
+afternoon trading. You can also keep track of your pro¿t loss ratios on a monthly basis and always
+work to improve your statistics. If you trade 500,000 shares per month and you can improve your
+
+                                                                   8
+                                                 HOW TO DAY TRADE
+
+average pro¿ts by 1 cent per share, it will increase your pro¿ts by $5,000 per month. This shows
+you that very small adjustments in your statistics can result in huge differences at the end of the
+month. This also highlights the tightrope traders must walk. The difference between success and
+failure can be the matter of a slight adjustment in your ratios. The part of your pro¿t loss ratio
+that is easiest to control is your max loss.
+
+                    Capping your Losses - Be good at being wrong
+
+When I speak with a trader who recently experienced a large loss, I like to spend time reviewing
+the trade that resulted in the loss. I always begin by asking the trader what their risk was when
+they entered the trade. Rarely does a beginner trader enter a position intending to risk as much
+as they ultimately lose. That is the ¿rst mistake. Every time we take a trade, we must know how
+much we are risking. This means understanding the logical place to sell the stock for a loss if
+the trend or the setup fails. Before getting into the chart patterns and the de¿nitions of exit
+indicators, we will ¿rst say that we stop out of all trades when they hit our max loss. Unfortunately,
+many traders enter position without a max loss in mind.
+
+Every trading plan should have a max loss per trade and a max loss per day. We recommend
+students set their daily max loss at their daily pro¿t target. When they have a $200 daily pro¿t
+target, if they are down $200 on the day they shut down their computer and walk away. Although
+it is dif¿cult to accept defeat, it is far more important to realize that once you have exceeded
+your max loss, your judgment is almost guaranteed to become compromised. It is always best
+to walk away instead of attempting to trade in a compromised emotional state. Just as we have
+a max loss per day, we also have a max loss per trade. I typically set my max loss at about 25%
+of my daily goal. If I take a trade and the market suddenly turns against me, I take the loss. Over
+the years of working with students, I have found that some students are very good at taking
+their losses, while others struggle to press the sell button. Some even turn short term day trades
+into long swing trades. If you are in the group of traders who frequently ¿nd themselves down
+beyond your pre-determined max loss, I would consider setting automatic stop orders with
+your broker. If the price falls below the stop price, your order will automatically execute and you
+avoid having to press the sell button yourself. Even though it can be dif¿cult to hand over this
+aspect of trade management to the computer, it is sometimes the best technique for students
+who struggle to take the losses early. When you are trading, it is important to remind yourself
+that regardless of how you traded last week or last month, today is your opportunity to prove
+to yourself that you can follow rules and stick to your trading plan. If you want to succeed as a
+trader, it is paramount that you are able to hold yourself to the rules of max loss per trade and
+max loss per day. Ultimately, this means walking away from the computer when you hit your
+max loss for the day, even if it is dif¿cult.
+
+Day trading is a career where you can make a catastrophic mistake, and then keep trading
+moments later. You could take a 30,000 share position, lose $15,000, and then do it again ¿ve
+more times in a row. In just one day and a handful of trades, you could easily blow up your entire
+account. This type of event is the result of emotionally fueled trading. By forcing yourself to walk
+away after hitting your max loss, you can avoid the temptation to fall into a cycle of increasing
+
+                                                                   9
+                                                     ROSS CAMERON
+
+your risk and trying to make back your losses. In other careers, race car driving for instance,
+if you crash your car into the wall you are done with the race and have to wait until the next
+race. The very nature of that type of job gives you a period of time to re¡ect on the mistakes
+you made that resulted in the accident. Day trading does not come with these built-in time out
+periods after we make a mistake. We have to build them into our trading plan because they are
+extremely important for our emotional development as a trader. They are what prevent us from
+making mistakes when we are in a heightened emotional state.
+
+                                       Balancing your Risk
+
+If you take 10 trades in a day, and you risk $100 on the ¿rst nine trades and then risk $1,000 on
+the 10th trade, it doesn't matter if you have a 90% success rate when you lose on the last trade.
+You will be a losing trader. This is an element of risk management called balancing risk. You never
+want to have one trade weighted so heavily with risk that it has the power to erase previous
+winners. Even if the ¿nal trade had the 2:1 pro¿t loss potential (risking $1,000 to make $2,000),
+it is a poor decision because the risk of that one trade far outweighs your average risk per trade.
+Many traders, including myself, will adjust our risk per trade throughout the day based on our
+performance and to adapt to greater market conditions. This is a common practice used to
+increase pro¿ts on days when trading is good and reduce losses on days when trading is dif¿cult.
+The difference is that I am adjusting risk in smaller increments, so the impacts of winners or losers
+will not have a strong effect on my overall performance. If I risk $100 on the ¿rst six trades, I
+may decide to increase risk to $150 or decrease risk to $75 on seventh, but I would not make a
+drastic change to my risk parameters in the middle of a trading day. Many beginner traders will
+have a great day until they decide to swing for the fences and take a high risk position on what
+they think is a perfect setup. If they lose on that high risk trade, they will give back their entire
+pro¿ts from the day and potentially go into the red. This is a disappointing ¿nancial loss, but what
+is even worse is the loss of con¿dence and the impact that it has on your emotions. This is the
+type of behavior that can quickly cause a trader to fall into a cycle of emotionally fueled trading
+known as revenge trading. Trying to quickly make back the losses by taking increasingly risky
+trades. To avoid this situation entirely, a trader must balance their risk across all trades, so if that
+¿nal trade is a loser, it does not ruin their day or their psychological control over future trades.
+
+              Gamblers think about Pro¿ts, Traders think about Risk
+
+The stock market is a place where all different personalities come together to trade. You will ¿nd
+long term investors, institutional investors, activist investors, retail traders, and you will also ¿nd
+gamblers. Unfortunately, day trading has a negative connotation to some who consider it the
+equivalent to gambling. Any full-time trader understands that that is far from reality. A trader
+makes decisions based on a strategy that has historical data to support it. The only way to make
+a career out of trading is to understand your risk on every trade and to follow the rules of your
+trading plan. But, there will always be those who simply gamble with their trading accounts
+by taking reckless positions in the search of huge pro¿ts. If you want to gamble, you might as
+well go to a casino. The odds of having a lucky trade and making a fortune in the stock market
+are extremely slim. You cannot base your strategy or your career on luck. Greed is a powerful
+
+                                                                  10
+                                                 HOW TO DAY TRADE
+
+emotion that, a lot like fear, can allow you to throw out your rational thought processes. If you
+ever ¿nd yourself feeling that emotion of greed kicking in, it is a good time to turn off your
+platform and walk away. Since we are trading with and against the best traders in the world, if
+we are not able to trade at our peak performance levels, we should not be trading.
+
+                                Add to Winners not to Losers
+
+Although there are many traders and investors that utilize a strategy of scaling in, adding shares
+at various prices to get a good cost basis, I avoid adding to stocks that are below my entry price
+for day trades. If I purchase a stock at $10.00 and it drops to $9.50, I could double my position
+and adjust my cost basis to $9.75, but then I am adding to a losing position. If it drops to $9.25,
+I will experience a loss double than the initial loss if I had simply sold at $9.50. In all my years
+of trading, I have found the best trades work almost immediately. Occasionally, I will get into
+a trade and it will nearly touch my stop and then turn around and end up being a winner, but
+more often, those trades turn into losers. Instead of adding to a losing trade, I prefer to cut the
+loss and move on to the next opportunity. When you focus on adding to losers, you risk making
+the loss bigger and you miss the opportunity to ¿nd a better setup.
+
+In contrast, if I buy a stock at $10.00 and it goes up to $10.50, I may double my position and
+have a new cost basis of $10.25. If the stock surges up to $10.75 or $11.00 I'll make more with
+the increased position, and if it the stock drops back down to $10.25 or $10.00, I can sell for
+breakeven or for a small loss. Adding to winning trades gives you the potential to have big
+winners, while adding to losers gives you the potential for big losses. Since we want to focus on
+capping our losses, we need to avoid adding to losers.
+
+                         Stock Picking versus Risk Management
+
+This is a good time to remind you that you can be a pro¿table trader with an accuracy rate of
+50% or less, as long as you have a good pro¿t loss ratio. Being pro¿table is not about being right
+on every trade, it's about capping your losses and taking trades that provide the opportunity
+for winners that will exceed the losers. Early on I made the example of the trader who loses
+money despite a 90% success rate. This trader may be a great stock picker, but his lack of risk
+management results in a losing strategy. Picking good stocks is important, but clearly it is not
+as important as managing your risk on every trade. I say this to remind you to focus ¿rst and
+foremost on your risk and your max loss on each trade. In the next chapter, we will discuss stock
+selection as an extension of risk management. By trading the right stocks, we can improve our
+likelihood for success especially when we combine risk management techniques.
+
+                                                                  11
+                                CHAPTER 3
+
+    STOCK SELECTION - CHOOSING
+     THE RIGHT STOCKS TO TRADE
+
+In the last chapter we talked about the importance of risk management. We will continue to touch
+back on the theme of risk management and emotional conditioning throughout this chapter.
+By trading only the strongest stocks and applying the principles of good risk management,
+we can give ourselves a huge statistical advantage for success. There are thousands of stocks
+available to trade each day, but only a few that are actually good candidates for day trading.
+There are so many that a new trader can quickly become overwhelmed. Often, new traders
+refer to a watch list of companies they are familiar with. While this may be suitable for some
+longer term investment strategies, it is not appropriate for day trading. For day trading, there
+are usually only a small handful of stocks each day that I would consider the right stocks to
+trade. We have a very speci¿c list of requirements for what makes a stock worth trading on any
+given day. Most day traders will trade hundreds of different stocks each month, rarely trading
+the same stocks for more than a few days at a time. The reason we trade so many different
+stocks is because we are only interested in stocks with volatility and heavy trading volume.
+Stocks trade on heavy volume because they have a high level of retail interest. High levels
+of retail interest are typically driven by news, but are sometimes driven by stocks trading at
+extreme highs or lows. If you look at almost any chart, you will see a few days where the stock
+traded on extremely high relative volume. Those days are often accompanied by a big gap
+on the chart. Those are the days we would be most interested in trading that stock. I often
+remind our students that on any given day, there is a stock having a once in a year event. As a
+day trader, we have to be willing to jump from stock to stock in order to ¿nd the type of price
+action that can result in at least 5-10% intraday moves.
+
+                                                                  12
+                                                 HOW TO DAY TRADE
+
+                 Chart of a stock showing the days with big volume. Those were
+                            the days this was a stock in play for day traders.
+
+                                   Stocks must have Volume
+
+As day traders, we look for stocks that are trading on above average volume. On any given
+day, algorithmic trading computers account for more than half of the volume in the market. If
+we see a stock that is trading on below average volume, it is safe to assume that day traders
+have very little interest in that stock and that the majority of the volume is controlled by high
+frequency trading computers. These trading computers will buy and sell shares which will result
+
+                                                                  13
+                                                     ROSS CAMERON
+
+in volume and chart patterns. The problem for day traders is, that when we look at these charts
+and recognize a familiar pattern, we can be fooled into thinking it is a good buying opportunity.
+A good looking setup is never complete without above average volume. We need above average
+volume to con¿rm that thousands of other traders are watching this same chart. When we are
+watching a setup forming and we expect a breakout to the upside, that breakout is the result
+of thousands of traders all buying up shares. In fact, we are one of those buyers! That means as
+day traders we should only trade stocks other people are trading.
+
+There are a few techniques for making sure we are trading the right stocks. The most obvious
+technique is to simply look at the daily volume. If a stock trades an average of 500k shares per
+day and has already traded 2 million shares, there is above average interest. The other option is
+to use stock scanning software to scan for stocks with high relative volume. The relative volume
+for the day is translated into a number, a ratio. `1' is average and `2' being 2x average. Stocks can
+trade on any multiple of relative volume, so anything above a `2' is interesting.
+
+                                     The Hunt for a Catalyst
+
+Every morning starts the same way for me. I look at the stocks trading on heavy volume in the
+pre-market session. This is often an indicator of early retail interest that will carry over into the
+trading day. I review each of the stocks trading on high volume to see if there is a catalyst. A
+biotech or pharmaceutical stock that has just released results from a clinical study could be
+interesting, or a stock that just reported a big earnings release would be worth watching. I don't
+put a tremendous amount of energy into researching the catalyst beyond con¿rming there is
+a reason that the stock is moving up or down. Even the best news releases sometimes result in
+poor price action, so I remind myself to always follow the chart and not the fundamentals of
+the catalyst. Investors focus on fundamentals, but traders focus on chart patterns and technical
+analysis. We have to remember that we are traders and keep our attention on the chart patterns
+at all times.
+
+When I'm reviewing pre-market leaders, it is important to check for buy outs. When a stock has
+been bought out overnight it will trade the next morning at the new price, and typically there
+will be a huge amount of volume as people buy and sell shares they have been holding. The
+problem is that since the stock has been bought out, the value of the stock has been determined.
+If a buyout is priced at 4.00 for example, the stock will trade almost exactly at 4.00 all day long.
+There is no reason to short the stock or buy the stock knowing the value of the company has
+become ¿xed at 4.00. The reason these stocks trade on high relative volume is because long term
+investors sell their positions at the buyout price. Anytime we see a buy out on the gap scanner
+we disregard it and move on to the next stock.
+
+                                                                  14
+                                                 HOW TO DAY TRADE
+
+                             Chart of a stock that has just been bought out.
+When we are reviewing the news for a stock, it is important to think about the quality of the source.
+News released directly from the company, a competing company, majority shareholders, top tier
+analyst ¿rms or government agencies will typically be the strongest. This will include earnings
+results, sales contracts, buyout offers, stock buyback programs, FDA approvals, government
+investigations, patent approvals, etc. News released from unknown analysts or uncon¿rmed
+sources should always be considered suspect.
+
+                                                                  15
+                                                     ROSS CAMERON
+
+     Chart of a Former Runner, a stock known to make huge moves when it has news.
+
+                                          Former Runners
+
+It is important to be familiar with former runners. A former runner is a stock that has made huge
+intraday moves in the past, or has made parabolic moves on the daily chart. These are stocks that
+made moves in excess of 100% over a few days. If we notice a former runner reporting news, it
+is worth keeping a close eye on it. We already know the stock has the potential for home run
+type breakouts, so it is possible we could see that type of move again under the right conditions.
+Former runners will typically have all the characteristics of a good stock. They will have that
+perfect combination of a low ¡oat and strong breaking news.
+
+                                                                  16
+                                                 HOW TO DAY TRADE
+
+                        Chart of Low Float Stock moving 10,000% in 3 weeks.
+
+                                         Low Float Stocks
+
+All stocks have a ¡oat. The ¡oat is the number of outstanding shares available to trade on the
+open market, not including shares held by insiders and the company. The ¡oat is the supply.
+When a stock makes its initial public offering (IPO), they release a set number of shares into the
+market. This becomes the ¡oat. At any time, a company can begin a stock buyback program to
+repurchase the shares on the open market. The result of a buyback program will be a decrease
+
+                                                                  17
+                                                     ROSS CAMERON
+in ¡oat and typically, an increase in share price. Alternatively, a company can increase their ¡oat
+by selling more shares on the open market through offerings. Selling more shares will increase
+the ¡oat and decrease the value of the shares. Secondary offerings are a form of dilution used
+for the purpose of raising more capital for the company. This is where the concept of supply and
+demand in the markets comes from.
+Day traders will always want to be aware of the ¡oat size of the stocks they trade. If a stock has
+a great catalyst and a very low ¡oat, the supply and demand effect can cause 100% intraday
+moves. In contrast, a stock that has a very large ¡oat is unlikely to result in more than a 10%
+intraday move, even with the best news. By understanding the ¡oat, we can recognize the
+potential of a stock. Whether we are looking at a pre-market runner or reviewing a stock that
+just popped up on a scanner mid-day, the ¡oat is always going to be one of the ¿rst things
+we check. As day traders, we hunt for volatility, which means we prefer to trade lower ¡oat
+stocks. Investors looking for less volatility and less risk may look for companies with a larger
+¡oat. This again highlights the unique skill set required for different market participants.
+I prefer to trade momentum stocks with a ¡oat of under 50 million shares. Stocks with a ¡oat
+of under 10 million shares will produce some of the biggest percentage gainers. There are
+days when a stock with a 5 million share ¡oat will trade more than 20 million shares. That
+means the entire number of outstanding shares has changed hands four different times. When
+stocks trade the entire ¡oat of available shares, it is commonly known as ¡oat rotation. When
+we see stocks that move 100%-200% intraday, they will almost always experience at least one
+full ¡oat rotation.
+When I trade reversals, I will trade any ¡oat. A reversal setup that has a great 5min chart with
+a strong daily chart can be a good candidate regardless of the ¡oat. The target on these
+types of trades will typically be a move back towards the open price. Stocks with a ¡oat of
+more than 500 million shares will typically be less volatile and less interesting for most day
+traders.
+
+                                                                  18
+                                                 HOW TO DAY TRADE
+
+      Chart of a several follow through days. This is when momentum continues over
+   several days. A follow through day is when a candle breaks the previous days high.
+
+                           Follow Through Days / Continuation
+
+When I review the stocks gapping up each morning, I also take note of stocks that were
+extremely active in the previous trading day. Sometimes these stocks will have the potential to
+carry over momentum from the previous day. Multi-day runners are common among stocks
+that have released really good news and also have strong daily charts. The important price level
+to watch is the previous days high and low. I only trade when the prices make a fresh breakout
+versus the previous days high. Typically, the fresh breakout will bring in a new set of buyers and
+
+                                                                  19
+                                                     ROSS CAMERON
+force short sellers to cover their open positions. For this reason, I keep follow through stocks on
+close watch for a potential breakout.
+
+                         Chart of an inside day. The inside day was the small
+                                  green candle after the large red candle.
+                                                                  20
+                                                 HOW TO DAY TRADE
+
+                                             Inside Days
+
+In contrast to follow through days where we look for continued momentum and a fresh breakout, an
+inside day is when a stock trades completely inside the previous days high and low. I avoid trading a
+stock on an inside day because there is no reason to expect signi¿cant momentum or price action.
+Inside days will often follow days of big volatility. Sometimes, stocks are able to break out over the
+previous days range and form a follow through, but until that happens, I stay on the sidelines.
+
+                    A stock chart showing the power of breaking mid-day news
+                  that created a 20 point move. The stock retraces to its moving
+
+                        averages before ¿nding support and moving back up.
+                                                                  21
+                                                     ROSS CAMERON
+
+                           Breaking News & Intraday Extremes
+
+In addition to extreme stocks that are former runners or have low ¡oats, there are also going to
+be stocks that become irrationally weak or strong in the middle of the day. The midday strength
+or weakness can sometimes be attributed to breaking news. When news breaks in the middle of
+the day, it can cause a stock to spike up so rapidly that shares will be halted by a volatility halt. A
+stock spiking 10% in ¿ve minute can trigger these halts. It is not uncommon to see a stock spike
+up and get halted after a press release. These stocks are experiencing an intraday extreme, and
+if they are also trading on high relative volume, they become a stock worth watching for a trade.
+We will apply one of our trading strategies, covered later in this book, to these breaking news
+setups. In addition to stocks surging on breaking news, we also have stocks that will begin to
+trade at intraday extremes for no apparent reason. As long as these stocks are trading on high
+relative volume, they become a stock in play, even if we do not have an obvious catalyst. We
+would prefer to trade stocks with a clear catalyst, but since we know the market can be irrational,
+we do not want to discount any stock that is moving with suf¿cient volume.
+
+                          Stocks Selection as Risk Management
+
+Trading the right stocks can help reduce your risk as a trader. The majority of stocks in the market
+are not suitable for day trading on any given day. As day traders, we are only interested in the
+highly active stocks each day. This means we must be quick to adapt to changing markets. Some
+months we trade pharmaceutical stocks while other months we trade technology stocks. The
+market is constantly changing, but we can rest assured that every day there will be a stock trading
+on heavy volume due to news. Regardless of bearish markets or bullish markets, there will always
+be volatility in the market and that will keep day traders in business. As hunters of volatility, we
+begin each day with a review of the pre-market movers and continue through the day with a
+sharp eye for stocks coming in and out of play. As you continue reading, you will begin to learn
+about trading chart patterns on the right stocks while applying good risk management principles.
+
+                                                                  22
+                                CHAPTER 4
+
+  INTRODUCTION TO CANDLESTICKS
+
+As day traders, we spend the majority of our time looking at intraday stock charts, but it's
+important to remember that every stock is trading in the context of its daily chart. This means
+that although we will take trades based on intraday chart patterns, we will always keep an eye on
+potential support and resistance levels on the daily chart. In this chapter, we will work through
+setting up your basic stock charts and teach the basic chart patterns we look for on daily charts,
+with an emphasis on support and resistance levels. Later, we will dive into the intraday patterns.
+A stock chart is a visual representation of the price history of a stock. Stock charts provide us
+with a context so we can understand the current price of a stock relative to previous prices. The
+most commonly used charts for day traders are candlestick charts. If you are looking at a daily
+chart that includes the last 90 days, you will see 90 candlesticks. On a daily chart, each candlestick
+represents one day of trading, while on a 1min chart, each candlestick represents one minute of
+trading. Charts can be set in almost any time frame a trader desires, but the most common time
+frames are daily charts, 60min charts, 15min charts, 5min charts, and 1min charts. I personally
+use a daily chart, 5min, and 1min chart to ¿nd my entries.
+
+                                                                  23
+                                                     ROSS CAMERON
+A single candlestick provides us with four pieces of information about the price action of a stock
+within that time frame. The four pieces of information we learn from a candle stick are the high
+of the period, the low of the period, the open of the period, and the close of the period. The
+center of the candle is called the real body, and the lines that go up to the high and down to the
+low are called the upper and lower candle wicks, or shadows. In addition to the four data points,
+we can also draw conclusions about the market sentiment based on the shape of the candle.
+Multiple candlesticks lined up together can begin to form familiar chart patterns, including ¡ags
+and wedges.
+
+                                          Image of a Doji Candlestick.
+
+                                         Doji Candlesticks
+
+A doji candlestick has a very small candle body, meaning the open price and the close price are
+nearly the same. We can infer from this candlestick shape that there is a momentary standoff
+between buyers and sellers. If the candle occurs on heavy volume it tells us there is a battle at
+that price. Sometimes a doji will also have a long upper or lower candle wick. This tells us the price
+suddenly moved up or down, but quickly returned to the same price as the open. The means
+the move was not sustained. In general, doji candles represent some degree of indecision in the
+market. When a doji candle occurs at the top of a very strong move of 5-10 green candles, the
+indecision re¡ected in the candle shape can signify a potential reversal. Doji's that occur during a
+period of sideways consolidation are less important to us because sideways price action already
+re¡ects indecision.
+
+                                                                  24
+                                                 HOW TO DAY TRADE
+
+Image of a Topping Tail candle. Bottoming Tails are the inverse candle in a downtrend.
+
+                             Bottoming Tails and Topping Tails
+
+Candles at the top or bottom of a long trend that have long upper or long lower wicks are
+considered topping tail or bottoming tail candles. They can signify a potential reversal. The
+shape of the candle indicates a continuation of the trend, followed by a quick reversal with a
+close around the middle or low of the candle's range. A doji candle that has long upper or lower
+wicks is one of my favorite indicators of a potential reversal. I rely on these candlestick patterns
+for timing my counter trend entries.
+
+                                                                  25
+                                                     ROSS CAMERON
+
+                         Image of Hammer Candle (inverted hammers occur
+                                    after uptrend and are upside down).
+
+                             Hammers and Inverted Hammers
+
+Like bottoming tails and dojis, a hammer candle really only has signi¿cance when it occurs in
+the context of a long downtrend. Hammer candles will always have small bodies and long lower
+wicks that are larger than the bodies. It is often said that a hammer candle at the bottom of a
+downtrend is hammering out a new base. The long bottom wick indicates a selloff in that period
+where the buyers quickly took the opportunity to jump in and push prices back up. This does
+not always mean the trend will reverse, con¿rmation of the reversal will come when the next
+candle breaks the high of the hammer. This is called a candle over candle con¿rmation. We will
+discuss the entry and exit indicators in detail a bit later.
+An inverted hammer only carries signi¿cance when it occurs at the end of a long uptrend. The
+inverted hammer will have a long topping tail and a small real body. The long topping tail
+indicates a surge of buying that was quickly reversed. This suggests indecision and a battle
+between buyers and sellers that was won by the sellers. When we are watching stocks trading
+in real-time, we can see the formation of the candle wicks. They often appear as a ¿nal burst of
+volume and then a quick and powerful snap back up as the reversal begins.
+
+                                                                  26
+                                                 HOW TO DAY TRADE
+
+                                       Long Body Candles
+
+The ¿nal candle stick shape we will discuss are long body candles. A long body candle that is
+green, opens and surges up without ever going down. These candles close at the high and are
+indicative of extreme bullish sentiment. As day traders, we always want to be holding a stock
+while a long body candle is forming, but we never want to buy after a long body candle. If we
+buy at the top of a long body candle we are chasing a large move. Instead, we need to wait for
+a pullback opportunity if we want to trade with the trend, or wait for a reversal indicator if we
+want to short the stock.
+A red long body candle shows extreme bearish sentiment as the candle opens and sells off for
+the entire candlestick period. If we are in a short position during the formation of a long body
+candle, we may want to consider covering part of our position into the ¡ush to the downside.
+After a series of several long body candles in a row, there is a high likelihood of a bounce.
+Anytime I miss a move, whether to the upside or the downside, I wait for a good reversal
+indicator. We will discuss the counter trend trading strategies later in this book, but if you can
+picture three red long body candles in a row that end with a bottoming tail candle, that is the
+type of reversal pattern we are going to be hunting for. If that bottoming tail also coincides with
+a daily support level, we may feel con¿dent taking a candle over candle entry on the ¿rst candle
+to make a new high following the selloff.
+
+                                                                  27
+                                        ROSS CAMERON
+
+Image of Long Body Candles (these candles can be either red or green).
+                                                     28
+                                CHAPTER 5
+
+      SETTING UP YOUR CHARTS -
+         TECHNICAL INDICATORS
+
+As we setup your charts we are going to focus on keeping things simple and clean. Adding
+complexity to your charts will create unnecessary confusion. There are thousands of technical
+indicators available to download and install on your chart, but I think they are predominantly
+overrated and unnecessary. Technical indicators are almost always lagging indicators. They are
+a middleman between you and the price action. A technical indicator is a formula that calculates
+current price action and then tries to place the price in a context in order to help predict future
+price action. The problem is, that by the time a technical indicator is con¿rming a reversal, the
+reversal is already well underway. Like with price action, a trader has to learn to anticipate the
+move before it actually happens. We can either learn to read the subtle cues of an indicator or
+focus on the candle sticks. I decided I would prefer to become an expert at reading candlestick
+shapes and patterns than the moves of a technical indicator. We are cutting out the middleman
+and going straight to the price action. The hunt for the perfect combination of indicators that
+will give you that added measure of con¿dence can become dangerously close to the hunt for
+the Holy Grail. I would encourage you to avoid going down that path and instead, focus on
+candlestick patterns as your primary source for ¿nding setups. In this chapter, I will introduce
+you to the technical indicators I use on a daily basis. We will discuss the detailed application of
+these indicators later in the book.
+
+                                                                  29
+                                                     ROSS CAMERON
+
+               3 Chart Layout showing 5min, 1min, and Daily charts side by side.
+
+                                         My Chart Layout
+
+When I am looking at a stock, I always have three charts that I am watching. The 1min, 5min,
+and daily charts. The 1min and 5min charts are zoomed in to show just today's price action, but
+the daily chart will usually show the last 3-6 months depending on what I am looking for. On
+the daily chart, I will draw out my horizontal trend lines to mark out windows and triggers. On
+the 1min and 5min chart, I will draw support and resistance lines throughout the day. I ¿nd the
+visual presence of the lines helps me make decisions about whether a trade is worth taking and
+how much room for pro¿t it might have.
+You will notice that my charts are very clean. I use a few of the most common technical indicators,
+but I try to keep it really simple.
+
+                                                                  30
+                     HOW TO DAY TRADE
+
+Chart of Moving Averages (Gray is 9 EMA, Blue is 20
+        EMA, Red is 50 EMA, Purple is 200 EMA).
+                                      31
+                                                     ROSS CAMERON
+
+                              Image of standard Moving Average settings.
+
+                                         Moving Averages
+
+Moving averages are one of the most important indicators I use as a day trader. They represent
+well respected levels of support and resistance for most stocks on both an intraday and a daily
+level. While using moving averages alone are not enough to be a pro¿table trader, they are an
+important indicator on our charts because they show the direction of the trend. Stocks trading
+above their moving averages are considered in an uptrend while stocks below their moving
+averages are in a downtrend. Therefore, when price crosses a moving average there will be a lot
+of traders that take notice and adjust their positions.
+
+                                                                  32
+                                                 HOW TO DAY TRADE
+There are two types of moving averages. Simple moving averages (SMA) and exponential moving
+averages (EMA). All moving averages are calculated as the average price of a stock over a set
+period of time. A 9 period moving average is based on the last 9 candles. A 9 period moving
+average on a 5min chart will be different from the 9 period moving average on a 15min, 60min,
+or daily chart, since the last 9 periods will be different for those time frames. A simple moving
+average is the average price over the set number of periods. An exponential moving average
+takes the average over the set number of periods, but will weigh the most recent price action
+more heavily, so that the moving average moves quickly in response to more recent moves. As a
+day trader, we are making quick decisions and therefore need an indicator that responds quickly.
+I use exponential moving averages. The moving averages I have on each of my charts are the 9
+EMA, the 20 EMA, the 50 EMA and the 200 EMA.
+
+             Chart of a stock respecting the 9 EMA (in gray). Each moving average
+       pullback is a buying opportunity. Additionally, the moment the price crosses
+
+               below the moving average marks a potential change in the trend.
+                                                                  33
+                                                     ROSS CAMERON
+
+    Chart of a trend reversal. The stock was trading below the 9 and 20 EMA, but near
+ the red arrow the price crossed over the moving averages. The ¿rst pullback after the
+  price crossed the moving average (labeled #1) took the form of a bull ¡ag and was a
+ great entry. The 2nd, 3rd, and 4th moving average pullbacks were also potential entries.
+Trending stocks usually respect either the 9 EMA or the 20 EMA. I prefer to trade stocks trending
+along the 9 EMA because that shows more strength. Trending stocks will have a pattern of
+making quick moves up and then consolidate sideways until they tap the 9 EMA, then move
+back up again. This means if I am in a trending stock, I can set a conservative stop loss slightly
+below the 9 EMA support level and adjust it as the price moves. Alternatively, if I see a trending
+stock following this pattern and I want to jump in, I will recognize the moving average as a good
+potential entry point since it is being respected as support. By entering near the support of the
+moving average I will typically have a tight stop with good pro¿t potential. When a trending
+stock makes moving average pullbacks I will typically buy the ¿rst and second pullback most
+
+                                                                  34
+                                                 HOW TO DAY TRADE
+aggressively and be a bit cautious on later pullbacks. When stocks are trending, we want to buy
+as close to moving average support as possible to reduce risk. In contrast, if I am looking to
+take a reversal trade, I will usually look to take a position when the price is extremely extended
+and has moved away from the 9 EMA. The plan is to take pro¿ts on part of the trade when price
+comes back to the 9 EMA to test that support or resistance level.
+
+                Chart of a stock respecting the 200 EMA (dark purple trend line).
+
+                         Importance of the 200 moving average
+
+While I primarily use the 9 EMA on my 5min and 1min charts, the 200 EMA is also a very well
+respected moving average. It is not uncommon to ¿nd support or resistance at the 200 EMA on
+
+                                                                  35
+                                                     ROSS CAMERON
+the 5min chart, and especially on the daily chart. I often trade cautiously around the 200 moving
+average because I recognize stocks may consolidate before breaking away from that level. If I
+am looking for a reversal trade and the price is running into resistance at the 200 EMA I would
+consider that to be a stronger setup. Most of the momentum trades I take will be well above
+the 200 EMA. I rarely take trades to the long side that are below the 200 EMA or take trades to
+the short side that are above the 200 EMA.
+
+                                         Chart of the VWAP indicator.
+                                                                  36
+                                                 HOW TO DAY TRADE
+
+                                     Image of standard VWAP settings.
+
+                        Volume Weighted Average price (VWAP)
+
+In addition to the standard moving averages, I use the Volume Weighted Average Price (VWAP).
+Just as the exponential moving averages give weight to recent price action, the VWAP weighs
+the amount of volume that traded at each price more heavily. The VWAP gives us a really good
+understanding of the average price of the stock over the course of the day, because it factors in
+how many shares were traded. The VWAP is the equilibrium point of a stock on any given day. If
+we are looking for countertrend setups, we would want to ¿nd a stock that is extremely extended
+
+                                                                  37
+                                                     ROSS CAMERON
+away from its equilibrium point. For trend based trading, I generally look to ¿nd entries close
+to the VWAP. This is not always possible if a stock has made a really strong intraday move. In
+cases where the price is extended from the VWAP, but I still want to take a trend based trade, I
+will refer back to the price relative to the 9 EMA.
+
+                               Chart with Candle outside Bollinger Bands.
+                                                                  38
+                                                 HOW TO DAY TRADE
+
+                               Image of standard Bollinger Bands settings.
+
+                                          Bollinger Bands
+
+I use Bollinger Bands exclusively for timing reversal trades. I use a standard 20 period moving
+average with a 2.0 standard deviation for my Bollinger Bands. This is the default setting for the
+indicator. As a counter trend trader, we have to be very careful not to enter a reversal trade
+too soon. We want to enter stocks as close to the maximum extension point, and then ride the
+momentum when the trend reverses. In order to get good entries, I wait for candles to trade
+outside the Bollinger Bands. You will notice that almost all of the price action on any given day
+
+                                                                  39
+                                                     ROSS CAMERON
+will take place inside the Bollinger Bands. Therefore, anytime the price is outside the Bollinger
+Bands, it's an extreme situation. It is important to remember that prices can stay outside the
+Bollinger Bands during a parabolic move, so we still have to be cautious about entering too
+soon. The reason we trade intraday extremes, like candles outside Bollinger Bands, is because
+we know this is where we will ¿nd above average volume. In order to make sure any reversal
+is trading at extremes, I keep the Bollinger Bands on my 5min charts. I do not use them on the
+daily charts or the 1min charts.
+
+                                     Chart with Relative Strength Index.
+                                                                  40
+                                                 HOW TO DAY TRADE
+
+                                        Image of standard RSI settings.
+
+                                Relative Strength Index (RSI)
+
+I use the Relative Strength Index (RSI) exclusively for reversal trades. Like a candle fully outside
+the Bollinger Bands, when RSI is below 20 or above 80, it indicates an intraday extreme. Many of
+best reversal trades will have an RSI below 5 or above 95. RSI is measured on a scale of 0-100, and
+it represents the strength of the stock. A reading of 90 or 95, indicates an extremely overbought
+condition while 5-10, represents an oversold condition. Many traders jump to the conclusion that
+when RSI is at extremes, the trend cannot possibly get any more extended and could change
+
+                                                                  41
+                                                     ROSS CAMERON
+directions. It is important to note that since RSI can remain at extremes for a long period of time,
+it is not a reliable buy or sell indicator without additional con¿rmation. Stocks that are trending
+slowly, up or down, generally don't always show RSI extremes. The RSI extremes are more often
+combined with parabolic moves or long trends that ¿nally peak with one last surge. Instead of
+keeping RSI on my charts, I have created a ¿lter in my stock scanners to only show me reversal
+stock ideas when the RSI is below 20 or above 80.
+
+                                              Image of Volume Bars.
+
+                                            Volume Bars
+
+The ¿nal technical indicator that I use on a daily basis are simple volume bars. These bars tell us
+how many shares of volume were traded during a candlestick period. Volume is a critical piece
+of information for my trading strategies. It would be very dif¿cult for me to trade without the
+volume bars. I need to have a sense of the increasing and decreasing volume as momentum
+builds and then fades. When I see decreasing volume during a trend, it can be an indicator that
+the trend is about to change directions. Additionally, during periods of consolidation, seeing an
+increase in volume can suggest a potential break back into a trend.
+
+                                                                  42
+

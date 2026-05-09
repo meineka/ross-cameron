@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Backtest-Outputs (sollen nicht ins Repo)
+04_backtest/results/
+04_backtest/cache/
+*.parquet
+*.feather
+
+# Daten (zu groß, lokal)
+05_data/raw/
+05_data/cache/
+*.csv.gz
+
+# Aber: kleine Sample-Dateien erlaubt
+!05_data/samples/
+
+# Logs
+*.log
+logs/
