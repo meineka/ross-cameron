@@ -84,6 +84,11 @@ TIME_NEW_ENTRIES_END = dtime(11, 30)
 TIME_HARD_FLAT = dtime(12, 0)
 TIME_RTH_START = dtime(9, 30)
 
+# Intraday Re-Scan (Cameron-Workflow: kontinuierlich neu ranken)
+RESCAN_INTERVAL_MINUTES_FAST = 10   # erste Stunde alle 10 Min
+RESCAN_INTERVAL_MINUTES_NORMAL = 15  # danach alle 15 Min
+RESCAN_FAST_PHASE_END = dtime(10, 30)  # Power-Hour Ende
+
 DATA_DIR = Path(__file__).parent
 
 # ─── Datenklassen ───────────────────────────────────────────────────────────
@@ -434,9 +439,12 @@ class Bot:
             except Exception as e:
                 log.error("handle_bar error for %s: %s", bar.symbol, e, exc_info=True)
 
-        # 3. Time-Cuts + Health-Check Loop läuft parallel
+        # 3. Time-Cuts + Health-Check + Intraday-Re-Scan Loop
+        self._pending_ws_resubscribe = False
+
         async def time_and_health_loop():
             last_health = datetime.now(NY_TZ)
+            last_rescan = datetime.now(NY_TZ)
             while True:
                 ny = datetime.now(NY_TZ)
                 # Hard-Flat
@@ -448,29 +456,46 @@ class Bot:
                     self._log_day_summary()
                     await asyncio.sleep(60)
                     return
+                # Intraday-Re-Scan
+                interval = RESCAN_INTERVAL_MINUTES_FAST if ny.time() <= RESCAN_FAST_PHASE_END else RESCAN_INTERVAL_MINUTES_NORMAL
+                if (ny - last_rescan).total_seconds() >= interval * 60:
+                    await self.intraday_rescan()
+                    last_rescan = ny
                 # Health-Check alle 15 Min
                 if (ny - last_health).total_seconds() >= 900:
                     self._log_health()
                     last_health = ny
                 await asyncio.sleep(30)
 
-        # 4. WebSocket mit Auto-Reconnect
+        # 4. WebSocket mit Auto-Reconnect + Re-Subscribe bei Watchlist-Update
         async def ws_loop():
             while True:
                 try:
                     ws = StockDataStream(self.api_key, self.api_secret, feed="iex")
-                    ws.subscribe_bars(on_bar, *list(self.tickers.keys()))
-                    log.info("WS connected, listening…")
-                    await asyncio.to_thread(ws.run)
+                    current_symbols = list(self.tickers.keys())
+                    ws.subscribe_bars(on_bar, *current_symbols)
+                    log.info("WS subscribed to %d symbols: %s", len(current_symbols), current_symbols)
+                    self._pending_ws_resubscribe = False
+
+                    # Run WS in thread + monitor for re-subscribe-flag
+                    ws_task = asyncio.create_task(asyncio.to_thread(ws.run))
+                    while not ws_task.done():
+                        await asyncio.sleep(5)
+                        if self._pending_ws_resubscribe:
+                            log.info("  WS re-subscribe triggered — restarting connection")
+                            try:
+                                ws.stop_ws()
+                            except Exception:
+                                pass
+                            break
                     log.warning("WS disconnected — reconnect in 5s")
                 except Exception as e:
                     self.day.ws_reconnects += 1
                     log.error("WS error (#%d): %s — reconnect in 10s",
                               self.day.ws_reconnects, e, exc_info=True)
-                # Stop reconnecting if hard-flat reached
                 if datetime.now(NY_TZ).time() >= TIME_HARD_FLAT:
                     return
-                await asyncio.sleep(10)
+                await asyncio.sleep(5)
 
         try:
             await asyncio.gather(ws_loop(), time_and_health_loop())
@@ -482,6 +507,61 @@ class Bot:
             log.error("Bot.run unhandled error: %s", e, exc_info=True)
             self.executor.market_close_all()
             self._log_day_summary()
+
+    async def intraday_rescan(self):
+        """Re-scan + update self.tickers. Behalte Stocks mit offenen Positions."""
+        log.info("─" * 60)
+        log.info("INTRADAY RE-SCAN @ %s", datetime.now(NY_TZ).strftime("%H:%M ET"))
+        try:
+            new_candidates = await asyncio.to_thread(premarket_scan, TOP_N)
+        except Exception as e:
+            log.error("intraday rescan failed: %s", e, exc_info=True)
+            return
+        if not new_candidates:
+            log.warning("  Re-scan empty — keeping current watchlist")
+            return
+
+        new_symbols = {c.symbol for c in new_candidates}
+        old_symbols = set(self.tickers.keys())
+        added = new_symbols - old_symbols
+        removed = old_symbols - new_symbols
+        kept = new_symbols & old_symbols
+
+        log.info("  Watchlist delta: +%d added, -%d removed (or held), %d unchanged",
+                 len(added), len(removed), len(kept))
+
+        # Update ranks für gehaltene Symbole (Reihenfolge kann sich ändern!)
+        for c in new_candidates:
+            if c.symbol in self.tickers:
+                old_rank = self.tickers[c.symbol].rank
+                self.tickers[c.symbol].rank = c.rank
+                self.tickers[c.symbol].score = c.score
+                if old_rank != c.rank:
+                    log.info("  RANK CHANGE %s: #%d → #%d", c.symbol, old_rank, c.rank)
+
+        # Drop-Outs: behalten wenn in Position, sonst entfernen
+        for sym in removed:
+            ts = self.tickers[sym]
+            if ts.in_position:
+                log.info("  KEEP %s (out of top-10 but in_position, rank=%d)", sym, ts.rank)
+            else:
+                log.info("  DROP %s (out of top-10, no position)", sym)
+                del self.tickers[sym]
+                # Pending: WebSocket-unsubscribe — wird bei nächstem WS-Reconnect implizit gemacht
+                self._pending_ws_resubscribe = True
+
+        # Neue Symbole hinzufügen
+        for c in new_candidates:
+            if c.symbol in added:
+                self.tickers[c.symbol] = c
+                log.info("  ADD %s rank=#%d score=%.0f — subscribing WS", c.symbol, c.rank, c.score)
+                self._pending_ws_resubscribe = True
+
+        log.info("  Current watchlist: %s", [
+            f"#{t.rank}{t.symbol}{'*' if t.in_position else ''}"
+            for t in sorted(self.tickers.values(), key=lambda x: x.rank)
+        ])
+        log.info("─" * 60)
 
     def _log_health(self):
         """Periodic health-check log."""
