@@ -642,6 +642,9 @@ def status_check():
     """Aktuelle Positions + Daily-PnL anzeigen."""
     api_key = os.environ.get("APCA_API_KEY_ID", "")
     api_secret = os.environ.get("APCA_API_SECRET_KEY", "")
+    if not api_key or not api_secret:
+        print("FAIL: APCA_API_KEY_ID + APCA_API_SECRET_KEY nicht gesetzt")
+        return
     from alpaca.trading.client import TradingClient
     client = TradingClient(api_key, api_secret, paper=True)
     acc = client.get_account()
