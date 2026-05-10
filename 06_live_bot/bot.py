@@ -608,13 +608,80 @@ class ReplayBot:
             ts.in_position = False
 
 
+# ─── Pre-Flight Connection Check ────────────────────────────────────────────
+def check_connection():
+    """Verifiziert Alpaca-API + Account-Status."""
+    api_key = os.environ.get("APCA_API_KEY_ID", "")
+    api_secret = os.environ.get("APCA_API_SECRET_KEY", "")
+    if not api_key or not api_secret:
+        print("FAIL: APCA_API_KEY_ID + APCA_API_SECRET_KEY nicht gesetzt")
+        print("Setup: https://app.alpaca.markets/paper/dashboard/overview")
+        return False
+    try:
+        from alpaca.trading.client import TradingClient
+        client = TradingClient(api_key, api_secret, paper=True)
+        acc = client.get_account()
+        print(f"  Status:        {acc.status}")
+        print(f"  Equity:        ${float(acc.equity):,.2f}")
+        print(f"  Buying-Power:  ${float(acc.buying_power):,.2f}")
+        print(f"  Cash:          ${float(acc.cash):,.2f}")
+        print(f"  Pattern-Day:   {acc.pattern_day_trader}")
+        print(f"  Trading-Block: {acc.trading_blocked}")
+        print(f"  Account-Block: {acc.account_blocked}")
+        if acc.trading_blocked or acc.account_blocked:
+            print("FAIL: Account blocked")
+            return False
+        print("OK: Alpaca-Verbindung funktioniert")
+        return True
+    except Exception as e:
+        print(f"FAIL: {e}")
+        return False
+
+
+def status_check():
+    """Aktuelle Positions + Daily-PnL anzeigen."""
+    api_key = os.environ.get("APCA_API_KEY_ID", "")
+    api_secret = os.environ.get("APCA_API_SECRET_KEY", "")
+    from alpaca.trading.client import TradingClient
+    client = TradingClient(api_key, api_secret, paper=True)
+    acc = client.get_account()
+    print(f"=== ACCOUNT ===")
+    print(f"  Equity: ${float(acc.equity):,.2f}")
+    print(f"  Cash:   ${float(acc.cash):,.2f}")
+    print(f"  PnL today: ${float(acc.equity) - float(acc.last_equity):+,.2f}")
+    print(f"\n=== POSITIONS ===")
+    pos = client.get_all_positions()
+    if not pos:
+        print("  (keine offenen Positionen)")
+    for p in pos:
+        ul = float(p.unrealized_pl)
+        ulpc = float(p.unrealized_plpc) * 100
+        print(f"  {p.symbol}: {p.qty} @ ${float(p.avg_entry_price):.2f} → ${float(p.current_price):.2f}  PnL ${ul:+.2f} ({ulpc:+.2f}%)")
+    print(f"\n=== TODAY-ORDERS ===")
+    from alpaca.trading.requests import GetOrdersRequest
+    from alpaca.trading.enums import QueryOrderStatus
+    today_orders = client.get_orders(filter=GetOrdersRequest(status=QueryOrderStatus.ALL, limit=20))
+    for o in today_orders[:20]:
+        print(f"  {o.created_at.strftime('%H:%M')} {o.side} {o.qty} {o.symbol} @ ${o.limit_price or 'mkt'} → {o.status}")
+
+
 # ─── CLI ────────────────────────────────────────────────────────────────────
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dry-run", action="store_true", help="Pattern-Detection only, no orders")
     p.add_argument("--scan-only", action="store_true", help="Premarket-Scan + exit")
     p.add_argument("--replay", type=str, help="Historical replay YYYY-MM-DD aus pilot-data")
+    p.add_argument("--check-connection", action="store_true", help="Alpaca-Auth verifizieren")
+    p.add_argument("--status", action="store_true", help="Account + Positions anzeigen")
     args = p.parse_args()
+
+    if args.check_connection:
+        ok = check_connection()
+        sys.exit(0 if ok else 1)
+
+    if args.status:
+        status_check()
+        return
 
     if args.replay:
         ReplayBot().run(args.replay)
