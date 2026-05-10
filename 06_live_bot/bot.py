@@ -76,8 +76,38 @@ DAILY_MAX_LOSS_USD = 150.0          # = 3× max-loss-per-trade
 DAILY_GOAL_USD = 150.0              # symmetric (Cameron-Rule)
 INTRADAY_DRAWDOWN_PCT_OF_PROFITS = 50.0
 
-LIQUIDITY_CAP_PCT_OF_AVG_VOL = 1.0  # max 1% von 1-min-avg-volume
-QUARTER_SIZE_UNLOCK_CENTS = 0.20    # nach +20¢/Aktie kumuliert: full size
+LIQUIDITY_CAP_PCT_OF_AVG_VOL = 1.0
+QUARTER_SIZE_UNLOCK_CENTS = 0.20
+
+# ── 8 Easy-Wins (Cameron-Compliance) ───────────────────────────────────────
+# #4 Daily-Goal-Stop: bei erreichen STOP
+DAILY_GOAL_STOP_ENABLED = True
+
+# #5 Max-Trades pro Tag (Cameron-Rule: Quality > Quantity)
+MAX_TRADES_PER_DAY = 5             # Cameron sagt 1 für Beginners, 3-5 für ihn selbst
+
+# #2 30¢-Quick-Exit: wenn 30c gegen Entry → exit (mistime-detection)
+QUICK_EXIT_THRESHOLD_CENTS = 0.30
+QUICK_EXIT_BARS_LIMIT = 5          # innerhalb 5 Bars nach Entry
+
+# #1 Position-Adding (Pyramiding): bei jedem +10¢ höher 25% mehr Shares (max 3 Adds)
+ADD_TO_WINNER_ENABLED = True
+ADD_TRIGGER_CENTS = 0.10           # alle 10¢ above entry
+ADD_FRACTION = 0.25                # 25% extra shares pro Add
+MAX_ADDS_PER_TRADE = 3
+
+# #8 Slippage realistisch
+SLIPPAGE_CENTS = 0.05              # was 0.01, jetzt realistic 5c
+
+# #6 SPY-Trend-Filter: skip Trading wenn SPY < -1% am Tag (Bear-Day)
+SPY_TREND_VETO_PCT = -1.0
+SPY_TREND_REDUCE_SIZE_PCT = -0.5   # SPY < -0.5% aber > -1%: size 50%
+
+# #3 Whole/Half-Dollar Targets
+USE_PSYCH_LEVEL_T2 = True          # T2 = max(pole_height_target, nearest psych level)
+
+# #7 Pole-Volume-Rising
+POLE_VOLUME_RISING_REQUIRED = True
 
 # Time-Cuts (NY-Time)
 TIME_NEW_ENTRIES_END = dtime(11, 30)
@@ -119,13 +149,19 @@ class TickerState:
     pullback_count_today: int = 0   # for 3rd-pullback rule
     in_position: bool = False
     entry_price: float = 0.0
+    entry_bar_idx: int = 0          # bar-count at entry (for #2 quick-exit)
+    bars_since_entry: int = 0       # counter
     stop_price: float = 0.0
     target1_price: float = 0.0
     target2_price: float = 0.0
     half_filled: bool = False
     shares: int = 0
+    initial_shares: int = 0         # for pyramiding-tracking
+    adds_count: int = 0             # #1 add-counter
+    last_add_price: float = 0.0
     pole_candles: int = 0
     flag_candles: int = 0
+    pole_height: float = 0.0
 
 
 @dataclass
@@ -144,10 +180,20 @@ class DayState:
     patterns_rejected_fbo: int = 0
     patterns_rejected_pullback_count: int = 0
     patterns_rejected_size_zero: int = 0
+    patterns_rejected_max_trades: int = 0    # #5
     orders_submitted: int = 0
     orders_failed: int = 0
+    adds_executed: int = 0                    # #1
+    quick_exits: int = 0                       # #2
     ws_reconnects: int = 0
     last_heartbeat: datetime | None = None
+    # #5 Trade-Counter
+    trades_completed_today: int = 0
+    # #6 SPY-Trend
+    spy_pct_today: float = 0.0
+    spy_size_multiplier: float = 1.0          # 1.0=normal, 0.5=halved, 0.0=skip
+    # #4 daily-goal-stop
+    goal_reached: bool = False
 
 
 # ─── Premarket-Scanner ──────────────────────────────────────────────────────
@@ -301,6 +347,12 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
             p_pct = (p_end - p_start) / p_start * 100
             if p_pct < POLE_MIN_MOVE_PCT: continue
             if topping[ps:pe].max() > POLE_TOPPING_TAIL_MAX: continue
+            # #7 Pole-Volume-Rising: Volume in 2nd half of pole >= 1st half (avg)
+            if POLE_VOLUME_RISING_REQUIRED and pl >= 4:
+                first_half_vol = v[ps:ps+pl//2].mean()
+                second_half_vol = v[ps+pl//2:pe].mean()
+                if second_half_vol < first_half_vol * 0.9:  # 10% Toleranz
+                    continue
             fs = pe; fe = i
             p_h = p_end - p_start
             if p_h <= 0: continue
@@ -311,11 +363,19 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
             ep = prh + SLIPPAGE_CENTS
             sp = fl_low - SLIPPAGE_CENTS
             if ep <= sp: continue
+            # #3 T2 = max(pole_height-target, next psych. level above entry)
+            t2_mech = ep + p_h
+            if USE_PSYCH_LEVEL_T2:
+                # nächste 0.50/1.00 above entry
+                next_half = (int(ep * 2) + 1) / 2.0   # nächstes 0.50
+                t2 = max(t2_mech, next_half) if next_half > ep + 0.05 else t2_mech
+            else:
+                t2 = t2_mech
             return True, {
                 "entry_price": float(ep),
                 "stop_price": float(sp),
                 "target1": float(ep + (ep - sp)),
-                "target2": float(ep + p_h),
+                "target2": float(t2),
                 "pole_height": float(p_h),
                 "pole_candles": int(pl),
                 "flag_candles": int(fl),
@@ -337,11 +397,40 @@ def compute_position_size(entry: float, stop: float, account_equity: float, day:
 def can_enter_new(day: DayState, ny_time: dtime) -> tuple[bool, str]:
     if day.spiral_locked: return False, "spiral_locked"
     if day.realized_pnl <= -DAILY_MAX_LOSS_USD: return False, "daily_max_loss"
+    # #4 Daily-Goal-Stop
+    if DAILY_GOAL_STOP_ENABLED and day.goal_reached: return False, "daily_goal_reached"
     if day.peak_pnl > 0 and day.realized_pnl < day.peak_pnl * (1 - INTRADAY_DRAWDOWN_PCT_OF_PROFITS/100):
         return False, "intraday_drawdown_50pct"
     if ny_time >= TIME_NEW_ENTRIES_END: return False, "after_1130"
     if ny_time < TIME_RTH_START: return False, "before_rth"
+    # #5 Max trades per day
+    if day.trades_completed_today >= MAX_TRADES_PER_DAY:
+        return False, f"max_{MAX_TRADES_PER_DAY}_trades_today"
+    # #6 SPY-Trend-Filter (when reduce 0.5x is set, allow but smaller; when 0.0 skip)
+    if day.spy_size_multiplier <= 0.0:
+        return False, f"SPY_bear_day_{day.spy_pct_today:+.2f}%"
     return True, ""
+
+
+def fetch_spy_today_pct() -> float:
+    """SPY heutiger Move (vs prev close) für Bear-Day-Filter."""
+    try:
+        df = yf.download("SPY", period="2d", interval="1d", progress=False, auto_adjust=False)
+        if df.empty or len(df) < 2: return 0.0
+        prev = float(df["Close"].iloc[-2])
+        cur = float(df["Close"].iloc[-1])
+        return (cur - prev) / prev * 100
+    except Exception:
+        return 0.0
+
+
+def compute_spy_size_multiplier(spy_pct: float) -> float:
+    """SPY-Trend-basierter Size-Multiplier."""
+    if spy_pct <= SPY_TREND_VETO_PCT:
+        return 0.0    # Bear day: skip
+    if spy_pct <= SPY_TREND_REDUCE_SIZE_PCT:
+        return 0.5    # weak day: half size
+    return 1.0        # normal
 
 
 # ─── Trade-Logger ───────────────────────────────────────────────────────────
@@ -434,6 +523,18 @@ class Bot:
         except Exception as e:
             log.error("Alpaca-Connection FAIL: %s", e, exc_info=True)
             return
+
+        # 0a. #6 SPY-Trend-Filter
+        spy_pct = await asyncio.to_thread(fetch_spy_today_pct)
+        self.day.spy_pct_today = spy_pct
+        self.day.spy_size_multiplier = compute_spy_size_multiplier(spy_pct)
+        log.info("SPY today: %+.2f%% → size-multiplier %.2fx",
+                 spy_pct, self.day.spy_size_multiplier)
+        if self.day.spy_size_multiplier <= 0.0:
+            log.warning("=" * 60)
+            log.warning("SPY-BEAR-DAY: %.2f%% < %.1f%% — KEINE neuen Trades heute",
+                        spy_pct, SPY_TREND_VETO_PCT)
+            log.warning("=" * 60)
 
         # 1. Premarket-Scan
         candidates = await asyncio.to_thread(premarket_scan, TOP_N)
@@ -716,9 +817,17 @@ class Bot:
                      params["entry_price"] - params["stop_price"])
             return
 
+        # #6 SPY-Size-Multiplier anwenden
+        shares = int(shares * self.day.spy_size_multiplier)
+        if shares < 1:
+            self.day.patterns_rejected_size_zero += 1
+            log.info("  REJECT %s: shares=0 nach SPY-multiplier %.2fx",
+                     sym, self.day.spy_size_multiplier)
+            return
+
         # Submit
-        log.info("  SUBMITTING BUY %s %d shares @ $%.2f (rank=%d)",
-                 sym, shares, params["entry_price"], ts.rank)
+        log.info("  SUBMITTING BUY %s %d shares @ $%.2f (rank=%d, spy_mult=%.1f)",
+                 sym, shares, params["entry_price"], ts.rank, self.day.spy_size_multiplier)
         order_id = self.executor.submit_buy_limit(sym, shares, params["entry_price"])
         if order_id:
             self.day.orders_submitted += 1
@@ -727,19 +836,75 @@ class Bot:
         if order_id:
             ts.in_position = True
             ts.entry_price = params["entry_price"]
+            ts.entry_bar_idx = self.day.bars_received
+            ts.bars_since_entry = 0
             ts.stop_price = params["stop_price"]
             ts.target1_price = params["target1"]
             ts.target2_price = params["target2"]
             ts.shares = shares
+            ts.initial_shares = shares
+            ts.adds_count = 0
+            ts.last_add_price = params["entry_price"]
             ts.pole_candles = params["pole_candles"]
             ts.flag_candles = params["flag_candles"]
+            ts.pole_height = params["pole_height"]
             ts.half_filled = False
             self.logger.log({
                 "event": "entry", "symbol": sym, "rank": ts.rank, "score": ts.score,
                 **params, "shares": shares, "order_id": order_id,
+                "spy_mult": self.day.spy_size_multiplier,
             })
 
     async def manage_position(self, ts: TickerState, bar: dict, ny_time: dtime):
+        ts.bars_since_entry += 1
+
+        # #2 30¢-Quick-Exit: wenn 30c against entry und noch im Frühphase
+        if not ts.half_filled and ts.bars_since_entry <= QUICK_EXIT_BARS_LIMIT:
+            against = ts.entry_price - bar["close"]
+            if against >= QUICK_EXIT_THRESHOLD_CENTS:
+                # Stock läuft nicht in unsere Richtung — exit jetzt statt warten
+                self.executor.submit_sell_limit(ts.symbol, ts.shares, bar["close"] - SLIPPAGE_CENTS, "quick_exit_30c")
+                pnl = (bar["close"] - ts.entry_price) * ts.shares
+                self.day.realized_pnl += pnl
+                self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
+                self.day.quick_exits += 1
+                self.day.trades_completed_today += 1
+                if pnl <= 0:
+                    self.day.consecutive_losses += 1
+                    if self.day.consecutive_losses >= 2:
+                        self.day.spiral_locked = True
+                        log.warning("SPIRAL-DETECTION: 2 consecutive losses → STOP")
+                self.logger.log({"event": "quick_exit", "symbol": ts.symbol,
+                                 "shares": ts.shares, "price": bar["close"], "pnl": pnl})
+                log.info("  QUICK-EXIT %s: -%.2fc against entry within %d bars (PnL $%.2f)",
+                         ts.symbol, against * 100, ts.bars_since_entry, pnl)
+                ts.in_position = False
+                return
+
+        # #1 Position-Adding (Pyramiding) auf Winners
+        if ADD_TO_WINNER_ENABLED and ts.adds_count < MAX_ADDS_PER_TRADE:
+            add_trigger_price = ts.last_add_price + ADD_TRIGGER_CENTS
+            if bar["high"] >= add_trigger_price and bar["close"] > ts.entry_price:
+                add_shares = max(1, int(ts.initial_shares * ADD_FRACTION))
+                self.executor.submit_buy_limit(ts.symbol, add_shares, add_trigger_price)
+                old_avg = ts.entry_price
+                # neue Average-Cost-Basis
+                ts.entry_price = (old_avg * ts.shares + add_trigger_price * add_shares) / (ts.shares + add_shares)
+                ts.shares += add_shares
+                ts.adds_count += 1
+                ts.last_add_price = add_trigger_price
+                self.day.adds_executed += 1
+                self.logger.log({"event": "add", "symbol": ts.symbol, "shares": add_shares,
+                                 "price": add_trigger_price, "new_avg": ts.entry_price,
+                                 "total_shares": ts.shares, "adds": ts.adds_count})
+                log.info("  ADD-TO-WINNER %s: +%d @ $%.2f → total %d, avg $%.2f (#%d)",
+                         ts.symbol, add_shares, add_trigger_price, ts.shares,
+                         ts.entry_price, ts.adds_count)
+                # Move stop to BE on first add (Cameron-Rule)
+                if ts.adds_count == 1:
+                    ts.stop_price = old_avg
+                return
+
         # T1
         if not ts.half_filled and bar["high"] >= ts.target1_price:
             half = max(1, ts.shares // 2)
@@ -755,19 +920,28 @@ class Bot:
         # T2
         if ts.half_filled and bar["high"] >= ts.target2_price:
             self.executor.submit_sell_limit(ts.symbol, ts.shares, ts.target2_price, "T2")
-            self.logger.log({"event": "T2_exit", "symbol": ts.symbol, "shares": ts.shares, "price": ts.target2_price})
-            self.day.realized_pnl += (ts.target2_price - ts.entry_price) * ts.shares + (ts.target1_price - ts.entry_price) * (ts.shares)  # approx
+            r1 = (ts.target1_price - ts.entry_price) * ts.initial_shares * 0.5
+            r2 = (ts.target2_price - ts.entry_price) * ts.shares
+            pnl = r1 + r2
+            self.logger.log({"event": "T2_exit", "symbol": ts.symbol, "shares": ts.shares,
+                            "price": ts.target2_price, "pnl": pnl})
+            self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
             self.day.consecutive_losses = 0
+            self.day.trades_completed_today += 1
+            self._check_daily_goal()
             ts.in_position = False
             return
         # Stop / BE
         stop = ts.stop_price if not ts.half_filled else ts.entry_price
         if bar["low"] <= stop:
-            self.executor.submit_sell_limit(ts.symbol, ts.shares, stop, "stop_or_BE")
+            self.executor.submit_sell_limit(ts.symbol, ts.shares, stop - SLIPPAGE_CENTS, "stop_or_BE")
             pnl = (stop - ts.entry_price) * ts.shares
+            if ts.half_filled:
+                pnl += (ts.target1_price - ts.entry_price) * (ts.initial_shares - ts.shares)
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
+            self.day.trades_completed_today += 1
             if pnl <= 0:
                 self.day.consecutive_losses += 1
                 if self.day.consecutive_losses >= 2:
@@ -775,10 +949,20 @@ class Bot:
                     log.warning("SPIRAL-DETECTION: 2 consecutive losses → trading stopped")
             else:
                 self.day.consecutive_losses = 0
+            self._check_daily_goal()
             self.logger.log({"event": "stop_exit", "symbol": ts.symbol, "shares": ts.shares,
                             "price": stop, "pnl": pnl, "reason": "stop" if not ts.half_filled else "BE"})
             ts.in_position = False
             return
+
+    def _check_daily_goal(self):
+        """#4 Daily-Goal-Stop."""
+        if not self.day.goal_reached and self.day.realized_pnl >= DAILY_GOAL_USD:
+            self.day.goal_reached = True
+            log.warning("=" * 60)
+            log.warning("DAILY GOAL $%.0f ERREICHT (PnL $%.2f) → KEINE NEUEN TRADES",
+                        DAILY_GOAL_USD, self.day.realized_pnl)
+            log.warning("=" * 60)
 
 
 # ─── Replay-Mode (stream historical 5m bars through bot logic) ─────────────

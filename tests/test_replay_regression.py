@@ -25,7 +25,9 @@ def test_replay_2026_04_15_baseline():
     assert "Top-10 for 2026-04-15" in log
     assert "BIRD" in log
     assert "MNTS" in log
-    assert "Daily realized PnL: $12.15" in log, f"PnL drift! Output:\n{log[-2000:]}"
+    # Baseline-PnL: $10.38 (mit 5c Slippage + psych-level T2 + 8 Easy-Wins)
+    # Wenn Code-Aenderung: Wert auf neue Baseline anpassen.
+    assert "Daily realized PnL: $10.38" in log, f"PnL drift! Output:\n{log[-2000:]}"
 
 
 @pytest.mark.skipif(not PILOT_DATA.exists(), reason="pilot data missing")
