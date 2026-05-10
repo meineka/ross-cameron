@@ -695,16 +695,27 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
         ny_now = datetime.now(NY_TZ)
         wait_sec = (next_start - ny_now).total_seconds()
         wait_hours = wait_sec / 3600
-        log.info("Next premarket-scan: %s ET (in %.1f hours)", next_start.strftime("%Y-%m-%d %H:%M"), wait_hours)
-        log.info("Sleeping… (Ctrl+C to stop)")
+        log.info("Next premarket-scan: %s ET (in %.1f h = %s CET)",
+                 next_start.strftime("%Y-%m-%d %H:%M"),
+                 wait_hours,
+                 (next_start + timedelta(hours=6)).strftime("%H:%M"))
+        log.info("Sleeping… heartbeat every 15 min, Ctrl+C to stop")
 
-        # Sleep in 60-sec-chunks so KeyboardInterrupt responds
+        # Sleep in 60-sec-chunks; heartbeat alle 15 Min
+        last_heartbeat = datetime.now(NY_TZ)
         while datetime.now(NY_TZ) < next_start:
             try:
                 await asyncio.sleep(60)
             except (KeyboardInterrupt, asyncio.CancelledError):
                 log.info("Daemon stopped by user")
                 return
+            now = datetime.now(NY_TZ)
+            if (now - last_heartbeat).total_seconds() >= 900:  # 15 Min
+                remaining_h = (next_start - now).total_seconds() / 3600
+                log.info("ALIVE — sleeping. Next scan in %.1f h at %s CET",
+                         remaining_h,
+                         (next_start + timedelta(hours=6)).strftime("%H:%M"))
+                last_heartbeat = now
 
         log.info("=" * 60)
         log.info("PREMARKET TIME — starting one trading day")

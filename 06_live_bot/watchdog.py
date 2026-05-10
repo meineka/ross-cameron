@@ -15,14 +15,15 @@ from datetime import datetime, timezone
 if __name__ == "__main__":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(Path(__file__).parent / "watchdog.log", encoding="utf-8"),
-    ],
-)
+_log_path = Path(__file__).parent / "watchdog.log"
+_handlers = [logging.StreamHandler(sys.stdout)]
+try:
+    _handlers.append(logging.FileHandler(_log_path, encoding="utf-8", mode="a"))
+except (PermissionError, OSError):
+    # Fallback if log file locked (race condition with stdout redirect)
+    pass
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
+                    handlers=_handlers)
 log = logging.getLogger("watchdog")
 
 CHECK_INTERVAL_SEC = 300  # 5 Min
