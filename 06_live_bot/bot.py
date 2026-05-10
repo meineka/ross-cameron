@@ -114,6 +114,17 @@ class DayState:
     quarter_size_unlocked: bool = False
     cents_per_share_cumulative: float = 0.0
     spiral_locked: bool = False
+    # Telemetry counters
+    bars_received: int = 0
+    patterns_detected: int = 0
+    patterns_rejected_macd: int = 0
+    patterns_rejected_fbo: int = 0
+    patterns_rejected_pullback_count: int = 0
+    patterns_rejected_size_zero: int = 0
+    orders_submitted: int = 0
+    orders_failed: int = 0
+    ws_reconnects: int = 0
+    last_heartbeat: datetime | None = None
 
 
 # ─── Premarket-Scanner ──────────────────────────────────────────────────────
@@ -140,26 +151,49 @@ def fetch_us_universe() -> list[str]:
     return sorted(tickers)
 
 
-def premarket_scan(top_n: int = TOP_N) -> list[TickerState]:
-    """5-Pillars-Filter + Top-N-Composite-Score-Ranking."""
-    log.info("Premarket scan: pulling daily bars for filter…")
-    tickers = fetch_us_universe()
-    log.info("  %d tickers in universe", len(tickers))
+def premarket_scan(top_n: int = TOP_N, max_retries: int = 2) -> list[TickerState]:
+    """5-Pillars-Filter + Top-N-Composite-Score-Ranking, mit Retry-Logik."""
+    for attempt in range(max_retries + 1):
+        try:
+            return _premarket_scan_inner(top_n)
+        except Exception as e:
+            log.error("Scan attempt %d failed: %s", attempt + 1, e, exc_info=True)
+            if attempt < max_retries:
+                wait = 60 * (attempt + 1)
+                log.info("  Retry in %d sec…", wait)
+                import time as _t; _t.sleep(wait)
+    log.error("Scanner failed after %d attempts — returning empty watchlist", max_retries + 1)
+    return []
 
-    # Daily-Bars 30 Tage → RVOL-Proxy + intraday_pct
+
+def _premarket_scan_inner(top_n: int) -> list[TickerState]:
+    log.info("=" * 60)
+    log.info("PREMARKET SCAN START — pulling daily bars")
+    log.info("=" * 60)
+    tickers = fetch_us_universe()
+    log.info("  Universe: %d tickers from NASDAQ-Trader CSV", len(tickers))
+    if not tickers:
+        log.error("  FAIL: empty universe — NASDAQ-Trader CSV unreachable?")
+        return []
+
     end = datetime.now(timezone.utc).date()
     start = end - timedelta(days=45)
     cands = []
     batch_size = 200
+    n_batches = (len(tickers) + batch_size - 1) // batch_size
+    failed_batches = 0
     for i in range(0, len(tickers), batch_size):
         batch = tickers[i:i + batch_size]
+        batch_idx = i // batch_size + 1
         try:
             df = yf.download(
                 tickers=batch, start=start.isoformat(), end=end.isoformat(),
                 interval="1d", group_by="ticker", auto_adjust=False,
                 progress=False, threads=True,
             )
-        except Exception:
+        except Exception as e:
+            log.warning("  Batch %d/%d FAIL: %s", batch_idx, n_batches, e)
+            failed_batches += 1
             continue
         if df.empty:
             continue
@@ -181,12 +215,28 @@ def premarket_scan(top_n: int = TOP_N) -> list[TickerState]:
             & (latest["rvol_proxy"] >= RVOL_MIN_PROXY)
         ]
         cands.append(latest)
+        if batch_idx % 5 == 0:
+            cumulative = sum(len(c) for c in cands)
+            log.info("  Batch %d/%d processed; %d candidates so far", batch_idx, n_batches, cumulative)
+
+    log.info("  Failed batches: %d/%d", failed_batches, n_batches)
     if not cands:
+        log.warning("  NO CANDIDATES found — empty result. Possible reasons:")
+        log.warning("    - market closed today (holiday/weekend)")
+        log.warning("    - 5-pillars filter too strict for current market")
+        log.warning("    - yfinance data issues")
         return []
+
     all_cands = pd.concat(cands, ignore_index=True)
+    log.info("  Pre-rank candidates: %d (passed all 5 pillars)", len(all_cands))
     all_cands["score"] = all_cands["rvol_proxy"] * all_cands["intraday_pct"]
     all_cands = all_cands.sort_values("score", ascending=False).head(top_n)
-    log.info("  Top-%d candidates: %s", top_n, all_cands["ticker"].tolist())
+    log.info("=" * 60)
+    log.info("TOP-%d WATCHLIST:", top_n)
+    for rank, row in enumerate(all_cands.itertuples(), start=1):
+        log.info("  #%d %s  $%.2f  +%.1f%%  RVOL %.1fx  score=%.0f",
+                 rank, row.ticker, row.close, row.intraday_pct, row.rvol_proxy, row.score)
+    log.info("=" * 60)
     return [
         TickerState(symbol=row.ticker, rank=int(rank+1), score=float(row.score))
         for rank, row in enumerate(all_cands.itertuples())
@@ -353,48 +403,121 @@ class Bot:
         log.info("=" * 60)
         log.info("CAMERON-BOT START — paper trading")
         log.info("=" * 60)
+
+        # 0. Connection Pre-Check
+        try:
+            equity = self.executor.get_equity()
+            log.info("Alpaca-Connection OK — Account-Equity: $%.2f", equity)
+        except Exception as e:
+            log.error("Alpaca-Connection FAIL: %s", e, exc_info=True)
+            return
+
         # 1. Premarket-Scan
         candidates = await asyncio.to_thread(premarket_scan, TOP_N)
         if not candidates:
-            log.error("No premarket candidates — abort")
+            log.warning("=" * 60)
+            log.warning("KEINE WATCHLIST heute — wahrscheinlich Markt-Holiday oder Filter zu streng")
+            log.warning("Bot beendet diesen Trading-Tag, schlaeft bis morgen")
+            log.warning("=" * 60)
             return
         for ts in candidates:
             self.tickers[ts.symbol] = ts
             self.logger.log({"event": "watchlist", **asdict(ts), "bars": []})
 
         # 2. Live Bar-Stream Subscribe
-        equity = self.executor.get_equity()
-        log.info("Account equity: $%.2f", equity)
-        log.info("Watching: %s", [t.symbol for t in self.tickers.values()])
-
-        ws = StockDataStream(self.api_key, self.api_secret, feed="iex")  # free tier IEX
-        symbols = list(self.tickers.keys())
+        log.info("Subscribing to Alpaca-WS for %d symbols (IEX-Feed)…", len(self.tickers))
 
         async def on_bar(bar):
-            await self.handle_bar(bar)
+            self.day.bars_received += 1
+            try:
+                await self.handle_bar(bar)
+            except Exception as e:
+                log.error("handle_bar error for %s: %s", bar.symbol, e, exc_info=True)
 
-        ws.subscribe_bars(on_bar, *symbols)
-
-        # 3. Time-Cuts-Loop läuft parallel
-        async def time_loop():
+        # 3. Time-Cuts + Health-Check Loop läuft parallel
+        async def time_and_health_loop():
+            last_health = datetime.now(NY_TZ)
             while True:
-                ny = datetime.now(tz=timezone(timedelta(hours=-4)))  # ET fixed (no DST handling — ok for paper)
+                ny = datetime.now(NY_TZ)
+                # Hard-Flat
                 if ny.time() >= TIME_HARD_FLAT:
-                    log.info("12:00 ET — hard flat all positions")
+                    log.info("=" * 60)
+                    log.info("12:00 ET (18:00 CET) — HARD FLAT")
+                    log.info("=" * 60)
                     self.executor.market_close_all()
+                    self._log_day_summary()
                     await asyncio.sleep(60)
                     return
+                # Health-Check alle 15 Min
+                if (ny - last_health).total_seconds() >= 900:
+                    self._log_health()
+                    last_health = ny
                 await asyncio.sleep(30)
 
-        # 4. Run WS + Time-Loop concurrently
+        # 4. WebSocket mit Auto-Reconnect
+        async def ws_loop():
+            while True:
+                try:
+                    ws = StockDataStream(self.api_key, self.api_secret, feed="iex")
+                    ws.subscribe_bars(on_bar, *list(self.tickers.keys()))
+                    log.info("WS connected, listening…")
+                    await asyncio.to_thread(ws.run)
+                    log.warning("WS disconnected — reconnect in 5s")
+                except Exception as e:
+                    self.day.ws_reconnects += 1
+                    log.error("WS error (#%d): %s — reconnect in 10s",
+                              self.day.ws_reconnects, e, exc_info=True)
+                # Stop reconnecting if hard-flat reached
+                if datetime.now(NY_TZ).time() >= TIME_HARD_FLAT:
+                    return
+                await asyncio.sleep(10)
+
         try:
-            await asyncio.gather(
-                asyncio.to_thread(ws.run),
-                time_loop(),
-            )
+            await asyncio.gather(ws_loop(), time_and_health_loop())
         except KeyboardInterrupt:
-            log.info("KeyboardInterrupt — closing")
+            log.info("KeyboardInterrupt — closing all positions")
             self.executor.market_close_all()
+            self._log_day_summary()
+        except Exception as e:
+            log.error("Bot.run unhandled error: %s", e, exc_info=True)
+            self.executor.market_close_all()
+            self._log_day_summary()
+
+    def _log_health(self):
+        """Periodic health-check log."""
+        d = self.day
+        log.info("─" * 60)
+        log.info("HEALTH @ %s | Bars=%d Patterns=%d Orders=%d/%d-fail PnL=$%.2f WSRecon=%d",
+                 datetime.now(NY_TZ).strftime("%H:%M ET"),
+                 d.bars_received, d.patterns_detected,
+                 d.orders_submitted, d.orders_failed,
+                 d.realized_pnl, d.ws_reconnects)
+        # Tickers receiving bars?
+        active = sum(1 for t in self.tickers.values() if len(t.bars) > 0)
+        log.info("  Active tickers: %d/%d (got bars)", active, len(self.tickers))
+        for sym, t in self.tickers.items():
+            if t.in_position:
+                log.info("  POSITION %s: %d shares @ $%.2f, stop $%.2f, T1 $%.2f, T2 $%.2f, half-filled=%s",
+                         sym, t.shares, t.entry_price, t.stop_price,
+                         t.target1_price, t.target2_price, t.half_filled)
+        log.info("─" * 60)
+
+    def _log_day_summary(self):
+        d = self.day
+        log.info("=" * 60)
+        log.info("DAY SUMMARY")
+        log.info("  Realized PnL:       $%.2f", d.realized_pnl)
+        log.info("  Peak PnL:           $%.2f", d.peak_pnl)
+        log.info("  Bars received:      %d", d.bars_received)
+        log.info("  Patterns detected:  %d", d.patterns_detected)
+        log.info("    rej MACD:         %d", d.patterns_rejected_macd)
+        log.info("    rej FBO:          %d", d.patterns_rejected_fbo)
+        log.info("    rej Pullback#3:   %d", d.patterns_rejected_pullback_count)
+        log.info("    rej Size=0:       %d", d.patterns_rejected_size_zero)
+        log.info("  Orders submitted:   %d (%d failed)", d.orders_submitted, d.orders_failed)
+        log.info("  Consec losses:      %d (spiral=%s)", d.consecutive_losses, d.spiral_locked)
+        log.info("  WS reconnects:      %d", d.ws_reconnects)
+        log.info("=" * 60)
 
     async def handle_bar(self, bar):
         sym = bar.symbol
@@ -422,22 +545,36 @@ class Bot:
         signal, params = detect_bull_flag(list(ts.bars))
         if not signal:
             return
+        self.day.patterns_detected += 1
+        log.info("PATTERN %s: pole=%dx flag=%dx height=$%.2f → entry $%.2f stop $%.2f",
+                 sym, params["pole_candles"], params["flag_candles"],
+                 params["pole_height"], params["entry_price"], params["stop_price"])
 
         # Pullback-count check (3rd+ pullback skip)
         ts.pullback_count_today += 1
         if ts.pullback_count_today >= 3:
-            log.info("%s skip: 3rd+ pullback", sym)
+            self.day.patterns_rejected_pullback_count += 1
+            log.info("  REJECT %s: 3rd+ pullback today (#%d)", sym, ts.pullback_count_today)
             return
 
         # Position-Size
         equity = self.executor.get_equity()
         shares = compute_position_size(params["entry_price"], params["stop_price"], equity, self.day)
         if shares < 1:
-            log.info("%s skip: shares < 1 (entry %.2f stop %.2f)", sym, params["entry_price"], params["stop_price"])
+            self.day.patterns_rejected_size_zero += 1
+            log.info("  REJECT %s: size=0 (entry $%.2f stop $%.2f risk-per-share $%.2f → max-shares 0)",
+                     sym, params["entry_price"], params["stop_price"],
+                     params["entry_price"] - params["stop_price"])
             return
 
         # Submit
+        log.info("  SUBMITTING BUY %s %d shares @ $%.2f (rank=%d)",
+                 sym, shares, params["entry_price"], ts.rank)
         order_id = self.executor.submit_buy_limit(sym, shares, params["entry_price"])
+        if order_id:
+            self.day.orders_submitted += 1
+        else:
+            self.day.orders_failed += 1
         if order_id:
             ts.in_position = True
             ts.entry_price = params["entry_price"]
