@@ -84,10 +84,28 @@ TIME_NEW_ENTRIES_END = dtime(11, 30)
 TIME_HARD_FLAT = dtime(12, 0)
 TIME_RTH_START = dtime(9, 30)
 
-# Intraday Re-Scan (Cameron-Workflow: kontinuierlich neu ranken)
-RESCAN_INTERVAL_MINUTES_FAST = 10   # erste Stunde alle 10 Min
-RESCAN_INTERVAL_MINUTES_NORMAL = 15  # danach alle 15 Min
+# Re-Scan-Strategie: zwei Schichten, ALIGNED zu round-5-Min boundaries
+# SLOW: yfinance Universe-Pull, ~3 Min Laufzeit → 180 Sek Head-Start
+# FAST: Alpaca Snapshot, <1 Sek → 5 Sek Head-Start
+SCAN_HEAD_START_SLOW_SEC = 180  # yfinance scan dauer
+SCAN_HEAD_START_FAST_SEC = 5    # Alpaca snapshot dauer
+RESCAN_SLOW_INTERVAL_MIN = 5    # alle 5 Min finish bei :00, :05, :10, :15, :20...
+RESCAN_FAST_INTERVAL_MIN = 1    # alle 1 Min Alpaca-Re-Rank
 RESCAN_FAST_PHASE_END = dtime(10, 30)  # Power-Hour Ende
+
+
+def aligned_scan_start(now: datetime, period_min: int, head_start_sec: int) -> datetime:
+    """Returns next datetime where scan must START to FINISH at next round boundary.
+
+    Beispiel: period_min=5, head_start=180 → finish bei :00, :05, :10, :15, ...
+    Start bei :02:00, :07:00, :12:00, :17:00, :22:00, :27:00, :32:00 ...
+    """
+    minutes_past = now.minute % period_min
+    next_boundary = now.replace(second=0, microsecond=0) + timedelta(minutes=period_min - minutes_past)
+    start = next_boundary - timedelta(seconds=head_start_sec)
+    if start <= now:
+        start = next_boundary + timedelta(minutes=period_min) - timedelta(seconds=head_start_sec)
+    return start
 
 DATA_DIR = Path(__file__).parent
 
@@ -443,8 +461,15 @@ class Bot:
         self._pending_ws_resubscribe = False
 
         async def time_and_health_loop():
-            last_health = datetime.now(NY_TZ)
-            last_rescan = datetime.now(NY_TZ)
+            ny0 = datetime.now(NY_TZ)
+            last_health = ny0
+            slow_next_at = aligned_scan_start(ny0, RESCAN_SLOW_INTERVAL_MIN, SCAN_HEAD_START_SLOW_SEC)
+            fast_next_at = aligned_scan_start(ny0, RESCAN_FAST_INTERVAL_MIN, SCAN_HEAD_START_FAST_SEC)
+            log.info("Aligned-Schedule:")
+            log.info("  SLOW yfinance: next start at %s ET (finishes ~:%02d:00)",
+                     slow_next_at.strftime("%H:%M:%S"),
+                     (slow_next_at + timedelta(seconds=SCAN_HEAD_START_SLOW_SEC)).minute)
+            log.info("  FAST alpaca:   next start at %s ET", fast_next_at.strftime("%H:%M:%S"))
             while True:
                 ny = datetime.now(NY_TZ)
                 # Hard-Flat
@@ -456,16 +481,23 @@ class Bot:
                     self._log_day_summary()
                     await asyncio.sleep(60)
                     return
-                # Intraday-Re-Scan
-                interval = RESCAN_INTERVAL_MINUTES_FAST if ny.time() <= RESCAN_FAST_PHASE_END else RESCAN_INTERVAL_MINUTES_NORMAL
-                if (ny - last_rescan).total_seconds() >= interval * 60:
+                # SLOW Re-Scan (aligned to 5-min boundary, finishes AT round time)
+                if ny >= slow_next_at:
                     await self.intraday_rescan()
-                    last_rescan = ny
+                    slow_next_at = aligned_scan_start(datetime.now(NY_TZ),
+                                                     RESCAN_SLOW_INTERVAL_MIN,
+                                                     SCAN_HEAD_START_SLOW_SEC)
+                # FAST Re-Scan (aligned to 1-min boundary)
+                if ny >= fast_next_at:
+                    await self.fast_rescan_via_alpaca()
+                    fast_next_at = aligned_scan_start(datetime.now(NY_TZ),
+                                                     RESCAN_FAST_INTERVAL_MIN,
+                                                     SCAN_HEAD_START_FAST_SEC)
                 # Health-Check alle 15 Min
                 if (ny - last_health).total_seconds() >= 900:
                     self._log_health()
                     last_health = ny
-                await asyncio.sleep(30)
+                await asyncio.sleep(2)  # tighter loop für besseres Alignment
 
         # 4. WebSocket mit Auto-Reconnect + Re-Subscribe bei Watchlist-Update
         async def ws_loop():
@@ -508,10 +540,47 @@ class Bot:
             self.executor.market_close_all()
             self._log_day_summary()
 
+    async def fast_rescan_via_alpaca(self):
+        """Fast-Re-Rank via Alpaca-Snapshot für aktuelle Watchlist + naher Pool."""
+        from alpaca.data.requests import StockSnapshotRequest
+        try:
+            # Snapshot für aktuelle Watchlist
+            symbols = list(self.tickers.keys())
+            if not symbols:
+                return
+            data_client = StockHistoricalDataClient(self.api_key, self.api_secret)
+            req = StockSnapshotRequest(symbol_or_symbols=symbols)
+            snaps = data_client.get_stock_snapshot(req)
+            log.info("FAST RESCAN @ %s — Alpaca-snapshot for %d symbols",
+                     datetime.now(NY_TZ).strftime("%H:%M ET"), len(snaps))
+            for sym, snap in snaps.items():
+                if sym not in self.tickers: continue
+                bar = snap.daily_bar
+                if bar and bar.close:
+                    prev = snap.previous_daily_bar
+                    if prev and prev.close:
+                        intraday_pct = (bar.high - prev.close) / prev.close * 100
+                        new_score = bar.volume / max(prev.volume, 1) * intraday_pct
+                        old_score = self.tickers[sym].score
+                        if abs(new_score - old_score) > old_score * 0.2:
+                            log.info("  SCORE CHANGE %s: %.0f → %.0f (%+.1f%%)",
+                                     sym, old_score, new_score,
+                                     (new_score - old_score) / old_score * 100 if old_score else 0)
+                            self.tickers[sym].score = new_score
+            # Re-rank within current watchlist
+            sorted_syms = sorted(self.tickers.values(), key=lambda x: -x.score)
+            for new_rank, ts in enumerate(sorted_syms, start=1):
+                if ts.rank != new_rank:
+                    log.info("  RE-RANK %s: #%d → #%d", ts.symbol, ts.rank, new_rank)
+                    ts.rank = new_rank
+        except Exception as e:
+            log.warning("fast rescan failed: %s", e)
+
     async def intraday_rescan(self):
-        """Re-scan + update self.tickers. Behalte Stocks mit offenen Positions."""
+        """Slow Re-scan via yfinance Universe-Pull."""
         log.info("─" * 60)
-        log.info("INTRADAY RE-SCAN @ %s", datetime.now(NY_TZ).strftime("%H:%M ET"))
+        log.info("SLOW RE-SCAN @ %s (yfinance universe pull)",
+                 datetime.now(NY_TZ).strftime("%H:%M ET"))
         try:
             new_candidates = await asyncio.to_thread(premarket_scan, TOP_N)
         except Exception as e:
@@ -891,15 +960,20 @@ PREMARKET_SCAN_TIME = dtime(6, 30)      # 06:30 ET = 12:30 CET
 
 
 def next_premarket_start() -> datetime:
-    """Returns next 06:30 ET datetime. Skips weekends."""
+    """Returns time when bot must START premarket scan such that watchlist ready BY 06:30 ET.
+
+    Premarket scan dauert ~3 Min, also 06:27 ET starten → 06:30 ready.
+    Skips weekends.
+    """
     ny_now = datetime.now(NY_TZ)
-    candidate = ny_now.replace(hour=6, minute=30, second=0, microsecond=0)
-    if candidate <= ny_now:
-        candidate += timedelta(days=1)
-    # Skip weekends (Sa=5, So=6)
-    while candidate.weekday() >= 5:
-        candidate += timedelta(days=1)
-    return candidate
+    target_finish = ny_now.replace(hour=6, minute=30, second=0, microsecond=0)
+    if target_finish <= ny_now:
+        target_finish += timedelta(days=1)
+    # Skip weekends
+    while target_finish.weekday() >= 5:
+        target_finish += timedelta(days=1)
+    # Subtract head-start so scan FINISHES at 06:30 ET
+    return target_finish - timedelta(seconds=SCAN_HEAD_START_SLOW_SEC)
 
 
 async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
