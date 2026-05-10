@@ -33,3 +33,9 @@ desktop.ini
 # Logs
 *.log
 logs/
+
+# Bot runtime files (constantly updated)
+06_live_bot/heartbeat.txt
+06_live_bot/*.log
+06_live_bot/trades_live.jsonl
+06_live_bot/data_pilot/
