@@ -668,6 +668,55 @@ def status_check():
         print(f"  {o.created_at.strftime('%H:%M')} {o.side} {o.qty} {o.symbol} @ ${o.limit_price or 'mkt'} → {o.status}")
 
 
+# ─── Daemon Mode (sleep until premarket, run one day, repeat) ──────────────
+NY_TZ = timezone(timedelta(hours=-4))   # ET fixed (Mai = EDT)
+PREMARKET_SCAN_TIME = dtime(6, 30)      # 06:30 ET = 12:30 CET
+
+
+def next_premarket_start() -> datetime:
+    """Returns next 06:30 ET datetime. Skips weekends."""
+    ny_now = datetime.now(NY_TZ)
+    candidate = ny_now.replace(hour=6, minute=30, second=0, microsecond=0)
+    if candidate <= ny_now:
+        candidate += timedelta(days=1)
+    # Skip weekends (Sa=5, So=6)
+    while candidate.weekday() >= 5:
+        candidate += timedelta(days=1)
+    return candidate
+
+
+async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
+    """Endlosschleife: warte bis Premarket, traden, warte bis nächster Tag."""
+    log.info("=" * 60)
+    log.info("DAEMON MODE — runs until you Ctrl+C or PC sleeps")
+    log.info("=" * 60)
+    while True:
+        next_start = next_premarket_start()
+        ny_now = datetime.now(NY_TZ)
+        wait_sec = (next_start - ny_now).total_seconds()
+        wait_hours = wait_sec / 3600
+        log.info("Next premarket-scan: %s ET (in %.1f hours)", next_start.strftime("%Y-%m-%d %H:%M"), wait_hours)
+        log.info("Sleeping… (Ctrl+C to stop)")
+
+        # Sleep in 60-sec-chunks so KeyboardInterrupt responds
+        while datetime.now(NY_TZ) < next_start:
+            try:
+                await asyncio.sleep(60)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                log.info("Daemon stopped by user")
+                return
+
+        log.info("=" * 60)
+        log.info("PREMARKET TIME — starting one trading day")
+        log.info("=" * 60)
+        try:
+            bot = Bot(api_key, api_secret, dry_run=dry_run)
+            await bot.run()
+        except Exception as e:
+            log.error("Trading day errored: %s — sleeping until next day", e, exc_info=True)
+        log.info("Trading day done. Looping for next session.")
+
+
 # ─── CLI ────────────────────────────────────────────────────────────────────
 def main():
     p = argparse.ArgumentParser()
@@ -676,6 +725,7 @@ def main():
     p.add_argument("--replay", type=str, help="Historical replay YYYY-MM-DD aus pilot-data")
     p.add_argument("--check-connection", action="store_true", help="Alpaca-Auth verifizieren")
     p.add_argument("--status", action="store_true", help="Account + Positions anzeigen")
+    p.add_argument("--daemon", action="store_true", help="Endlos-Modus: warte auf nächste Session, tradeen, repeat")
     args = p.parse_args()
 
     if args.check_connection:
@@ -704,6 +754,10 @@ def main():
         log.error("Or use --replay YYYY-MM-DD for offline-test")
         log.error("Or use --scan-only for pure scanner test")
         log.error("Alpaca paper signup: https://app.alpaca.markets/signup")
+        return
+
+    if args.daemon:
+        asyncio.run(daemon_run(api_key, api_secret, dry_run=args.dry_run))
         return
 
     bot = Bot(api_key, api_secret, dry_run=args.dry_run)
