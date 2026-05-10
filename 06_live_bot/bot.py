@@ -1191,6 +1191,12 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
                          remaining_h,
                          (next_start + timedelta(hours=6)).strftime("%H:%M"))
                 last_heartbeat = now
+            # Heartbeat-File für externe Watchdogs (jede 60s aktualisiert)
+            try:
+                hb_file = Path(__file__).parent / "heartbeat.txt"
+                hb_file.write_text(now.strftime("%Y-%m-%d %H:%M:%S NY"), encoding="utf-8")
+            except Exception:
+                pass
 
         log.info("=" * 60)
         log.info("PREMARKET TIME — starting one trading day")
