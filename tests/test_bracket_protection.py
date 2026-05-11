@@ -1,0 +1,120 @@
+"""Tests: jede Position MUSS broker-seitig Stop + Take-Profit haben.
+
+Garantiert dass wir nie 'nackt' im Markt sind: kein submit_buy ohne stop+tp,
+T1-Partial re-protected die Restposition, Pyramiding-Add re-protected,
+in-script-Sell cancelt erst Children.
+"""
+from __future__ import annotations
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "06_live_bot"))
+
+
+# ─── Executor.submit_bracket_buy ─────────────────────────────────────────────
+def test_executor_bracket_buy_sends_stop_and_tp():
+    import bot
+    ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=False)
+    ex.client = MagicMock()
+    fake_order = MagicMock(id="abc-123")
+    ex.client.submit_order.return_value = fake_order
+    rid = ex.submit_bracket_buy("AAA", 10, entry=10.0, stop=9.0, take_profit=12.0)
+    assert rid == "abc-123"
+    call = ex.client.submit_order.call_args[0][0]
+    # Bracket-Konfiguration
+    from alpaca.trading.enums import OrderClass
+    assert call.order_class == OrderClass.BRACKET
+    assert call.stop_loss.stop_price == 9.0
+    assert call.take_profit.limit_price == 12.0
+    assert call.qty == 10
+
+
+def test_executor_dry_run_bracket_no_real_call():
+    import bot
+    ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=True)
+    ex.client = MagicMock()
+    rid = ex.submit_bracket_buy("AAA", 5, 10, 9, 12)
+    assert rid is not None
+    ex.client.submit_order.assert_not_called()
+
+
+# ─── cancel_open_orders_for ──────────────────────────────────────────────────
+def test_cancel_open_orders_iterates():
+    import bot
+    ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=False)
+    ex.client = MagicMock()
+    ex.client.get_orders.return_value = [MagicMock(id="o1"), MagicMock(id="o2")]
+    n = ex.cancel_open_orders_for("AAA")
+    assert n == 2
+    assert ex.client.cancel_order_by_id.call_count == 2
+
+
+# ─── protect_position ────────────────────────────────────────────────────────
+def test_protect_position_cancels_then_resubmits_stop_and_tp():
+    import bot
+    ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=False)
+    ex.client = MagicMock()
+    ex.client.get_orders.return_value = []
+    ex.protect_position("AAA", 5, stop=9.0, take_profit=11.0)
+    # Mindestens zwei submits: Stop + TP
+    sides = [c[0][0] for c in ex.client.submit_order.call_args_list]
+    assert len(sides) == 2
+    # Eine ist Stop, eine Limit
+    has_stop = any(getattr(s, "stop_price", None) == 9.0 for s in sides)
+    has_tp   = any(getattr(s, "limit_price", None) == 11.0 for s in sides)
+    assert has_stop and has_tp
+
+
+# ─── submit_sell_limit cancelt erst Children ─────────────────────────────────
+def test_sell_limit_cancels_brackets_first():
+    import bot
+    ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=False)
+    ex.client = MagicMock()
+    ex.client.get_orders.return_value = [MagicMock(id="bracket-1")]
+    ex.client.submit_order.return_value = MagicMock(id="sell-id")
+    ex.submit_sell_limit("AAA", 5, 10.5, "T1_50pct")
+    # Cancel-Bracket vorher passiert
+    ex.client.cancel_order_by_id.assert_called_with("bracket-1")
+    # Dann sell submit
+    ex.client.submit_order.assert_called_once()
+
+
+# ─── Bot.try_enter benutzt Bracket statt plain BUY ───────────────────────────
+def test_bot_entry_uses_bracket_in_source():
+    src = (ROOT / "06_live_bot" / "bot.py").read_text(encoding="utf-8")
+    assert "submit_bracket_buy" in src
+    # Im pattern-entry-Block (sucht nach "SUBMITTING BRACKET-BUY"):
+    assert "SUBMITTING BRACKET-BUY" in src
+
+
+def test_t1_partial_reprotects_remaining():
+    """Nach T1-Partial muss protect_position für Rest aufgerufen werden."""
+    src = (ROOT / "06_live_bot" / "bot.py").read_text(encoding="utf-8")
+    idx = src.find("submit_sell_limit(ts.symbol, half, ts.target1_price")
+    assert idx > 0
+    after = src[idx: idx + 600]
+    assert "protect_position" in after
+
+
+def test_pyramiding_add_reprotects():
+    """Nach Add: Bracket der originalen Position covert nicht mehr alle Shares
+    → protect_position auf gesamte neue Position."""
+    src = (ROOT / "06_live_bot" / "bot.py").read_text(encoding="utf-8")
+    idx = src.find("Move stop to BE on first add")
+    assert idx > 0
+    after = src[idx: idx + 500]
+    assert "protect_position" in after
+
+
+# ─── Smoke: Bot importiert weiterhin ────────────────────────────────────────
+def test_bot_imports():
+    import bot
+    assert hasattr(bot, "AlpacaExecutor")
+    ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=True)
+    assert hasattr(ex, "submit_bracket_buy")
+    assert hasattr(ex, "protect_position")
+    assert hasattr(ex, "cancel_open_orders_for")

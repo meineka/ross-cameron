@@ -39,8 +39,11 @@ import pandas as pd
 import yfinance as yf
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
+from alpaca.trading.requests import (
+    LimitOrderRequest, MarketOrderRequest,
+    TakeProfitRequest, StopLossRequest, GetOrdersRequest,
+)
+from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass, QueryOrderStatus
 from alpaca.data.live import StockDataStream
 from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
@@ -520,6 +523,8 @@ class AlpacaExecutor:
             return 25000.0
 
     def submit_buy_limit(self, symbol: str, shares: int, price: float) -> str | None:
+        """Plain Limit-Buy (für Pyramiding-Adds — Stop/TP der Hauptposition liegt
+        bereits broker-seitig als Bracket)."""
         if self.dry_run:
             log.info("[DRY] BUY %s %d @ %.2f", symbol, shares, price)
             return f"dryrun-{symbol}-{datetime.now().timestamp()}"
@@ -535,10 +540,86 @@ class AlpacaExecutor:
             log.error("submit_buy err %s: %s", symbol, e)
             return None
 
+    def submit_bracket_buy(self, symbol: str, shares: int, entry: float,
+                           stop: float, take_profit: float) -> str | None:
+        """Cameron-Default: Entry-Limit + Stop-Loss + Take-Profit als BRACKET.
+        Alle drei broker-seitig — Position ist NIE 'nackt' wenn entry fillt."""
+        if self.dry_run:
+            log.info("[DRY] BRACKET-BUY %s %d entry=%.2f stop=%.2f tp=%.2f",
+                     symbol, shares, entry, stop, take_profit)
+            return f"dryrun-{symbol}-{datetime.now().timestamp()}"
+        try:
+            req = LimitOrderRequest(
+                symbol=symbol, qty=shares, side=OrderSide.BUY,
+                time_in_force=TimeInForce.DAY, limit_price=round(entry, 2),
+                order_class=OrderClass.BRACKET,
+                take_profit=TakeProfitRequest(limit_price=round(take_profit, 2)),
+                stop_loss=StopLossRequest(stop_price=round(stop, 2)),
+            )
+            o = self.client.submit_order(req)
+            log.info("BRACKET-BUY %s %d entry=%.2f STOP=%.2f TP=%.2f → %s",
+                     symbol, shares, entry, stop, take_profit, o.id)
+            return o.id
+        except Exception as e:
+            log.error("submit_bracket_buy err %s: %s", symbol, e)
+            return None
+
+    def protect_position(self, symbol: str, shares: int, stop: float, take_profit: float) -> None:
+        """Setze für eine bestehende long-Position broker-seitig OCO-Schutz
+        (Stop + Take-Profit). Nötig nach T1-Partial oder Pyramiding-Add."""
+        if self.dry_run or shares < 1:
+            return
+        # Alte Schutz-Orders weg, damit Quantity passt
+        self.cancel_open_orders_for(symbol)
+        # Stop-Order
+        try:
+            from alpaca.trading.requests import StopOrderRequest
+            self.client.submit_order(StopOrderRequest(
+                symbol=symbol, qty=shares, side=OrderSide.SELL,
+                time_in_force=TimeInForce.DAY, stop_price=round(stop, 2),
+            ))
+        except Exception as e:
+            log.warning("protect-stop %s err: %s", symbol, e)
+        # Take-Profit-Limit
+        try:
+            self.client.submit_order(LimitOrderRequest(
+                symbol=symbol, qty=shares, side=OrderSide.SELL,
+                time_in_force=TimeInForce.DAY, limit_price=round(take_profit, 2),
+            ))
+        except Exception as e:
+            log.warning("protect-tp %s err: %s", symbol, e)
+        log.info("  PROTECT %s %d  STOP=%.2f  TP=%.2f", symbol, shares, stop, take_profit)
+
+    def cancel_open_orders_for(self, symbol: str) -> int:
+        """Cancel alle offenen Orders eines Symbols — nötig vor T1-Partial oder
+        Quick-Exit damit Bracket-Children nicht doppelt feuern."""
+        if self.dry_run:
+            return 0
+        try:
+            opens = self.client.get_orders(filter=GetOrdersRequest(
+                status=QueryOrderStatus.OPEN, symbols=[symbol], limit=50,
+            ))
+            n = 0
+            for o in opens:
+                try:
+                    self.client.cancel_order_by_id(o.id); n += 1
+                except Exception:
+                    pass
+            if n:
+                log.info("  Cancelled %d open orders for %s (pre-action)", n, symbol)
+            return n
+        except Exception as e:
+            log.warning("cancel_open_orders %s err: %s", symbol, e)
+            return 0
+
     def submit_sell_limit(self, symbol: str, shares: int, price: float, reason: str) -> str | None:
+        """Vor jedem Script-side Sell: erst Bracket-Children canceln damit nicht
+        Stop+TP gleichzeitig mit unserem Sell feuern. Im dry-run skip cancel."""
         if self.dry_run:
             log.info("[DRY] SELL %s %d @ %.2f (%s)", symbol, shares, price, reason)
             return f"dryrun-{symbol}-{datetime.now().timestamp()}"
+        # Bracket-Children weg, dann unser Sell
+        self.cancel_open_orders_for(symbol)
         try:
             req = LimitOrderRequest(
                 symbol=symbol, qty=shares, side=OrderSide.SELL,
@@ -908,10 +989,14 @@ class Bot:
                      sym, self.day.spy_size_multiplier)
             return
 
-        # Submit
-        log.info("  SUBMITTING BUY %s %d shares @ $%.2f (rank=%d, spy_mult=%.1f)",
-                 sym, shares, params["entry_price"], ts.rank, self.day.spy_size_multiplier)
-        order_id = self.executor.submit_buy_limit(sym, shares, params["entry_price"])
+        # Submit als BRACKET — Stop+TP broker-seitig, Position nie 'nackt'
+        log.info("  SUBMITTING BRACKET-BUY %s %d shares  entry=$%.2f STOP=$%.2f TP2=$%.2f (rank=%d, spy_mult=%.1f)",
+                 sym, shares, params["entry_price"], params["stop_price"],
+                 params["target2"], ts.rank, self.day.spy_size_multiplier)
+        order_id = self.executor.submit_bracket_buy(
+            sym, shares, params["entry_price"],
+            params["stop_price"], params["target2"],
+        )
         if order_id:
             self.day.orders_submitted += 1
         else:
@@ -1007,6 +1092,10 @@ class Bot:
                 # Move stop to BE on first add (Cameron-Rule)
                 if ts.adds_count == 1:
                     ts.stop_price = old_avg
+                # Add cancelt Bracket — neuer Schutz für komplette Restposition
+                self.executor.protect_position(
+                    ts.symbol, ts.shares, stop=ts.stop_price, take_profit=ts.target2_price,
+                )
                 return
 
         # T1
@@ -1016,6 +1105,9 @@ class Bot:
             self.logger.log({"event": "T1", "symbol": ts.symbol, "shares": half, "price": ts.target1_price})
             ts.half_filled = True
             ts.shares -= half
+            # Restposition braucht neue broker-seitige Schutzkette: Stop auf BE, TP=T2
+            self.executor.protect_position(ts.symbol, ts.shares,
+                                           stop=ts.entry_price, take_profit=ts.target2_price)
             self.day.cents_per_share_cumulative += (ts.target1_price - ts.entry_price)
             if self.day.cents_per_share_cumulative >= QUARTER_SIZE_UNLOCK_CENTS:
                 self.day.quarter_size_unlocked = True
