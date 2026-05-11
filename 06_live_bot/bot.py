@@ -57,6 +57,9 @@ from status_dashboard import write_status
 from day_summary_persist import write_day_summary
 from position_recovery import recover_or_flatten
 from vwap_filter import is_above_vwap
+from float_filter import passes_float_filter
+from indicators import macd_is_bullish, macd_bear_cross, false_breakout_veto
+from catalyst_filter import passes_catalyst_filter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,7 +74,12 @@ log = logging.getLogger("bot")
 # ─── Cameron-Constants (mirror constraints.yaml) ────────────────────────────
 PRICE_MIN, PRICE_MAX = 2.0, 20.0
 DAILY_GAIN_MIN_PCT = 10.0
-RVOL_MIN_PROXY = 2.0
+RVOL_MIN_PROXY = 5.0  # Cameron-strict (war fälschlich 2.0)
+FLOAT_MAX_SHARES = 10_000_000  # 5. Cameron-Pillar
+CATALYST_REQUIRED = True  # 5. Cameron-Pillar
+POWER_HOUR_END = dtime(10, 30)
+POWER_HOUR_SIZE_MULT = 1.0
+POST_POWER_SIZE_MULT = 0.75
 TOP_N = 10
 TIMEFRAME = "5Min"
 
@@ -309,9 +317,26 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
         return []
 
     all_cands = pd.concat(cands, ignore_index=True)
-    log.info("  Pre-rank candidates: %d (passed all 5 pillars)", len(all_cands))
+    log.info("  Pre-rank candidates: %d (price/RVOL/%%)", len(all_cands))
+
+    # Cameron-Pillar 2 (Float) + Pillar 5 (Catalyst) — die fehlenden zwei
     all_cands["score"] = all_cands["rvol_proxy"] * all_cands["intraday_pct"]
-    all_cands = all_cands.sort_values("score", ascending=False).head(top_n)
+    all_cands = all_cands.sort_values("score", ascending=False).head(top_n * 3)
+
+    filtered = []
+    for row in all_cands.itertuples():
+        sym = row.ticker
+        if not passes_float_filter(sym, FLOAT_MAX_SHARES):
+            log.info("    REJECT %s (float > %s)", sym, f"{FLOAT_MAX_SHARES:,}")
+            continue
+        if CATALYST_REQUIRED and not passes_catalyst_filter(sym):
+            log.info("    REJECT %s (no recent catalyst)", sym)
+            continue
+        filtered.append(row)
+        if len(filtered) >= top_n:
+            break
+    log.info("  Post-Float+Catalyst-Filter: %d / %d", len(filtered), len(all_cands))
+    all_cands = pd.DataFrame(filtered) if filtered else all_cands.head(0)
     log.info("=" * 60)
     log.info("TOP-%d WATCHLIST:", top_n)
     for rank, row in enumerate(all_cands.itertuples(), start=1):
@@ -383,6 +408,18 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
                 t2 = max(t2_mech, next_half) if next_half > ep + 0.05 else t2_mech
             else:
                 t2 = t2_mech
+            # ─── Cameron-Vetos (heute gefixt) ─────────────────────────────
+            # VWAP: Cameron tradet nur über Session-VWAP
+            if not is_above_vwap(bars, c[i]):
+                return False, {"_veto": "vwap"}
+            # MACD 12/26/9: bullish + over zero-line
+            if not macd_is_bullish(c.tolist()):
+                return False, {"_veto": "macd"}
+            # FBO-5-Indicator
+            vetoed, why = false_breakout_veto(bars)
+            if vetoed:
+                return False, {"_veto": f"fbo_{why}"}
+
             return True, {
                 "entry_price": float(ep),
                 "stop_price": float(sp),
@@ -396,13 +433,24 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
 
 
 # ─── Risk-Engine ────────────────────────────────────────────────────────────
-def compute_position_size(entry: float, stop: float, account_equity: float, day: DayState) -> int:
+def compute_position_size(
+    entry: float, stop: float, account_equity: float, day: DayState,
+    *, avg_volume: float | None = None, ny_time: dtime | None = None,
+) -> int:
     if entry <= stop: return 0
     risk_per_share = entry - stop
     max_shares = int(MAX_LOSS_PER_TRADE_USD / risk_per_share)
     # Quarter-Size-Rule
     if not day.quarter_size_unlocked:
         max_shares = max_shares // 4
+    # Power-Hour-Boost: 9:30-10:30 full, danach 75%
+    if ny_time is not None:
+        mult = POWER_HOUR_SIZE_MULT if ny_time < POWER_HOUR_END else POST_POWER_SIZE_MULT
+        max_shares = int(max_shares * mult)
+    # Liquidity-Cap: max 1% of avg-daily-volume (Cameron 'Whales-in-Pond')
+    if avg_volume and avg_volume > 0:
+        cap = int(avg_volume * LIQUIDITY_CAP_PCT_OF_AVG_VOL / 100)
+        max_shares = min(max_shares, cap)
     return max(0, max_shares)
 
 
@@ -892,6 +940,27 @@ class Bot:
 
     async def manage_position(self, ts: TickerState, bar: dict, ny_time: dtime):
         ts.bars_since_entry += 1
+
+        # Cameron MACD-Exit: bei bear-cross sofort raus (fade-away-Schutz)
+        closes_now = [b["close"] for b in ts.bars]
+        if len(closes_now) >= 30 and macd_bear_cross(closes_now):
+            self.executor.submit_sell_limit(
+                ts.symbol, ts.shares, bar["close"] - SLIPPAGE_CENTS, "macd_bear_cross"
+            )
+            pnl = (bar["close"] - ts.entry_price) * ts.shares
+            self.day.realized_pnl += pnl
+            self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
+            self.day.trades_completed_today += 1
+            if pnl <= 0:
+                self.day.consecutive_losses += 1
+                if self.day.consecutive_losses >= 2:
+                    self.day.spiral_locked = True
+                    log.warning("SPIRAL-DETECTION: 2 consecutive losses → STOP")
+            self.logger.log({"event": "macd_exit", "symbol": ts.symbol,
+                             "shares": ts.shares, "price": bar["close"], "pnl": pnl})
+            log.info("  MACD-EXIT %s @ $%.2f (PnL $%.2f)", ts.symbol, bar["close"], pnl)
+            ts.in_position = False
+            return
 
         # #2 30¢-Quick-Exit: wenn 30c against entry und noch im Frühphase
         if not ts.half_filled and ts.bars_since_entry <= QUICK_EXIT_BARS_LIMIT:
