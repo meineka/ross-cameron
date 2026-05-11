@@ -6,7 +6,6 @@ Nutzung von Auto-Healer:
 """
 from __future__ import annotations
 import sys, io, json, re, argparse
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 from pathlib import Path
 from datetime import datetime, timedelta
 import subprocess
@@ -17,7 +16,9 @@ LOG = HERE / "daemon.log"
 # Error-Categories mit Auto-Fix-Hinweis
 ERROR_PATTERNS = [
     # (regex, kategorie, severity, auto_fixable, fix_hint)
+    (r"possibly delisted|Quote not found for symbol|no price data found|no timezone found", "yfinance_delisted", "info", True, "Symbol delisted — skip"),
     (r"YFRateLimitError|429|Too Many Requests", "yfinance_rate_limit", "low", True, "wartet selbst"),
+    (r"WS error.*'str' object has no attribute 'value'", "ws_api_drift", "critical", False, "alpaca-py erwartet DataFeed-Enum statt String"),
     (r"WS error|WebSocket.*disconnected", "ws_disconnect", "low", True, "auto-reconnect aktiv"),
     (r"Connection refused|Connection reset", "network", "medium", True, "wartet auf reconnect"),
     (r"Alpaca-Connection FAIL", "alpaca_auth", "high", False, "API-keys checken"),
@@ -226,4 +227,5 @@ def main():
 
 
 if __name__ == "__main__":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     main()
