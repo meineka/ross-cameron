@@ -142,13 +142,11 @@ def get_bot_status() -> dict:
 def get_positions_count() -> int:
     """Open positions via Alpaca."""
     try:
-        import os
+        sys.path.insert(0, str(HERE))
+        from secrets_loader import get_alpaca_keys
         from alpaca.trading.client import TradingClient
-        client = TradingClient(
-            os.environ.get("APCA_API_KEY_ID", ""),
-            os.environ.get("APCA_API_SECRET_KEY", ""),
-            paper=True,
-        )
+        k, s = get_alpaca_keys()
+        client = TradingClient(k, s, paper=True)
         return len(client.get_all_positions())
     except Exception:
         return -1
