@@ -39,3 +39,8 @@ logs/
 06_live_bot/*.log
 06_live_bot/trades_live.jsonl
 06_live_bot/data_pilot/
+06_live_bot/.env
+06_live_bot/status.json
+06_live_bot/watchlist_today.json
+06_live_bot/slippage.jsonl
+06_live_bot/results/

@@ -40,8 +40,15 @@ def kill_bot():
 def start_bot() -> int:
     """Startet bot.py --daemon detached, returns PID oder 0 bei Fehler."""
     env = os.environ.copy()
-    env.setdefault("APCA_API_KEY_ID", "PKBERNOMU23XEGRU5SPD3JZGDX")
-    env.setdefault("APCA_API_SECRET_KEY", "FZBBx9v8Pw7eaLRFD8wW51WNnVkWeWNkts2D7zRSaxaB")
+    # Keys werden von secrets_loader (env oder .env) ins Environment geladen
+    try:
+        from secrets_loader import get_alpaca_keys
+        k, s = get_alpaca_keys()
+        env.setdefault("APCA_API_KEY_ID", k)
+        env.setdefault("APCA_API_SECRET_KEY", s)
+    except Exception as e:
+        print(f"[FAIL] secrets_loader: {e}")
+        sys.exit(2)
     log_path = HERE / "daemon.log"
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     with open(log_path, "ab") as logf:

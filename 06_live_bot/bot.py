@@ -47,6 +47,17 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
+# Lokale Module für Verbesserungen
+sys.path.insert(0, str(Path(__file__).parent))
+from pre_flight import run_preflight
+from watchlist_persist import save_watchlist, load_watchlist_if_fresh
+from reconnect_backoff import ReconnectBackoff
+from slippage_log import record_fill
+from status_dashboard import write_status
+from day_summary_persist import write_day_summary
+from position_recovery import recover_or_flatten
+from vwap_filter import is_above_vwap
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
@@ -548,6 +559,14 @@ class Bot:
         for ts in candidates:
             self.tickers[ts.symbol] = ts
             self.logger.log({"event": "watchlist", **asdict(ts), "bars": []})
+        try:
+            save_watchlist(
+                [ts.symbol for ts in candidates],
+                {ts.symbol: ts.score for ts in candidates},
+            )
+            log.info("Watchlist persisted → watchlist_today.json")
+        except Exception as e:
+            log.warning("watchlist-persist failed: %s", e)
 
         # 2. Live Bar-Stream Subscribe
         log.info("Subscribing to Alpaca-WS for %d symbols (IEX-Feed)…", len(self.tickers))
@@ -599,9 +618,15 @@ class Bot:
                 if (ny - last_health).total_seconds() >= 900:
                     self._log_health()
                     last_health = ny
+                # Status-Dashboard alle 30 Sek
+                try:
+                    write_status(self)
+                except Exception:
+                    pass
                 await asyncio.sleep(2)  # tighter loop für besseres Alignment
 
-        # 4. WebSocket mit Auto-Reconnect + Re-Subscribe bei Watchlist-Update
+        # 4. WebSocket mit Auto-Reconnect + Exponential-Backoff + Circuit-Breaker
+        backoff = ReconnectBackoff(base_sec=1.0, cap_sec=60.0, max_consec_fails=8)
         async def ws_loop():
             while True:
                 try:
@@ -610,6 +635,7 @@ class Bot:
                     ws.subscribe_bars(on_bar, *current_symbols)
                     log.info("WS subscribed to %d symbols: %s", len(current_symbols), current_symbols)
                     self._pending_ws_resubscribe = False
+                    backoff.reset()  # successful subscribe → reset Backoff
 
                     # Run WS in thread + monitor for re-subscribe-flag
                     ws_task = asyncio.create_task(asyncio.to_thread(ws.run))
@@ -622,14 +648,17 @@ class Bot:
                             except Exception:
                                 pass
                             break
-                    log.warning("WS disconnected — reconnect in 5s")
+                    log.warning("WS disconnected — reconnect (backoff)")
                 except Exception as e:
                     self.day.ws_reconnects += 1
-                    log.error("WS error (#%d): %s — reconnect in 10s",
-                              self.day.ws_reconnects, e, exc_info=True)
+                    log.error("WS error (#%d): %s", self.day.ws_reconnects, e, exc_info=True)
                 if datetime.now(NY_TZ).time() >= TIME_HARD_FLAT:
                     return
-                await asyncio.sleep(5)
+                try:
+                    await backoff.sleep_after_fail()
+                except RuntimeError as cb:
+                    log.critical("WS Circuit-Breaker: %s — exit ws_loop", cb)
+                    return
 
         try:
             await asyncio.gather(ws_loop(), time_and_health_loop())
@@ -755,6 +784,11 @@ class Bot:
 
     def _log_day_summary(self):
         d = self.day
+        try:
+            out = write_day_summary(d, d.spy_pct_today)
+            log.info("Day summary saved: %s", out)
+        except Exception as e:
+            log.warning("day-summary write failed: %s", e)
         log.info("=" * 60)
         log.info("DAY SUMMARY")
         log.info("  Realized PnL:       $%.2f", d.realized_pnl)
@@ -1166,6 +1200,18 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
     log.info("=" * 60)
     log.info("DAEMON MODE — runs until you Ctrl+C or PC sleeps")
     log.info("=" * 60)
+
+    # Pre-Flight: verify auth, WS-init, yfinance — verhindert 2026-05-11-Geistermodus
+    if not run_preflight(api_key, api_secret):
+        log.error("Pre-Flight FAIL — daemon aborts (fix config + restart)")
+        return
+
+    # Position-Recovery: bei Crash mit offenen Positions → flatten
+    try:
+        from alpaca.trading.client import TradingClient
+        recover_or_flatten(TradingClient(api_key, api_secret, paper=True))
+    except Exception as e:
+        log.error("position-recovery failed: %s", e)
     while True:
         # Mid-day-resume: wenn Restart während Trading-Fenster (06:27–HARD_FLAT) an Werktag → sofort traden statt morgen warten
         ny_now = datetime.now(NY_TZ)
@@ -1251,8 +1297,12 @@ def main():
             print(f"  rank{ts.rank}: {ts.symbol}  score {ts.score:.1f}")
         return
 
-    api_key = os.environ.get("APCA_API_KEY_ID", "")
-    api_secret = os.environ.get("APCA_API_SECRET_KEY", "")
+    try:
+        from secrets_loader import get_alpaca_keys
+        api_key, api_secret = get_alpaca_keys()
+    except Exception:
+        api_key = ""
+        api_secret = ""
     if not api_key or not api_secret:
         log.error("Set APCA_API_KEY_ID + APCA_API_SECRET_KEY env-vars first.")
         log.error("Or use --replay YYYY-MM-DD for offline-test")
