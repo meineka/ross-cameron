@@ -42,6 +42,7 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
 from alpaca.data.live import StockDataStream
+from alpaca.data.enums import DataFeed
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
@@ -604,7 +605,7 @@ class Bot:
         async def ws_loop():
             while True:
                 try:
-                    ws = StockDataStream(self.api_key, self.api_secret, feed="iex")
+                    ws = StockDataStream(self.api_key, self.api_secret, feed=DataFeed.IEX)
                     current_symbols = list(self.tickers.keys())
                     ws.subscribe_bars(on_bar, *current_symbols)
                     log.info("WS subscribed to %d symbols: %s", len(current_symbols), current_symbols)
@@ -1166,6 +1167,17 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
     log.info("DAEMON MODE — runs until you Ctrl+C or PC sleeps")
     log.info("=" * 60)
     while True:
+        # Mid-day-resume: wenn Restart während Trading-Fenster (06:27–HARD_FLAT) an Werktag → sofort traden statt morgen warten
+        ny_now = datetime.now(NY_TZ)
+        if ny_now.weekday() < 5 and dtime(6, 27) <= ny_now.time() < TIME_HARD_FLAT:
+            log.info("MID-DAY-RESUME: Trading-Fenster offen → starte Session sofort (skip sleep)")
+            try:
+                bot = Bot(api_key, api_secret, dry_run=dry_run)
+                await bot.run()
+            except Exception as e:
+                log.error("Trading day errored (resume): %s", e, exc_info=True)
+            log.info("Resume-Session done. Looping.")
+            continue
         next_start = next_premarket_start()
         ny_now = datetime.now(NY_TZ)
         wait_sec = (next_start - ny_now).total_seconds()
