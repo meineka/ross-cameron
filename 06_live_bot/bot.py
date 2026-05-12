@@ -64,6 +64,7 @@ from float_filter import passes_float_filter
 from indicators import macd_is_bullish, macd_bear_cross, false_breakout_veto
 from catalyst_filter import passes_catalyst_filter
 from delisted_cache import filter_known_delisted, mark_batch_delisted
+from pump_dump_filter import size_multiplier as pd_size_multiplier, is_pump_dump_risk
 
 logging.basicConfig(
     level=logging.INFO,
@@ -140,6 +141,7 @@ POLE_VOLUME_RISING_REQUIRED = True
 TIME_NEW_ENTRIES_END = dtime(11, 30)
 TIME_HARD_FLAT = dtime(12, 0)
 TIME_RTH_START = dtime(9, 30)
+TIME_NEW_ENTRIES_START = dtime(9, 35)  # Cameron-Rule: warte 5 Min nach Open (Volatilitäts-Schutz)
 
 # Re-Scan-Strategie: zwei Schichten, ALIGNED zu round-5-Min boundaries
 # SLOW: yfinance Universe-Pull, ~3 Min Laufzeit → 180 Sek Head-Start
@@ -482,6 +484,7 @@ def can_enter_new(day: DayState, ny_time: dtime) -> tuple[bool, str]:
         return False, "intraday_drawdown_50pct"
     if ny_time >= TIME_NEW_ENTRIES_END: return False, "after_1130"
     if ny_time < TIME_RTH_START: return False, "before_rth"
+    if ny_time < TIME_NEW_ENTRIES_START: return False, "open_range_5min"  # Fix 12.05: kein Entry in 1. 5min
     # #5 Max trades per day
     if day.trades_completed_today >= MAX_TRADES_PER_DAY:
         return False, f"max_{MAX_TRADES_PER_DAY}_trades_today"
@@ -1018,6 +1021,11 @@ class Bot:
 
         # #6 SPY-Size-Multiplier anwenden
         shares = int(shares * self.day.spy_size_multiplier)
+        # Pump-Dump-Risiko: extremer Score → Position drastisch reduzieren (Fix 12.05)
+        pd_mult = pd_size_multiplier(ts.score)
+        if pd_mult < 1.0:
+            shares = int(shares * pd_mult)
+            log.warning("  PUMP-DUMP-RISK %s (score=%.0f) → size %.0fx", sym, ts.score, pd_mult)
         if shares < 1:
             self.day.patterns_rejected_size_zero += 1
             log.info("  REJECT %s: shares=0 nach SPY-multiplier %.2fx",
