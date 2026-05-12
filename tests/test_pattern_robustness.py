@@ -60,6 +60,19 @@ def test_detect_bull_flag_price_out_of_range():
     assert ok is False
 
 
+def test_handle_bar_catches_internal_exceptions():
+    """Audit-Iteration 3: handle_bar darf nicht den ganzen WS-Callback killen
+    wenn eine Symbol-Daten-Anomalie auftritt."""
+    src = (ROOT / "06_live_bot" / "bot.py").read_text(encoding="utf-8")
+    # outer try/except muss existieren
+    idx = src.find("async def handle_bar(self, bar):")
+    assert idx > 0
+    func_body = src[idx: idx + 2000]
+    assert "try:" in func_body
+    assert "handle_bar(" in func_body  # error log mentions the bar
+    assert 'log.error("handle_bar' in func_body
+
+
 def test_detect_bull_flag_returns_valid_levels_if_signal():
     """Wenn Signal: entry > stop, target > entry (klassische R:R-Pflicht)."""
     import bot

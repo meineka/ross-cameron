@@ -858,7 +858,12 @@ class Bot:
         # 4. WebSocket mit Auto-Reconnect + Exponential-Backoff + Circuit-Breaker
         backoff = ReconnectBackoff(base_sec=1.0, cap_sec=60.0, max_consec_fails=8)
         async def ws_loop():
+            """Audit-Bug-Fix 2026-05-12 (Iteration 3):
+              - Bug D: ws_reconnects zählt jetzt JEDEN Reconnect (success + fail)
+              - Bug E: backoff.sleep nur nach echtem Fehler, nicht nach clean disconnect
+            """
             while True:
+                had_error = False
                 try:
                     ws = StockDataStream(self.api_key, self.api_secret, feed=DataFeed.IEX)
                     current_symbols = list(self.tickers.keys())
@@ -875,20 +880,27 @@ class Bot:
                             log.info("  WS re-subscribe triggered — restarting connection")
                             try:
                                 ws.stop_ws()
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                log.warning("ws.stop_ws() raised: %s", e)
                             break
-                    log.warning("WS disconnected — reconnect (backoff)")
+                    log.warning("WS disconnected — reconnect (clean)")
+                    self.day.ws_reconnects += 1
                 except Exception as e:
+                    had_error = True
                     self.day.ws_reconnects += 1
                     log.error("WS error (#%d): %s", self.day.ws_reconnects, e, exc_info=True)
                 if datetime.now(NY_TZ).time() >= TIME_HARD_FLAT:
                     return
-                try:
-                    await backoff.sleep_after_fail()
-                except RuntimeError as cb:
-                    log.critical("WS Circuit-Breaker: %s — exit ws_loop", cb)
-                    return
+                # Backoff/Circuit-Breaker NUR nach Fehler — saubere Disconnects
+                # sollen den Counter nicht zum Circuit-Breaker treiben
+                if had_error:
+                    try:
+                        await backoff.sleep_after_fail()
+                    except RuntimeError as cb:
+                        log.critical("WS Circuit-Breaker: %s — exit ws_loop", cb)
+                        return
+                else:
+                    await asyncio.sleep(1)  # short pause vor reconnect
 
         try:
             await asyncio.gather(ws_loop(), time_and_health_loop())
@@ -1045,32 +1057,47 @@ class Bot:
         log.info("=" * 60)
 
     async def handle_bar(self, bar):
-        sym = bar.symbol
-        if sym not in self.tickers: return
-        ts = self.tickers[sym]
-        bar_dict = {
-            "open": bar.open, "high": bar.high, "low": bar.low,
-            "close": bar.close, "volume": bar.volume,
-            "timestamp": bar.timestamp,
-        }
-        ts.bars.append(bar_dict)
-        ny_time = bar.timestamp.astimezone(timezone(timedelta(hours=-4))).time()
+        """Audit-Bug-Fix 2026-05-12 (Iteration 3): outer try/except.
+        Eine Daten-Anomalie auf einem Symbol darf nicht den ganzen WS-Callback
+        killen — alle anderen Symbole würden ihre Bar verlieren."""
+        try:
+            sym = bar.symbol
+            if sym not in self.tickers: return
+            ts = self.tickers[sym]
+            bar_dict = {
+                "open": bar.open, "high": bar.high, "low": bar.low,
+                "close": bar.close, "volume": bar.volume,
+                "timestamp": bar.timestamp,
+            }
+            ts.bars.append(bar_dict)
+            try:
+                ny_time = bar.timestamp.astimezone(timezone(timedelta(hours=-4))).time()
+            except Exception:
+                ny_time = datetime.now(NY_TZ).time()
 
-        # Manage existing position
-        if ts.in_position:
-            await self.manage_position(ts, bar_dict, ny_time)
-            return
+            # Manage existing position
+            if ts.in_position:
+                await self.manage_position(ts, bar_dict, ny_time)
+                return
 
-        # Check if can enter new
-        ok, reason = can_enter_new(self.day, ny_time)
-        if not ok:
-            return
+            # Check if can enter new
+            ok, reason = can_enter_new(self.day, ny_time)
+            if not ok:
+                return
 
-        # Detect bull-flag
-        signal, params = detect_bull_flag(list(ts.bars))
-        if not signal:
+            # Detect bull-flag
+            signal, params = detect_bull_flag(list(ts.bars))
+            if not signal:
+                return
+            # Guard gegen unvollständige params
+            required = ("pole_candles", "flag_candles", "pole_height", "entry_price", "stop_price")
+            if not all(k in params for k in required):
+                log.warning("PATTERN %s: incomplete params, skip", sym)
+                return
+            self.day.patterns_detected += 1
+        except Exception as e:
+            log.error("handle_bar(%s) crashed: %s", getattr(bar, "symbol", "?"), e, exc_info=True)
             return
-        self.day.patterns_detected += 1
         log.info("PATTERN %s: pole=%dx flag=%dx height=$%.2f → entry $%.2f stop $%.2f",
                  sym, params["pole_candles"], params["flag_candles"],
                  params["pole_height"], params["entry_price"], params["stop_price"])
