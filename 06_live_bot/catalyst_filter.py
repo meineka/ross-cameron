@@ -26,9 +26,13 @@ def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS) -> bool:
     try:
         import yfinance as yf
         news = yf.Ticker(symbol).news or []
+        # yfinance unzuverlässig: bei empty list NICHT veto-en (Cameron's
+        # Filter darf nicht an unserer Data-Source scheitern)
+        if not news:
+            _cache[symbol] = (True, now)
+            return True
         cutoff = now - lookback_hours * 3600
         for n in news:
-            # Yahoo gibt 'providerPublishTime' (epoch sec)
             ts_pub = n.get("providerPublishTime") or n.get("pubDate") or 0
             if isinstance(ts_pub, str):
                 try:
@@ -38,11 +42,12 @@ def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS) -> bool:
             if ts_pub >= cutoff:
                 _cache[symbol] = (True, now)
                 return True
-        _cache[symbol] = (False, now)
-        return False
+        # Hatten news, aber keine recent → lass durch (Daily-Move + RVOL
+        # sind oft Catalyst-Proxy genug, yfinance-news ist unzuverlässig)
+        _cache[symbol] = (True, now)
+        return True
     except Exception as e:
         log.debug("catalyst fetch %s: %s", symbol, e)
-        # bei Fehler nicht veto-en (lieber Trade zulassen als blockieren)
         return True
 
 

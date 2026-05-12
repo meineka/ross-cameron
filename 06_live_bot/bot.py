@@ -63,6 +63,7 @@ from vwap_filter import is_above_vwap
 from float_filter import passes_float_filter
 from indicators import macd_is_bullish, macd_bear_cross, false_breakout_veto
 from catalyst_filter import passes_catalyst_filter
+from delisted_cache import filter_known_delisted, mark_batch_delisted
 
 logging.basicConfig(
     level=logging.INFO,
@@ -73,6 +74,9 @@ logging.basicConfig(
     ],
 )
 log = logging.getLogger("bot")
+# yfinance-Spam ein-dämmen — delisted-Symbol-ERRORs sind kein Problem,
+# sie haben heute 1000+ Logs/Audit-Alarme verursacht.
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 # ─── Cameron-Constants (mirror constraints.yaml) ────────────────────────────
 PRICE_MIN, PRICE_MAX = 2.0, 20.0
@@ -267,6 +271,10 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
     if not tickers:
         log.error("  FAIL: empty universe — NASDAQ-Trader CSV unreachable?")
         return []
+    # Delisted-Cache filtern (Fix vom 2026-05-12: yfinance-Spam-Prävention)
+    tickers, skipped_delisted = filter_known_delisted(tickers)
+    if skipped_delisted:
+        log.info("  Skipped %d known-delisted tickers from cache", skipped_delisted)
 
     end = datetime.now(timezone.utc).date()
     start = end - timedelta(days=45)
@@ -295,6 +303,14 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
             df = df.reset_index(); df["ticker"] = batch[0]
         df.columns = [c.lower() if isinstance(c, str) else c for c in df.columns]
         df = df.dropna(subset=["close","open","volume"])
+        # Tickers ohne Daten als delisted markieren (Fix vom 2026-05-12)
+        try:
+            seen = set(df["ticker"].unique()) if "ticker" in df.columns else set()
+            dead_in_batch = [t for t in batch if t not in seen]
+            if dead_in_batch:
+                mark_batch_delisted(dead_in_batch)
+        except Exception:
+            pass
         df = df.sort_values(["ticker","date"])
         df["prev_close"] = df.groupby("ticker")["close"].shift(1)
         df["intraday_pct"] = (df["high"] - df["prev_close"]) / df["prev_close"] * 100

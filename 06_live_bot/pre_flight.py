@@ -64,7 +64,9 @@ def run_preflight(api_key: str, api_secret: str, *, skip_yfinance: bool = False)
         ok, msg = fn()
         marker = "OK" if ok else "FAIL"
         log.info("  [%s] %s — %s", marker, name, msg)
-        if not ok:
+        if not ok and name != "yfinance":
+            # yfinance ist Daten-Source, nicht kritisch für Bot-Start (Scan
+            # skipt sich selbst wenn no-data); nur Auth + WS sind blocker
             all_ok = False
     log.info("=" * 60)
     log.info("PRE-FLIGHT: %s", "PASS" if all_ok else "FAIL — daemon will not start")

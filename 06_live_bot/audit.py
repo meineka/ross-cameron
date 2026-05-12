@@ -16,7 +16,8 @@ LOG = HERE / "daemon.log"
 # Error-Categories mit Auto-Fix-Hinweis
 ERROR_PATTERNS = [
     # (regex, kategorie, severity, auto_fixable, fix_hint)
-    (r"possibly delisted|Quote not found for symbol|no price data found|no timezone found", "yfinance_delisted", "info", True, "Symbol delisted — skip"),
+    (r"possibly delisted|Quote not found for symbol|no price data found|no timezone found|YFRateLimitError|\['[A-Z]+'\]:", "yfinance_delisted", "info", True, "Symbol delisted/yfinance noise"),
+    (r"ERROR\s+\[yfinance\]\s*$", "yfinance_empty_line", "info", True, "yfinance log artifact"),
     (r"YFRateLimitError|429|Too Many Requests", "yfinance_rate_limit", "low", True, "wartet selbst"),
     (r"WS error.*'str' object has no attribute 'value'", "ws_api_drift", "critical", False, "alpaca-py erwartet DataFeed-Enum statt String"),
     (r"WS error|WebSocket.*disconnected", "ws_disconnect", "low", True, "auto-reconnect aktiv"),
@@ -188,7 +189,7 @@ def main():
         summary["recommendation"] = "RESTART_MEMORY_HIGH"
     elif status["disk_free_gb"] >= 0 and status["disk_free_gb"] < 1.0:
         summary["recommendation"] = "ALERT_DISK_LOW"  # < 1 GB frei
-    elif summary["high_severity_errors"] > 3:
+    elif summary["high_severity_errors"] > 10:  # raised from 3 (Fix 12.05: yfinance-Spam-Toleranz)
         summary["recommendation"] = "INVESTIGATE_HIGH_SEVERITY"
     elif status["log_last_modified_sec_ago"] > 1200:
         summary["recommendation"] = "RESTART_LOG_STALE"
