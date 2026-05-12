@@ -56,10 +56,15 @@ def get_recent_log_lines(minutes: int = 30) -> list[str]:
 
 
 def classify_errors(lines: list[str]) -> list[dict]:
-    """Klassifiziere Errors in den Lines."""
+    """Klassifiziere Errors UND wichtige WARNINGs in den Lines.
+
+    Audit-Bug-Fix 2026-05-12: WARNING-Lines wie SPIRAL-DETECTION / DAILY GOAL
+    waren bisher unreachable für die info-Pattern. Jetzt werden sie auch matched.
+    """
     findings = []
     for line in lines:
-        if "ERROR" not in line and "Traceback" not in line and "FAIL" not in line:
+        if ("ERROR" not in line and "Traceback" not in line
+                and "FAIL" not in line and "WARNING" not in line):
             continue
         for pattern, category, severity, fixable, hint in ERROR_PATTERNS:
             if re.search(pattern, line, re.IGNORECASE):
