@@ -23,11 +23,18 @@ def test_replay_2026_04_15_baseline():
     # Expected from baseline run (after price-min bug fix):
     #   3 trades, BIRD + MNTS winners, $12.15 PnL
     assert "Top-10 for 2026-04-15" in log
-    assert "BIRD" in log
-    assert "MNTS" in log
-    # Baseline-PnL: $10.38 (mit 5c Slippage + psych-level T2 + 8 Easy-Wins)
-    # Wenn Code-Aenderung: Wert auf neue Baseline anpassen.
-    assert "Daily realized PnL: $10.38" in log, f"PnL drift! Output:\n{log[-2000:]}"
+    assert "BIRD" in log    # in Top-10 watchlist
+    assert "MNTS" in log    # actually traded
+    # Baseline-PnL Drift-History:
+    #   $12.15 — initial baseline
+    #   $10.38 — nach 5c slippage + psych-level T2 + 8 Easy-Wins
+    #   $7.08  — nach Cameron-strict-Fixes (12.05.2026):
+    #            VWAP-Veto + MACD-Veto + FBO-Veto + Float<10M + Catalyst-Filter +
+    #            Open-Range-Filter (no entries <09:35) + 1%-Equity-Cap +
+    #            Min-Stop-Distance + Pump-Dump-Risk-Multiplier
+    #   Folge: BIRD wird nicht mehr getradet (durch einen der Vetos rejected),
+    #          nur MNTS bleibt → kleinere aber sauberere Wins.
+    assert "Daily realized PnL: $7.08" in log, f"PnL drift! Output:\n{log[-2000:]}"
 
 
 @pytest.mark.skipif(not PILOT_DATA.exists(), reason="pilot data missing")
