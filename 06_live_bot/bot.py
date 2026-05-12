@@ -458,17 +458,35 @@ def compute_position_size(
     entry: float, stop: float, account_equity: float, day: DayState,
     *, avg_volume: float | None = None, ny_time: dtime | None = None,
 ) -> int:
-    if entry <= stop: return 0
-    risk_per_share = entry - stop
+    """Position-Sizing mit Cameron-Regeln. Defensiv gegen pathologische Inputs.
+
+    Audit-Bug-Fix 2026-05-12:
+      - Bug A: account_equity wurde ignoriert → 1 % Equity-Cap erzwingen
+      - Bug B: winziger risk_per_share (<5¢) → explodierende Position → Minimum-Stop $0.05
+      - Bug C: negative/null Eingaben → 0 shares (defensive)
+    """
+    # Defensive: ungültige Inputs
+    if entry <= 0 or stop <= 0:
+        return 0
+    if entry <= stop:
+        return 0
+    raw_risk_per_share = entry - stop
+    # Minimum-Stop $0.05 (5 cents): bei engerem Stop ist Pattern-Detection
+    # vermutlich Artefakt — verhindert 50000-Shares-Position
+    risk_per_share = max(raw_risk_per_share, 0.05)
     max_shares = int(MAX_LOSS_PER_TRADE_USD / risk_per_share)
+    # Equity-Cap: max 1 % von account_equity riskieren (Cameron-Rule)
+    if account_equity and account_equity > 0:
+        equity_risk_cap = account_equity * 0.01
+        max_shares = min(max_shares, int(equity_risk_cap / risk_per_share))
     # Quarter-Size-Rule
     if not day.quarter_size_unlocked:
         max_shares = max_shares // 4
-    # Power-Hour-Boost: 9:30-10:30 full, danach 75%
+    # Power-Hour-Boost: 9:30-10:30 full, danach 75 %
     if ny_time is not None:
         mult = POWER_HOUR_SIZE_MULT if ny_time < POWER_HOUR_END else POST_POWER_SIZE_MULT
         max_shares = int(max_shares * mult)
-    # Liquidity-Cap: max 1% of avg-daily-volume (Cameron 'Whales-in-Pond')
+    # Liquidity-Cap: max 1 % of avg-daily-volume (Cameron 'Whales-in-Pond')
     if avg_volume and avg_volume > 0:
         cap = int(avg_volume * LIQUIDITY_CAP_PCT_OF_AVG_VOL / 100)
         max_shares = min(max_shares, cap)
