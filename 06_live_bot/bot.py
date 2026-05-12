@@ -768,6 +768,15 @@ class Bot:
                     write_status(self)
                 except Exception:
                     pass
+                # Heartbeat-File aktualisieren auch im Trading-Loop (Fix 12.05)
+                try:
+                    hb_file = Path(__file__).parent / "heartbeat.txt"
+                    hb_file.write_text(
+                        datetime.now(NY_TZ).strftime("%Y-%m-%d %H:%M:%S NY (trading)"),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
                 await asyncio.sleep(2)  # tighter loop für besseres Alignment
 
         # 4. WebSocket mit Auto-Reconnect + Exponential-Backoff + Circuit-Breaker
@@ -910,6 +919,16 @@ class Bot:
 
     def _log_health(self):
         """Periodic health-check log."""
+        # Heartbeat-File auch während Trading-Tag aktualisieren (Fix 12.05:
+        # Audit fired RESTART_HEARTBEAT_STALE während bot.run() aktiv war)
+        try:
+            hb_file = Path(__file__).parent / "heartbeat.txt"
+            hb_file.write_text(
+                datetime.now(NY_TZ).strftime("%Y-%m-%d %H:%M:%S NY (trading)"),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
         d = self.day
         log.info("─" * 60)
         log.info("HEALTH @ %s | Bars=%d Patterns=%d Orders=%d/%d-fail PnL=$%.2f WSRecon=%d",
