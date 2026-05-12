@@ -141,7 +141,7 @@ POLE_VOLUME_RISING_REQUIRED = True
 TIME_NEW_ENTRIES_END = dtime(11, 30)
 TIME_HARD_FLAT = dtime(12, 0)
 TIME_RTH_START = dtime(9, 30)
-TIME_NEW_ENTRIES_START = dtime(9, 35)  # Cameron-Rule: warte 5 Min nach Open (Volatilitäts-Schutz)
+TIME_NEW_ENTRIES_START = dtime(9, 35)
 
 # Re-Scan-Strategie: zwei Schichten, ALIGNED zu round-5-Min boundaries
 # SLOW: yfinance Universe-Pull, ~3 Min Laufzeit → 180 Sek Head-Start
@@ -562,7 +562,20 @@ class AlpacaExecutor:
     def submit_bracket_buy(self, symbol: str, shares: int, entry: float,
                            stop: float, take_profit: float) -> str | None:
         """Cameron-Default: Entry-Limit + Stop-Loss + Take-Profit als BRACKET.
-        Alle drei broker-seitig — Position ist NIE 'nackt' wenn entry fillt."""
+        Alle drei broker-seitig — Position ist NIE 'nackt' wenn entry fillt.
+
+        Bug-Fix 2026-05-12: Sanity-Check vor submit. Wenn stop >= entry oder
+        tp <= entry → invalid order, log + skip. Post-Fill-Check macht
+        manage_position-Loop (next_bar bemerkt Position + setzt fresh OCO
+        wenn nötig). Bei thin-liquidity Stocks mit Gap-Fill ist das die
+        einzige Methode den HSPT-Bug zu vermeiden.
+        """
+        if stop >= entry:
+            log.error("BRACKET-BUY %s INVALID: stop %.2f >= entry %.2f — skip", symbol, stop, entry)
+            return None
+        if take_profit <= entry:
+            log.error("BRACKET-BUY %s INVALID: tp %.2f <= entry %.2f — skip", symbol, take_profit, entry)
+            return None
         if self.dry_run:
             log.info("[DRY] BRACKET-BUY %s %d entry=%.2f stop=%.2f tp=%.2f",
                      symbol, shares, entry, stop, take_profit)
@@ -582,6 +595,48 @@ class AlpacaExecutor:
         except Exception as e:
             log.error("submit_bracket_buy err %s: %s", symbol, e)
             return None
+
+    def verify_and_repair_protection(self, symbol: str, fill_price: float,
+                                     planned_stop: float, planned_tp: float,
+                                     shares: int) -> bool:
+        """Nach BRACKET-Fill: check ob Stop < Fill (Long-Validität).
+        Wenn nicht → cancel Bracket-Children + neue OCO mit Stop unter Fill.
+        Verhindert HSPT/ATRA-Bug. Returns True wenn repariert."""
+        if planned_stop < fill_price:
+            return False  # alles ok
+        if self.dry_run:
+            return False
+        log.warning("REPAIR %s: fill %.4f below planned stop %.2f — re-bracketing",
+                    symbol, fill_price, planned_stop)
+        # Bracket-Children weg
+        try:
+            from alpaca.trading.requests import GetOrdersRequest
+            opens = self.client.get_orders(filter=GetOrdersRequest(
+                status=QueryOrderStatus.OPEN, symbols=[symbol], limit=20,
+            ))
+            for child in opens:
+                try: self.client.cancel_order_by_id(child.id)
+                except Exception: pass
+            import time as _t; _t.sleep(2)
+        except Exception:
+            pass
+        # OCO relativ zum FILL
+        new_stop = round(fill_price * 0.95, 2)
+        new_tp = round(fill_price + 2 * (fill_price - new_stop), 2)
+        try:
+            self.client.submit_order(LimitOrderRequest(
+                symbol=symbol, qty=shares, side=OrderSide.SELL,
+                time_in_force=TimeInForce.DAY,
+                limit_price=new_tp,
+                order_class=OrderClass.OCO,
+                take_profit=TakeProfitRequest(limit_price=new_tp),
+                stop_loss=StopLossRequest(stop_price=new_stop),
+            ))
+            log.info("  REPAIR-OCO %s: stop=%.2f tp=%.2f", symbol, new_stop, new_tp)
+            return True
+        except Exception as e:
+            log.error("REPAIR failed for %s: %s", symbol, e)
+            return False
 
     def protect_position(self, symbol: str, shares: int, stop: float, take_profit: float) -> None:
         """Setze für eine bestehende long-Position broker-seitig OCO-Schutz
