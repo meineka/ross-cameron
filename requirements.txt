@@ -1,0 +1,7 @@
+alpaca-py>=0.40
+pyyaml>=6.0
+pandas>=2.0
+numpy>=1.24
+yfinance>=0.2
+websockets>=12.0
+requests>=2.31

@@ -1,0 +1,23 @@
+app = "cameron-bot"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  TZ = "UTC"
+
+# Persistent volume für heartbeat.txt, watchlist_today.json, results/
+[[mounts]]
+  source = "bot_data"
+  destination = "/app/06_live_bot/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+  cpus = 1
+
+# Kein HTTP-Service — Bot ist Worker-only
+# (auf "auto_stop_machines = false" damit immer läuft)
+[deploy]
+  strategy = "immediate"
