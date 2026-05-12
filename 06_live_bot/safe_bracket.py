@@ -1,12 +1,18 @@
-"""Safe-Bracket-Buy mit Post-Fill-Validation.
+"""Safe-Bracket-Buy mit Liquidity-Check + Post-Fill-Validation.
 
-Bug-Fix für 2026-05-12 14:00 ET:
-  Manuelle BUY-Orders mit BRACKET wurden bei illiquiden Stocks (HSPT, ATRA)
-  weit unter Limit gefilled. Stop war relativ zum Limit berechnet → landete
-  ÜBER dem Fill → Alpaca rejected den Stop-Child → Position ungeschützt.
+Bug-Fix-V2 für 2026-05-12 14:00 ET (HSPT/ATRA-Incident):
+  Eigentlicher Root-Cause: snapshot.latest_trade.price ($10.55) war ein
+  Stale-Print von vor Stunden. Real-Quote war bid $7.50 / ask $0.00.
+  Mein Code hat $10.55 blind vertraut, Limit $10.60 platziert, gefilled
+  bei $8.11 (tatsächlicher Ask). Stop $10.50 relativ zu Plan war über
+  Fill → invalid.
 
-Lösung: nach Fill prüfen ob Stop < Fill. Wenn nicht: Bracket-Children
-canceln und neue OCO-Protection mit Stop relativ zum Fill submitten.
+Lösung-V2: vor jedem Order
+  1. Quote prüfen (bid+ask vorhanden, spread <5%)
+  2. Daily-Volume prüfen (>10 000 ist OK, <1 000 = illiquid)
+  3. Limit = ask + 2 cents (NICHT last+5c)
+  4. Stop = bei real-ask × 0.95
+  5. Post-Fill: verify and repair wie V1
 """
 from __future__ import annotations
 import time
@@ -14,6 +20,44 @@ import logging
 from typing import Optional
 
 log = logging.getLogger("safe_bracket")
+
+MIN_DAILY_VOLUME = 10_000
+MAX_SPREAD_PCT = 5.0  # max spread/mid in %
+
+
+def check_liquidity(snap) -> tuple[bool, str]:
+    """Returns (ok, reason). Lehnt thin-Stocks ab BEFORE submit."""
+    try:
+        b = snap.daily_bar
+        q = snap.latest_quote
+        if not (b and q):
+            return False, "no quote/bar"
+        if b.volume < MIN_DAILY_VOLUME:
+            return False, f"daily_volume={b.volume:,} < {MIN_DAILY_VOLUME:,}"
+        bid = q.bid_price
+        ask = q.ask_price
+        if not (bid and ask) or bid <= 0 or ask <= 0:
+            return False, f"no two-sided quote (bid={bid} ask={ask})"
+        spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
+        if spread_pct > MAX_SPREAD_PCT:
+            return False, f"spread {spread_pct:.1f}% > {MAX_SPREAD_PCT}%"
+        return True, f"OK (vol={b.volume:,}, spread={spread_pct:.2f}%)"
+    except Exception as e:
+        return False, f"liquidity-check err: {e}"
+
+
+def quote_based_entry(snap, slippage_cents: float = 0.02) -> dict:
+    """Sinnvolle Entry/Stop/TP basierend auf REAL ASK (nicht latest_trade)."""
+    ask = snap.latest_quote.ask_price
+    bid = snap.latest_quote.bid_price
+    entry = round(ask + slippage_cents, 2)
+    stop = round(ask * 0.95, 2)          # 5 % unter ask
+    tp = round(ask + 2 * (ask - stop), 2)  # 1:2 R:R
+    return {
+        "entry": entry, "stop": stop, "tp": tp,
+        "ask": ask, "bid": bid,
+        "spread": ask - bid,
+    }
 
 
 def safe_bracket_buy(

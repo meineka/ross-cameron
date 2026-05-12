@@ -84,3 +84,70 @@ def test_safe_bracket_rejects_invalid_stop():
 def test_safe_bracket_imports():
     import safe_bracket
     assert hasattr(safe_bracket, "safe_bracket_buy")
+    assert hasattr(safe_bracket, "check_liquidity")
+    assert hasattr(safe_bracket, "quote_based_entry")
+
+
+# ─── Liquidity-Check (HSPT-style detection) ──────────────────────────────────
+def test_liquidity_rejects_low_daily_volume():
+    """HSPT-Profil: 188 daily volume, fake last_trade $10.55."""
+    from safe_bracket import check_liquidity
+    snap = MagicMock()
+    snap.daily_bar.volume = 188
+    snap.latest_quote.bid_price = 7.50
+    snap.latest_quote.ask_price = 8.10
+    ok, reason = check_liquidity(snap)
+    assert ok is False
+    assert "daily_volume" in reason
+
+
+def test_liquidity_rejects_no_two_sided_quote():
+    """HSPT-Realität: ask=0 (kein Verkäufer)."""
+    from safe_bracket import check_liquidity
+    snap = MagicMock()
+    snap.daily_bar.volume = 100_000
+    snap.latest_quote.bid_price = 7.50
+    snap.latest_quote.ask_price = 0
+    ok, reason = check_liquidity(snap)
+    assert ok is False
+    assert "no two-sided quote" in reason
+
+
+def test_liquidity_rejects_huge_spread():
+    """Wide spread = illiquide. Bid 5/Ask 10 = 67 % spread."""
+    from safe_bracket import check_liquidity
+    snap = MagicMock()
+    snap.daily_bar.volume = 100_000
+    snap.latest_quote.bid_price = 5.0
+    snap.latest_quote.ask_price = 10.0
+    ok, reason = check_liquidity(snap)
+    assert ok is False
+    assert "spread" in reason
+
+
+def test_liquidity_accepts_healthy_stock():
+    """AAPL-Profil: tight spread, hohe Vol."""
+    from safe_bracket import check_liquidity
+    snap = MagicMock()
+    snap.daily_bar.volume = 5_000_000
+    snap.latest_quote.bid_price = 294.19
+    snap.latest_quote.ask_price = 294.22
+    ok, reason = check_liquidity(snap)
+    assert ok is True
+
+
+def test_quote_based_entry_uses_ask_not_last_trade():
+    """Kern-Fix: entry basiert auf ask, NICHT latest_trade.price.
+    Im HSPT-Fall war last_trade=$10.55 (stale), ask wäre ~$8.10."""
+    from safe_bracket import quote_based_entry
+    snap = MagicMock()
+    snap.latest_quote.ask_price = 8.10
+    snap.latest_quote.bid_price = 7.50
+    plan = quote_based_entry(snap)
+    assert 8.10 <= plan["entry"] <= 8.15  # ask + slippage
+    assert plan["stop"] < plan["entry"]    # valid for long
+    assert plan["tp"] > plan["entry"]      # valid TP
+    # 1:2 R:R approximately
+    risk = plan["entry"] - plan["stop"]
+    reward = plan["tp"] - plan["entry"]
+    assert 1.5 * risk <= reward <= 2.5 * risk
