@@ -51,11 +51,38 @@ def is_bot_running() -> tuple[bool, list[int]]:
 
 
 def start_bot():
-    """Start bot.py --daemon as detached background process."""
+    """Start bot.py --daemon as detached background process.
+
+    Audit-Bug-Fix 2026-05-12 (Iter 4):
+    - Bug T: Hardcoded API keys waren im source committed — entfernt,
+      jetzt via secrets_loader (.env oder env-vars)
+    - Bug U: Trade-Lock check vor Restart — wenn offene Positions,
+      kein blind restart (Position-Recovery würde sie flatten)
+    """
+    # Trade-Lock via secrets_loader + Alpaca-Check (Bug U)
+    sys.path.insert(0, str(HERE))
+    try:
+        from secrets_loader import get_alpaca_keys
+        key, sec = get_alpaca_keys()
+    except Exception as e:
+        log.error("Watchdog: secrets unavailable — abort restart: %s", e)
+        return None
+    try:
+        from alpaca.trading.client import TradingClient
+        tc = TradingClient(key, sec, paper=True)
+        positions = tc.get_all_positions()
+        if positions:
+            log.warning("BLOCKED restart: %d positions open — let them resolve naturally", len(positions))
+            for p in positions:
+                log.warning("  %s qty=%s avg=%s", p.symbol, p.qty, p.avg_entry_price)
+            return None
+    except Exception as e:
+        log.error("Watchdog: position-check failed — abort restart: %s", e)
+        return None
+
     env = os.environ.copy()
-    # Falls Env-Vars nicht im Watchdog-Process: hardcoded fallback (NUR Paper)
-    env.setdefault("APCA_API_KEY_ID", "PKBERNOMU23XEGRU5SPD3JZGDX")
-    env.setdefault("APCA_API_SECRET_KEY", "FZBBx9v8Pw7eaLRFD8wW51WNnVkWeWNkts2D7zRSaxaB")
+    env["APCA_API_KEY_ID"] = key
+    env["APCA_API_SECRET_KEY"] = sec
     log_path = HERE / "daemon.log"
     flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
     with open(log_path, "ab") as logf:

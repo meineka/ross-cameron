@@ -196,11 +196,14 @@ def test_secrets_loader_from_env(monkeypatch):
 
 
 def test_no_hardcoded_secret_in_repo():
-    """Keine API-Keys mehr im Code. .env darf, ist gitignored."""
-    for f in ["deploy_safe.py", "micro_test_trade.py", "bot.py"]:
-        src = (ROOT / "06_live_bot" / f).read_text(encoding="utf-8")
-        assert "PKBERNOMU23XEGRU5SPD3JZGDX" not in src, f"hardcoded key in {f}"
-        assert "FZBBx9v8Pw7eaLRFD8wW51WNnVkWeWNkts2D7zRSaxaB" not in src, f"hardcoded secret in {f}"
+    """Keine API-Keys mehr im Code. .env darf, ist gitignored.
+    Audit-Iter 4 12.05: scan ALLE .py-Files in 06_live_bot, nicht nur Whitelist —
+    watchdog.py war übersehen und hatte hardcoded keys."""
+    bot_dir = ROOT / "06_live_bot"
+    for py_file in bot_dir.rglob("*.py"):
+        src = py_file.read_text(encoding="utf-8")
+        assert "PKBERNOMU23XEGRU5SPD3JZGDX" not in src, f"hardcoded key in {py_file.name}"
+        assert "FZBBx9v8Pw7eaLRFD8wW51WNnVkWeWNkts2D7zRSaxaB" not in src, f"hardcoded secret in {py_file.name}"
 
 
 # ─── #12 Day-Summary persist ─────────────────────────────────────────────────

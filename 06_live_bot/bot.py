@@ -1184,6 +1184,9 @@ class Bot:
                 if self.day.consecutive_losses >= 2:
                     self.day.spiral_locked = True
                     log.warning("SPIRAL-DETECTION: 2 consecutive losses → STOP")
+            else:
+                # Audit-Bug-Fix 2026-05-12 (Iter 4): MACD-Win soll counter resetten
+                self.day.consecutive_losses = 0
             self.logger.log({"event": "macd_exit", "symbol": ts.symbol,
                              "shares": ts.shares, "price": bar["close"], "pnl": pnl})
             log.info("  MACD-EXIT %s @ $%.2f (PnL $%.2f)", ts.symbol, bar["close"], pnl)
@@ -1241,9 +1244,9 @@ class Bot:
                 )
                 return
 
-        # T1
-        if not ts.half_filled and bar["high"] >= ts.target1_price:
-            half = max(1, ts.shares // 2)
+        # T1 — Audit-Bug-Fix 2026-05-12 (Iter 4): mind. 2 Shares nötig für Partial
+        if not ts.half_filled and bar["high"] >= ts.target1_price and ts.shares >= 2:
+            half = ts.shares // 2
             self.executor.submit_sell_limit(ts.symbol, half, ts.target1_price, "T1_50pct")
             self.logger.log({"event": "T1", "symbol": ts.symbol, "shares": half, "price": ts.target1_price})
             ts.half_filled = True
@@ -1256,11 +1259,15 @@ class Bot:
                 self.day.quarter_size_unlocked = True
                 log.info("Quarter-Size-Rule UNLOCKED today")
             return
-        # T2
-        if ts.half_filled and bar["high"] >= ts.target2_price:
+        # T2 — Audit-Iter 4: 1-Share-Trades springen T1 → T2 direkt (kein half_filled)
+        if bar["high"] >= ts.target2_price and ts.shares > 0:
             self.executor.submit_sell_limit(ts.symbol, ts.shares, ts.target2_price, "T2")
-            r1 = (ts.target1_price - ts.entry_price) * ts.initial_shares * 0.5
-            r2 = (ts.target2_price - ts.entry_price) * ts.shares
+            if ts.half_filled:
+                r1 = (ts.target1_price - ts.entry_price) * ts.initial_shares * 0.5
+                r2 = (ts.target2_price - ts.entry_price) * ts.shares
+            else:
+                r1 = 0.0
+                r2 = (ts.target2_price - ts.entry_price) * ts.shares
             pnl = r1 + r2
             self.logger.log({"event": "T2_exit", "symbol": ts.symbol, "shares": ts.shares,
                             "price": ts.target2_price, "pnl": pnl})
