@@ -46,6 +46,30 @@ The committed changes need to remain robust under future-data validation.
   No multi-trade-day with loss to spare. All configs identical.
 - **Status:** SKIP — selectivity filters already produce ≤1 trade/day.
 
+### Iter 6: TIME_NEW_ENTRIES_START shift (skip Power-Hour Early)
+- **Hypothesis:** Diagnose der 13 trades zeigte 9:30-10:15 hat 40% win-rate
+  (+$3.95 net) vs 10:30+ 100% win-rate (+$116.52). Shift entry-start
+  von 9:35 nach 10:15 könnte Sharpe verbessern.
+- **Backtest sweep:**
+  - 9:35 (cur): 13 trd / +$120 / 75% / MDD -$12.50 / Sharpe 9.64
+  - 10:00:      7 trd / +$77  / 86% / MDD -$12.15 / Sharpe 6.34
+  - 10:15:      5 trd / +$68  /100% / MDD $0      / Sharpe 67.93
+  - 10:30:      5 trd / +$68  /100% / MDD $0      / Sharpe 67.93
+  - 10:45:      4 trd / +$55  /100% / MDD $0      / Sharpe 54.85
+- **Status:** SKIP. 10:15+ Sharpe-Explosion ist FRAGIL — MDD=$0 mit N=5
+  bricht bei erstem Loss-Day. 10:00-Sweep ist sogar SCHLECHTER auf Sharpe.
+  -44% PnL absolute. Cameron's Edge IST Power-Hour (architektonischer
+  Konflikt). N=5 trades zu dünn für Confidence.
+- **Future:** Re-test mit 6+ Monaten Daten. Wenn Pattern robust bleibt,
+  später erneut diskutieren.
+
+### Iter 5: Pullback-Count-Limit (2 vs 3 vs 4 vs unlimited)
+- **Hypothesis:** Cameron's 2-pullback-then-dead rule.
+- **Backtest:** Alle Configs identisch ($120/13 trades). Pullback-Count
+  ist nie binding constraint im pilot (kein Symbol hatte >=2 attempts
+  am gleichen Tag).
+- **Status:** SKIP. Optimization-target ist leer.
+
 ### Iter 4: Top-N-Rank Watchlist Filter
 - **Hypothesis:** Cameron quote "I focus on the 2-3 best setups of the day,
   not all 10". Test if limiting watchlist to top-N-ranked symbols beats
