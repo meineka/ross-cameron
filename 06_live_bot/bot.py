@@ -718,27 +718,68 @@ class AlpacaExecutor:
                 log.error("fallback-tp %s err: %s", symbol, e2)
             return ok_stop  # mindestens Stop muss stehen
 
-    def cancel_open_orders_for(self, symbol: str) -> int:
-        """Cancel alle offenen Orders eines Symbols — nötig vor T1-Partial oder
-        Quick-Exit damit Bracket-Children nicht doppelt feuern."""
+    def cancel_open_orders_for(self, symbol: str,
+                                wait_seconds: float = 3.0,
+                                poll_interval: float = 0.3) -> int:
+        """Cancel alle offenen Orders eines Symbols und warte bis sie wirklich
+        weg sind — nötig vor T1-Partial oder Quick-Exit damit Bracket-Children
+        nicht doppelt feuern.
+
+        Audit-Iter 8 (2026-05-12) — Bug-Fix BO-6/BO-7:
+          Vorher: submit cancel + sofort return. Alpaca processiert Cancels
+          async (state: OPEN → PENDING_CANCEL → CANCELED). Folge-submit konnte
+          während PENDING_CANCEL feuern → beide Orders alive → oversold.
+        Jetzt: nach Cancel-Submit Polling bis alle Target-IDs nicht mehr OPEN
+        sind, oder bis wait_seconds Timeout. Logged Failures statt swallow.
+
+        Returns: Anzahl Cancels die submitted (nicht zwingend confirmed)
+                 wurden. Bei wait_seconds=0 wird nicht gewartet (Legacy).
+        """
         if self.dry_run:
             return 0
         try:
             opens = self.client.get_orders(filter=GetOrdersRequest(
                 status=QueryOrderStatus.OPEN, symbols=[symbol], limit=50,
             ))
-            n = 0
-            for o in opens:
+        except Exception as e:
+            log.warning("cancel_open_orders list err for %s: %s", symbol, e)
+            return 0
+        target_ids: set[str] = set()
+        failed: list[tuple[str, str]] = []
+        for o in opens or []:
+            try:
+                self.client.cancel_order_by_id(o.id)
+                target_ids.add(o.id)
+            except Exception as e:
+                failed.append((str(o.id), str(e)))
+        if failed:
+            log.warning("cancel_open_orders %s: %d cancels failed: %s",
+                        symbol, len(failed), failed)
+        submitted = len(target_ids)
+        if submitted == 0:
+            return 0
+        # Poll bis target-IDs nicht mehr OPEN sind
+        if wait_seconds > 0:
+            import time as _t
+            deadline = _t.time() + wait_seconds
+            while _t.time() < deadline:
                 try:
-                    self.client.cancel_order_by_id(o.id); n += 1
+                    still = self.client.get_orders(filter=GetOrdersRequest(
+                        status=QueryOrderStatus.OPEN, symbols=[symbol], limit=50,
+                    )) or []
+                    still_ids = {str(x.id) for x in still}
+                    if not (target_ids & still_ids):
+                        log.info("  Cancelled %d orders for %s (confirmed)",
+                                 submitted, symbol)
+                        return submitted
                 except Exception:
                     pass
-            if n:
-                log.info("  Cancelled %d open orders for %s (pre-action)", n, symbol)
-            return n
-        except Exception as e:
-            log.warning("cancel_open_orders %s err: %s", symbol, e)
-            return 0
+                _t.sleep(poll_interval)
+            log.warning("cancel_open_orders %s: timeout — %d may still be live",
+                        symbol, len(target_ids))
+        else:
+            log.info("  Cancelled %d orders for %s (no-wait)", submitted, symbol)
+        return submitted
 
     def submit_sell_limit(self, symbol: str, shares: int, price: float, reason: str) -> str | None:
         """Vor jedem Script-side Sell: erst Bracket-Children canceln damit nicht
