@@ -46,6 +46,21 @@ The committed changes need to remain robust under future-data validation.
   No multi-trade-day with loss to spare. All configs identical.
 - **Status:** SKIP — selectivity filters already produce ≤1 trade/day.
 
+### Iter 4: Top-N-Rank Watchlist Filter
+- **Hypothesis:** Cameron quote "I focus on the 2-3 best setups of the day,
+  not all 10". Test if limiting watchlist to top-N-ranked symbols beats
+  trading all 10.
+- **Backtest:** All variants LOSE to BASELINE-10.
+  - BASELINE-10: 13 trades / +$120.47 / Sharpe 9.64
+  - Top-7:        6 trades / +$23.55  / Sharpe 1.88
+  - Top-5:        4 trades / +$16.96  / Sharpe 1.36
+  - Top-3:        1 trade  /  +$6.00  / Sharpe 6.00
+  - Top-2 / Top-1: 0 trades
+- **Status:** SKIP. Cameron's "2-3 best setups" refers to EXECUTED trades
+  (bot already does 0.33/day = 13/39), not watchlist-size. Setup-selectivity
+  comes from detect_bull_flag + vetos, NOT from pre-filtering the watchlist.
+  Tightening watchlist just kills opportunity-pipeline.
+
 ### Iter 3c: T2 = R-multiple instead of pole-height
 - **Hypothesis:** Cameron's literal teaching is "T2 = 2R" but bot uses
   pole-height-based T2.
