@@ -724,14 +724,86 @@ class AlpacaExecutor:
             log.error("submit_sell err %s: %s", symbol, e)
             return None
 
-    def market_close_all(self):
+    def market_close_all(self, max_attempts: int = 3,
+                         verify_timeout_sec: float = 30.0,
+                         poll_interval_sec: float = 1.5):
+        """HARD_FLAT failsafe — kritisch. Audit-Fix 2026-05-12 (Iteration 5):
+          - Bug HF-1: Single-shot ohne retry → jetzt 3 Attempts mit Backoff
+          - Bug HF-2: Keine Fill-Verification → jetzt Polling bis positions==0
+          - Bug HF-9: Bei finalem Fail per-Position individual close
+        Returns: True wenn Account am Ende flat, False sonst (CRITICAL)."""
         if self.dry_run:
-            log.info("[DRY] CLOSE ALL"); return
-        try:
-            self.client.close_all_positions(cancel_orders=True)
-            log.info("Closed all positions")
-        except Exception as e:
-            log.error("close_all err: %s", e)
+            log.info("[DRY] CLOSE ALL"); return True
+        import time as _t
+
+        def _list_positions():
+            try:
+                return list(self.client.get_all_positions() or [])
+            except Exception as e:
+                log.warning("list positions err: %s", e)
+                return None  # unknown — assume not flat
+
+        pre = _list_positions()
+        if pre == []:
+            log.info("market_close_all: account already flat")
+            return True
+        if pre is None:
+            log.warning("market_close_all: pre-list failed — proceeding blindly")
+        else:
+            log.info("market_close_all: %d positions to close: %s",
+                     len(pre), [getattr(p, "symbol", "?") for p in pre])
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                self.client.close_all_positions(cancel_orders=True)
+                log.info("close_all_positions submitted (attempt %d/%d)",
+                         attempt, max_attempts)
+            except Exception as e:
+                log.error("close_all err (attempt %d/%d): %s",
+                          attempt, max_attempts, e)
+            # Poll bis flat oder Timeout
+            deadline = _t.time() + verify_timeout_sec
+            while _t.time() < deadline:
+                cur = _list_positions()
+                if cur == []:
+                    log.info("market_close_all: account FLAT after attempt %d", attempt)
+                    return True
+                _t.sleep(poll_interval_sec)
+            # noch nicht flat → nächster Attempt
+            remaining = _list_positions()
+            log.warning("market_close_all: still %s positions after attempt %d",
+                        len(remaining) if remaining is not None else "?", attempt)
+
+        # Final Fallback: per-Position individual market-sell
+        log.error("market_close_all: %d attempts failed — per-position fallback",
+                  max_attempts)
+        leftover = _list_positions() or []
+        ok = 0
+        for p in leftover:
+            sym = getattr(p, "symbol", None)
+            qty = abs(int(float(getattr(p, "qty", 0) or 0)))
+            if not sym or qty <= 0:
+                continue
+            try:
+                self.cancel_open_orders_for(sym)
+                from alpaca.trading.requests import MarketOrderRequest
+                self.client.submit_order(MarketOrderRequest(
+                    symbol=sym, qty=qty, side=OrderSide.SELL,
+                    time_in_force=TimeInForce.DAY,
+                ))
+                log.warning("FALLBACK market-sell %s %d submitted", sym, qty)
+                ok += 1
+            except Exception as e:
+                log.error("FALLBACK close %s failed: %s", sym, e)
+        # Final verify
+        _t.sleep(3.0)
+        final = _list_positions()
+        if final == []:
+            log.info("market_close_all: account FLAT after fallback (%d submitted)", ok)
+            return True
+        log.error("market_close_all: CRITICAL — account NOT flat after all attempts: %s",
+                  [getattr(p, "symbol", "?") for p in (final or [])])
+        return False
 
 
 # ─── Bot Main Loop ──────────────────────────────────────────────────────────
