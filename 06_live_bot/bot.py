@@ -1324,7 +1324,12 @@ class Bot:
             self.executor.submit_sell_limit(
                 ts.symbol, ts.shares, bar["close"] - SLIPPAGE_CENTS, "macd_bear_cross"
             )
+            # Audit-Iter 11 (2026-05-12) — Bug-Fix MP-1:
+            # Nach T1-Partial fehlte hier die T1-Realisierung. Stop-Exit
+            # hatte den Fix, MACD-Exit übersah die Gewinne der half-position.
             pnl = (bar["close"] - ts.entry_price) * ts.shares
+            if ts.half_filled:
+                pnl += (ts.target1_price - ts.entry_price) * (ts.initial_shares - ts.shares)
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
             self.day.trades_completed_today += 1
@@ -1336,6 +1341,7 @@ class Bot:
             else:
                 # Audit-Bug-Fix 2026-05-12 (Iter 4): MACD-Win soll counter resetten
                 self.day.consecutive_losses = 0
+            self._check_daily_goal()  # MP-fix: war nur in T2/Stop-Exit
             self.logger.log({"event": "macd_exit", "symbol": ts.symbol,
                              "shares": ts.shares, "price": bar["close"], "pnl": pnl})
             log.info("  MACD-EXIT %s @ $%.2f (PnL $%.2f)", ts.symbol, bar["close"], pnl)
@@ -1358,6 +1364,10 @@ class Bot:
                     if self.day.consecutive_losses >= 2:
                         self.day.spiral_locked = True
                         log.warning("SPIRAL-DETECTION: 2 consecutive losses → STOP")
+                else:
+                    # Quick-Exit-Win (rare) auch consecutive_losses resetten
+                    self.day.consecutive_losses = 0
+                self._check_daily_goal()  # MP-fix: war nur in T2/Stop-Exit
                 self.logger.log({"event": "quick_exit", "symbol": ts.symbol,
                                  "shares": ts.shares, "price": bar["close"], "pnl": pnl})
                 log.info("  QUICK-EXIT %s: -%.2fc against entry within %d bars (PnL $%.2f)",
