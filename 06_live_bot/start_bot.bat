@@ -1,14 +1,14 @@
 @echo off
 REM Cameron-Bot Auto-Start
 REM Wird automatisch nach Windows-Reboot gestartet (Startup-Folder)
+REM
+REM Audit-Iter 36 (2026-05-13): hardcoded API-Keys entfernt (Security-Bug).
+REM secrets_loader.py laedt aus 06_live_bot\.env (gitignored).
+REM Stelle sicher dass .env existiert mit APCA_API_KEY_ID + APCA_API_SECRET_KEY.
 
-cd /d C:\Users\Szymon\ross-cameron\06_live_bot
+cd /d "%~dp0"
 
-REM Env-Vars setzen (falls noch nicht durch setx geladen)
-set APCA_API_KEY_ID=PKBERNOMU23XEGRU5SPD3JZGDX
-set APCA_API_SECRET_KEY=FZBBx9v8Pw7eaLRFD8wW51WNnVkWeWNkts2D7zRSaxaB
-
-REM Bot im Hintergrund starten
+REM Bot im Hintergrund starten — keys werden aus .env geladen
 start /B python bot.py --daemon > daemon.log 2>&1
 
 echo Bot gestartet im Hintergrund. Log: daemon.log

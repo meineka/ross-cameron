@@ -759,26 +759,40 @@ class AlpacaExecutor:
             return None
 
     def submit_bracket_buy(self, symbol: str, shares: int, entry: float,
-                           stop: float, take_profit: float) -> str | None:
+                           stop: float, take_profit: float,
+                           wait_fill_seconds: float = 20.0) -> dict:
         """Cameron-Default: Entry-Limit + Stop-Loss + Take-Profit als BRACKET.
-        Alle drei broker-seitig — Position ist NIE 'nackt' wenn entry fillt.
 
-        Bug-Fix 2026-05-12: Sanity-Check vor submit. Wenn stop >= entry oder
-        tp <= entry → invalid order, log + skip. Post-Fill-Check macht
-        manage_position-Loop (next_bar bemerkt Position + setzt fresh OCO
-        wenn nötig). Bei thin-liquidity Stocks mit Gap-Fill ist das die
-        einzige Methode den HSPT-Bug zu vermeiden.
+        Review-fix 2026-05-13 (Reviewer's #1 P1 concern): vorher hat diese
+        Funktion order_id zurückgegeben sobald submit_order returned —
+        Bot dachte position ist offen obwohl nur SUBMITTED, nicht FILLED.
+        Konsequenz: in_position=True, PnL berechnet auf geplanten preisen,
+        broker-state und bot-state out of sync.
+
+        Jetzt: synchron auf Fill warten (wait_fill_seconds default 20s),
+        return-dict mit ECHTEM fill_price oder failure-status. Caller
+        nutzt fill_price statt geplante entry für state.
+
+        Returns dict:
+          {"status": "filled", "order_id": "...", "fill_price": 10.23,
+           "shares": 100}  ← position is real, use these values
+          {"status": "rejected", "order_id": "..."}  ← do NOT set in_position
+          {"status": "timeout", "order_id": "..."}  ← order canceled, do NOT
+          {"status": "failed", "reason": "..."}  ← submit raised, no order
         """
         if stop >= entry:
             log.error("BRACKET-BUY %s INVALID: stop %.2f >= entry %.2f — skip", symbol, stop, entry)
-            return None
+            return {"status": "failed", "reason": "stop>=entry"}
         if take_profit <= entry:
             log.error("BRACKET-BUY %s INVALID: tp %.2f <= entry %.2f — skip", symbol, take_profit, entry)
-            return None
+            return {"status": "failed", "reason": "tp<=entry"}
         if self.dry_run:
             log.info("[DRY] BRACKET-BUY %s %d entry=%.2f stop=%.2f tp=%.2f",
                      symbol, shares, entry, stop, take_profit)
-            return f"dryrun-{symbol}-{datetime.now().timestamp()}"
+            # In dry-run wir SIMULIEREN einen fill bei limit-price
+            return {"status": "filled",
+                    "order_id": f"dryrun-{symbol}-{datetime.now().timestamp()}",
+                    "fill_price": entry, "shares": shares}
         try:
             req = LimitOrderRequest(
                 symbol=symbol, qty=shares, side=OrderSide.BUY,
@@ -788,12 +802,53 @@ class AlpacaExecutor:
                 stop_loss=StopLossRequest(stop_price=round(stop, 2)),
             )
             o = self.client.submit_order(req)
-            log.info("BRACKET-BUY %s %d entry=%.2f STOP=%.2f TP=%.2f → %s",
-                     symbol, shares, entry, stop, take_profit, o.id)
-            return o.id
+            order_id = o.id
+            log.info("BRACKET-BUY %s %d entry=%.2f STOP=%.2f TP=%.2f → %s (waiting fill)",
+                     symbol, shares, entry, stop, take_profit, order_id)
         except Exception as e:
             log.error("submit_bracket_buy err %s: %s", symbol, e)
-            return None
+            return {"status": "failed", "reason": str(e)}
+        # Poll for fill
+        import time as _t
+        deadline = _t.time() + wait_fill_seconds
+        while _t.time() < deadline:
+            _t.sleep(1)
+            try:
+                refreshed = self.client.get_order_by_id(order_id)
+            except Exception as e:
+                log.debug("fill-poll err %s: %s", symbol, e)
+                continue
+            status = refreshed.status
+            # Status comparison robust gegen alpaca-py enum-drift (wie SB-2 fix)
+            status_str = str(getattr(status, "value", status)).strip().upper().rsplit(".", 1)[-1]
+            if status_str == "FILLED":
+                fp = getattr(refreshed, "filled_avg_price", None)
+                fq = getattr(refreshed, "filled_qty", None)
+                try:
+                    fill_price = float(fp) if fp else None
+                except (TypeError, ValueError):
+                    fill_price = None
+                try:
+                    fill_qty = int(float(fq)) if fq else shares
+                except (TypeError, ValueError):
+                    fill_qty = shares
+                if fill_price is None or fill_price <= 0:
+                    log.warning("BRACKET-BUY %s filled but no avg_price — using limit", symbol)
+                    fill_price = entry
+                log.info("BRACKET-BUY %s FILLED @ $%.4f (planned $%.2f, qty %d/%d)",
+                         symbol, fill_price, entry, fill_qty, shares)
+                return {"status": "filled", "order_id": order_id,
+                        "fill_price": fill_price, "shares": fill_qty}
+            if status_str in ("REJECTED", "CANCELED", "EXPIRED"):
+                log.warning("BRACKET-BUY %s order %s status=%s", symbol, order_id, status_str)
+                return {"status": "rejected", "order_id": order_id}
+        # Timeout — cancel the unfilled order
+        log.warning("BRACKET-BUY %s TIMEOUT — cancelling order %s", symbol, order_id)
+        try:
+            self.client.cancel_order_by_id(order_id)
+        except Exception:
+            pass
+        return {"status": "timeout", "order_id": order_id}
 
     def verify_and_repair_protection(self, symbol: str, fill_price: float,
                                      planned_stop: float, planned_tp: float,
@@ -1039,17 +1094,24 @@ class AlpacaExecutor:
         ok = 0
         for p in leftover:
             sym = getattr(p, "symbol", None)
-            qty = abs(int(float(getattr(p, "qty", 0) or 0)))
+            raw_qty = float(getattr(p, "qty", 0) or 0)
+            qty = abs(int(raw_qty))
             if not sym or qty <= 0:
                 continue
+            # Review-fix 2026-05-13: SHORT-positions (qty<0) brauchen BUY zum
+            # schließen, nicht SELL. Vorher würde der Fallback shorts noch
+            # weiter shorten — bot würde mehr Risiko aufbauen statt flatten.
+            side = OrderSide.SELL if raw_qty > 0 else OrderSide.BUY
             try:
                 self.cancel_open_orders_for(sym)
                 from alpaca.trading.requests import MarketOrderRequest
                 self.client.submit_order(MarketOrderRequest(
-                    symbol=sym, qty=qty, side=OrderSide.SELL,
+                    symbol=sym, qty=qty, side=side,
                     time_in_force=TimeInForce.DAY,
                 ))
-                log.warning("FALLBACK market-sell %s %d submitted", sym, qty)
+                log.warning("FALLBACK market-%s %s %d submitted",
+                            side.value if hasattr(side, 'value') else str(side),
+                            sym, qty)
                 ok += 1
             except Exception as e:
                 log.error("FALLBACK close %s failed: %s", sym, e)
@@ -1275,14 +1337,37 @@ class Bot:
                 else:
                     await asyncio.sleep(1)  # short pause vor reconnect
 
+        # Review-fix 2026-05-13: explicit task management statt asyncio.gather.
+        # Vorher: time_and_health_loop returnt nach HARD_FLAT, aber ws_loop
+        # läuft weiter → bot blockt bis WS-disconnect oder externe Kill.
+        # Jetzt: FIRST_COMPLETED + cancel pending → sauber raus.
+        ws_task = asyncio.create_task(ws_loop(), name="ws_loop")
+        time_task = asyncio.create_task(time_and_health_loop(), name="time_loop")
         try:
-            await asyncio.gather(ws_loop(), time_and_health_loop())
+            done, pending = await asyncio.wait(
+                {ws_task, time_task}, return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
+                try:
+                    await asyncio.wait_for(t, timeout=5.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+            # If ws_task finished first (=critical exit), trigger flatten
+            if ws_task in done and not (time_task in done):
+                log.warning("ws_loop ended first — emergency flatten")
+                self.executor.market_close_all()
+                self._log_day_summary()
         except KeyboardInterrupt:
             log.info("KeyboardInterrupt — closing all positions")
+            for t in (ws_task, time_task):
+                t.cancel()
             self.executor.market_close_all()
             self._log_day_summary()
         except Exception as e:
             log.error("Bot.run unhandled error: %s", e, exc_info=True)
+            for t in (ws_task, time_task):
+                t.cancel()
             self.executor.market_close_all()
             self._log_day_summary()
 
@@ -1456,7 +1541,7 @@ class Bot:
             ts.bars.append(bar_dict)
             try:
                 ts_dt = bar_dict["timestamp"]
-                ny_time = ts_dt.astimezone(timezone(timedelta(hours=-4))).time()
+                ny_time = ts_dt.astimezone(NY_TZ).time()
             except Exception:
                 ny_time = datetime.now(NY_TZ).time()
 
@@ -1481,7 +1566,9 @@ class Bot:
                 return
             self.day.patterns_detected += 1
         except Exception as e:
-            log.error("handle_bar(%s) crashed: %s", getattr(bar, "symbol", "?"), e, exc_info=True)
+            # Review-fix 2026-05-13: vorher `getattr(bar, ...)` aber `bar` ist
+            # in handle_bar_5min nicht definiert (NameError im error path).
+            log.error("handle_bar_5min(%s) crashed: %s", sym, e, exc_info=True)
             return
         log.info("PATTERN %s: pole=%dx flag=%dx height=$%.2f → entry $%.2f stop $%.2f",
                  sym, params["pole_candles"], params["flag_candles"],
@@ -1525,35 +1612,57 @@ class Bot:
         log.info("  SUBMITTING BRACKET-BUY %s %d shares  entry=$%.2f STOP=$%.2f TP2=$%.2f (rank=%d, spy_mult=%.1f)",
                  sym, shares, params["entry_price"], params["stop_price"],
                  params["target2"], ts.rank, self.day.spy_size_multiplier)
-        order_id = self.executor.submit_bracket_buy(
+        # Review-fix 2026-05-13: submit_bracket_buy returns dict mit echtem
+        # fill-status. Nur bei "filled" position aufmachen.
+        result = self.executor.submit_bracket_buy(
             sym, shares, params["entry_price"],
             params["stop_price"], params["target2"],
         )
-        if order_id:
-            self.day.orders_submitted += 1
-        else:
+        if result["status"] != "filled":
             self.day.orders_failed += 1
-        if order_id:
-            ts.in_position = True
-            ts.entry_price = params["entry_price"]
-            ts.entry_bar_idx = self.day.bars_received
-            ts.bars_since_entry = 0
-            ts.stop_price = params["stop_price"]
-            ts.target1_price = params["target1"]
-            ts.target2_price = params["target2"]
-            ts.shares = shares
-            ts.initial_shares = shares
-            ts.adds_count = 0
-            ts.last_add_price = params["entry_price"]
-            ts.pole_candles = params["pole_candles"]
-            ts.flag_candles = params["flag_candles"]
-            ts.pole_height = params["pole_height"]
-            ts.half_filled = False
-            self.logger.log({
-                "event": "entry", "symbol": sym, "rank": ts.rank, "score": ts.score,
-                **params, "shares": shares, "order_id": order_id,
-                "spy_mult": self.day.spy_size_multiplier,
-            })
+            log.warning("ENTRY %s NOT-FILLED (%s) — keeping in_position=False",
+                        sym, result.get("status"))
+            return
+        self.day.orders_submitted += 1
+        actual_fill_price = result["fill_price"]
+        actual_shares = result["shares"]
+        order_id = result["order_id"]
+        # Re-compute T1 / T2 / Stop relativ zum ECHTEN fill (kann von limit
+        # abweichen wenn besserer fill, oder nahe limit bei standard fill)
+        actual_stop = params["stop_price"]
+        # If actual fill below planned stop, recompute (HSPT-bug)
+        if actual_stop >= actual_fill_price:
+            risk_per_share = max(actual_fill_price * 0.05, 0.05)  # ~5% min
+            actual_stop = round(actual_fill_price - risk_per_share, 2)
+            log.warning("ENTRY %s: fill $%.4f below planned stop $%.2f — "
+                        "recomputed stop to $%.2f", sym, actual_fill_price,
+                        params["stop_price"], actual_stop)
+        actual_t1 = round(actual_fill_price + (actual_fill_price - actual_stop), 2)
+        actual_t2 = params["target2"]
+        if actual_t2 <= actual_fill_price:
+            actual_t2 = round(actual_fill_price + 2 * (actual_fill_price - actual_stop), 2)
+        ts.in_position = True
+        ts.entry_price = actual_fill_price       # ← echter fill, nicht plan
+        ts.entry_bar_idx = self.day.bars_received
+        ts.bars_since_entry = 0
+        ts.stop_price = actual_stop
+        ts.target1_price = actual_t1
+        ts.target2_price = actual_t2
+        ts.shares = actual_shares                 # ← echte qty (kann partial)
+        ts.initial_shares = actual_shares
+        ts.adds_count = 0
+        ts.last_add_price = actual_fill_price
+        ts.pole_candles = params["pole_candles"]
+        ts.flag_candles = params["flag_candles"]
+        ts.pole_height = params["pole_height"]
+        ts.half_filled = False
+        self.logger.log({
+            "event": "entry", "symbol": sym, "rank": ts.rank, "score": ts.score,
+            **params, "shares": actual_shares,
+            "order_id": order_id, "fill_price": actual_fill_price,
+            "actual_stop": actual_stop, "actual_t1": actual_t1, "actual_t2": actual_t2,
+            "spy_mult": self.day.spy_size_multiplier,
+        })
 
     async def manage_position(self, ts: TickerState, bar: dict, ny_time: dtime):
         ts.bars_since_entry += 1
@@ -1732,10 +1841,12 @@ class ReplayBot:
     def submit_sell(self, sym, shares, price, reason): log.info("[REPLAY] SELL %s %d @ %.2f (%s)", sym, shares, price, reason)
 
     def run(self, target_date: str):
-        bars_path = Path(__file__).parent.parent / "04_backtest" / "data_pilot" / "intraday_5m.parquet"
-        cands_path = Path(__file__).parent.parent / "04_backtest" / "data_pilot" / "candidates.parquet"
-        if not bars_path.exists():
-            log.error("Need pilot data — run 04_backtest/bootstrap.py first"); return
+        bars_path, cands_path = find_pilot_data_paths()
+        if bars_path is None:
+            log.error("Need pilot data — looked at: backtest_data/ and "
+                      "04_backtest/data_pilot/. Run 04_backtest/bootstrap.py "
+                      "or ensure backtest_data/intraday_5m.parquet exists.")
+            return
 
         bars = pd.read_parquet(bars_path)
         cands = pd.read_parquet(cands_path)
@@ -1908,8 +2019,31 @@ def status_check():
         print(f"  {o.created_at.strftime('%H:%M')} {o.side} {o.qty} {o.symbol} @ ${o.limit_price or 'mkt'} → {o.status}")
 
 
+# Pilot-Daten-Pfad mit Fallback. Review-fix 2026-05-13: gelieferte
+# REVIEW_PACKAGE hat `backtest_data/`, repo hat `04_backtest/data_pilot/`.
+def find_pilot_data_paths() -> tuple[Path | None, Path | None]:
+    """Returns (bars_path, candidates_path) oder (None, None)."""
+    root = Path(__file__).resolve().parent.parent
+    candidates = [
+        root / "backtest_data",
+        root / "04_backtest" / "data_pilot",
+    ]
+    for d in candidates:
+        bars = d / "intraday_5m.parquet"
+        cands = d / "candidates.parquet"
+        if bars.exists() and cands.exists():
+            return bars, cands
+    return None, None
+
+
 # ─── Daemon Mode (sleep until premarket, run one day, repeat) ──────────────
-NY_TZ = timezone(timedelta(hours=-4))   # ET fixed (Mai = EDT)
+# DST-aware via zoneinfo. Vorher: fixed UTC-4 brach im Winter (EST = UTC-5).
+try:
+    from zoneinfo import ZoneInfo
+    NY_TZ = ZoneInfo("America/New_York")
+except ImportError:
+    # Python <3.9 fallback (shouldn't happen in our setup)
+    NY_TZ = timezone(timedelta(hours=-4))
 PREMARKET_SCAN_TIME = dtime(6, 30)      # 06:30 ET = 12:30 CET
 
 

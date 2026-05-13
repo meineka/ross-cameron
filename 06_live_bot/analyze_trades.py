@@ -10,7 +10,10 @@ import pandas as pd
 import bot as bot_mod
 
 bot_mod.log.setLevel(logging.ERROR)
-bars_path = Path(__file__).parent.parent / "04_backtest" / "data_pilot" / "intraday_5m.parquet"
+from bot import find_pilot_data_paths
+bars_path, _ = find_pilot_data_paths()
+if bars_path is None:
+    raise FileNotFoundError("pilot data not found at backtest_data/ or 04_backtest/data_pilot/")
 bars = pd.read_parquet(bars_path)
 tc = next(c for c in bars.columns if "time" in c.lower() or "date" in c.lower())
 bars[tc] = pd.to_datetime(bars[tc], utc=True)

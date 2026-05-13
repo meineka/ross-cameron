@@ -13,11 +13,13 @@ sys.path.insert(0, str(ROOT / "06_live_bot"))
 
 # ─── Pre-Submit-Sanity-Check ─────────────────────────────────────────────────
 def test_bracket_buy_rejects_stop_above_entry():
+    """Review-fix 2026-05-13: return-shape changed from order_id|None
+    to dict with 'status' field."""
     import bot
     ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=False)
     ex.client = MagicMock()
-    rid = ex.submit_bracket_buy("AAA", 5, entry=10.0, stop=10.50, take_profit=12.0)
-    assert rid is None
+    result = ex.submit_bracket_buy("AAA", 5, entry=10.0, stop=10.50, take_profit=12.0)
+    assert result["status"] == "failed"
     ex.client.submit_order.assert_not_called()
 
 
@@ -25,17 +27,30 @@ def test_bracket_buy_rejects_tp_below_entry():
     import bot
     ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=False)
     ex.client = MagicMock()
-    rid = ex.submit_bracket_buy("AAA", 5, entry=10.0, stop=9.0, take_profit=9.5)
-    assert rid is None
+    result = ex.submit_bracket_buy("AAA", 5, entry=10.0, stop=9.0, take_profit=9.5)
+    assert result["status"] == "failed"
 
 
-def test_bracket_buy_accepts_valid():
+def test_bracket_buy_accepts_valid_returns_filled_dict():
+    """Valid bracket should now poll for fill and return filled status."""
     import bot
+    import unittest.mock as _m
     ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=False)
     ex.client = MagicMock()
     ex.client.submit_order.return_value = MagicMock(id="oid")
-    rid = ex.submit_bracket_buy("AAA", 5, entry=10.0, stop=9.5, take_profit=11.0)
-    assert rid == "oid"
+    # Mock fill response
+    filled_order = MagicMock()
+    filled_order.status = "filled"
+    filled_order.filled_avg_price = 10.05
+    filled_order.filled_qty = 5
+    ex.client.get_order_by_id.return_value = filled_order
+    with _m.patch("time.sleep"):
+        result = ex.submit_bracket_buy("AAA", 5, entry=10.0, stop=9.5, take_profit=11.0,
+                                         wait_fill_seconds=2)
+    assert result["status"] == "filled"
+    assert result["order_id"] == "oid"
+    assert result["fill_price"] == 10.05
+    assert result["shares"] == 5
 
 
 # ─── Post-Fill-Repair ────────────────────────────────────────────────────────

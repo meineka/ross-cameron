@@ -1,12 +1,12 @@
 @echo off
 REM Cameron-Bot Auto-Start (Bot + Watchdog)
 REM Wird automatisch nach Windows-Reboot gestartet (Startup-Folder)
+REM
+REM Audit-Iter 36 (2026-05-13): hardcoded API-Keys entfernt (Security-Bug).
+REM secrets_loader.py laedt automatisch aus 06_live_bot\.env (gitignored).
+REM Hardcoded user path durch %~dp0 ersetzt (portable).
 
-cd /d C:\Users\Szymon\ross-cameron\06_live_bot
-
-REM Env-Vars (falls setx noch nicht greift)
-set APCA_API_KEY_ID=PKBERNOMU23XEGRU5SPD3JZGDX
-set APCA_API_SECRET_KEY=FZBBx9v8Pw7eaLRFD8wW51WNnVkWeWNkts2D7zRSaxaB
+cd /d "%~dp0"
 
 REM Bot im Hintergrund (detached process)
 start "" /B python bot.py --daemon > daemon.log 2>&1
@@ -21,4 +21,6 @@ echo   - daemon.log    (Bot-Output)
 echo   - watchdog.log  (Watchdog-Output)
 echo.
 echo Verify:  tasklist ^| findstr python
-echo Stop:    taskkill /F /IM python.exe
+echo Stop:    nur den bot.py-Prozess killen via PID (nicht /IM python.exe — killed alle!)
+echo          tasklist /V ^| findstr bot.py
+echo          taskkill /F /PID ^<bot-pid^>
