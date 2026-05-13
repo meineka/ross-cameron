@@ -188,6 +188,8 @@ class TickerState:
     initial_shares: int = 0         # for pyramiding-tracking
     t1_shares_sold: int = 0         # tatsächlich am T1 verkaufte Shares
                                     # (Audit-Iter 12: bei Pyramiding ≠ initial*0.5)
+    intraday_pct: float = 0.0       # Audit-Iter 22: für pd_size_multiplier
+    rvol_proxy: float = 0.0         # Audit-Iter 22: für pd_size_multiplier
     adds_count: int = 0             # #1 add-counter
     last_add_price: float = 0.0
     pole_candles: int = 0
@@ -383,8 +385,14 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
         log.info("  #%d %s  $%.2f  +%.1f%%  RVOL %.1fx  score=%.0f",
                  rank, row.ticker, row.close, row.intraday_pct, row.rvol_proxy, row.score)
     log.info("=" * 60)
+    # Audit-Iter 22: intraday_pct + rvol_proxy in TickerState durchreichen,
+    # damit pd_size_multiplier den vollen Filter (nicht nur Score) nutzen kann.
     return [
-        TickerState(symbol=row.ticker, rank=int(rank+1), score=float(row.score))
+        TickerState(
+            symbol=row.ticker, rank=int(rank+1), score=float(row.score),
+            intraday_pct=float(getattr(row, "intraday_pct", 0.0) or 0.0),
+            rvol_proxy=float(getattr(row, "rvol_proxy", 0.0) or 0.0),
+        )
         for rank, row in enumerate(all_cands.itertuples())
     ]
 
@@ -1345,11 +1353,15 @@ class Bot:
 
         # #6 SPY-Size-Multiplier anwenden
         shares = int(shares * self.day.spy_size_multiplier)
-        # Pump-Dump-Risiko: extremer Score → Position drastisch reduzieren (Fix 12.05)
-        pd_mult = pd_size_multiplier(ts.score)
+        # Pump-Dump-Risiko: extremer Score ODER extreme Pct+RVOL-Kombi →
+        # Position drastisch reduzieren. Audit-Iter 22 (Bug PD-1):
+        # vorher nur Score gepasst, secondary-Filter (>100% + >50x RVOL)
+        # war dead code. Jetzt voller Filter.
+        pd_mult = pd_size_multiplier(ts.score, ts.intraday_pct, ts.rvol_proxy)
         if pd_mult < 1.0:
             shares = int(shares * pd_mult)
-            log.warning("  PUMP-DUMP-RISK %s (score=%.0f) → size %.0fx", sym, ts.score, pd_mult)
+            log.warning("  PUMP-DUMP-RISK %s (score=%.0f pct=%.1f rvol=%.1f) → size %.0fx",
+                        sym, ts.score, ts.intraday_pct, ts.rvol_proxy, pd_mult)
         if shares < 1:
             self.day.patterns_rejected_size_zero += 1
             log.info("  REJECT %s: shares=0 nach SPY-multiplier %.2fx",
