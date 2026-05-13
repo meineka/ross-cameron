@@ -11,21 +11,38 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 7: MAX_POLE_T2_R = 3.5 (cap overextended setups)
+- **Hypothesis:** Diagnose der 13 pilot-trades zeigte alle 3 Verluste
+  (FGI t2R=3.57, MSC t2R=4.14, ANNA t2R=2.39) hatten hohe Pole-zu-Risk
+  Ratios. Counter-intuition: großer Pole = exhausted/volatile Stock =
+  höheres Loss-Risiko, nicht "stronger" setup.
+- **Backtest (39 days):**
+  - no cap:    13 trd / +$120 / 75% / Sharpe 9.64
+  - t2R<=4.0:  12 trd / +$133 / 82% / Sharpe 10.65
+  - **t2R<=3.5: 11 trd / +$145 / 90% / Sharpe 11.65 ← SELECTED**
+  - t2R<=3.0:  11 trd / +$127 / 80% / Sharpe 10.20
+  - t2R<=2.5:  10 trd / +$101 / 78% / Sharpe 8.08
+- **Cumulative effect Iter 1+2+7:** +$70→+$145 PnL (+93%), Sharpe 2.45→11.65
+  (+376%), MaxDD -$30→-$12.48 (-59%).
+- **Cameron-conform:** Analog zu "don't add to overstretched stock".
+  T2-Calc unverändert, nur Entry-Veto bei extreme poles.
+- **Commit:** `5954ea6`
+
 ### Iter 2: POLE_TOPPING_TAIL_MAX 0.4 → 0.5
 - **Hypothesis:** Cameron-spec literal value (yaml + code both said 50%, impl 40%)
 - **Backtest (with Iter 1 baseline):** 9→13 trades, $73→$120 PnL,
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative effect Iter 1+2:**
+**Cumulative effect Iter 1+2+7:**
 
 | Metric | Original | Now | Δ |
 |---|---:|---:|---|
-| Trades | 17 | 13 | -4 |
-| PnL | $75.17 | $120.47 | +60% |
-| Win-Rate | 67% | 75% | +8% |
-| MaxDD | -$30.63 | -$12.50 | -59% |
-| Sharpe-like | 2.45 | 9.64 | +293% |
+| Trades | 17 | 11 | -6 |
+| PnL | $75.17 | $145.44 | +93% |
+| Win-Rate | 67% | 90% | +23% |
+| MaxDD | -$30.63 | -$12.48 | -59% |
+| Sharpe-like | 2.45 | 11.65 | +376% |
 
 ## Tested but NOT committed (negative or inconclusive)
 
