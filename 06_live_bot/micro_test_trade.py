@@ -20,11 +20,32 @@ from alpaca.data.requests import StockSnapshotRequest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from secrets_loader import get_alpaca_keys
+from watchlist_persist import load_watchlist_if_fresh
 KEY, SEC = get_alpaca_keys()
 
-# Heutige Watchlist + ein paar liquide Cameron-Klassiker als Backup
-CANDIDATES = ["TRAW", "WTF", "WEST", "ANPA", "STFS", "CODX", "MASK", "RXT"]
+# Audit-Iter 32 (Bug MT-3): heutige Watchlist von Disk laden statt hardcoded.
+# Fallback auf liquide Cameron-Klassiker wenn no fresh watchlist.
+HARDCODED_FALLBACK = ["TRAW", "WTF", "WEST", "ANPA", "STFS", "CODX", "MASK", "RXT"]
+CANDIDATES = load_watchlist_if_fresh() or HARDCODED_FALLBACK
 FALLBACK = "SPY"  # immer tradable, immer liquide
+
+
+def _status_is(status, target: str) -> bool:
+    """Audit-Iter 32 (Bug MT-1): tolerant gegen alpaca-py Enum-Repr-Drift.
+    Mirror von safe_bracket.py's _status_is helper."""
+    if status is None:
+        return False
+    for accessor in (
+        getattr(status, "value", None),
+        getattr(status, "name", None),
+        str(status),
+        str(status).rsplit(".", 1)[-1] if "." in str(status) else None,
+    ):
+        if accessor is None:
+            continue
+        if str(accessor).strip().upper() == target.upper():
+            return True
+    return False
 
 tc = TradingClient(KEY, SEC, paper=True)
 dc = StockHistoricalDataClient(KEY, SEC)
@@ -87,19 +108,20 @@ order = tc.submit_order(MarketOrderRequest(
 ))
 print(f"\n[BUY] order_id={order.id}  status={order.status}")
 
-# 3. Wait for fill
+# 3. Wait for fill (Audit-Iter 32, Bug MT-1: robust status compare)
 filled_buy = None
 for i in range(15):
     time.sleep(1)
     o = tc.get_order_by_id(order.id)
-    if str(o.status) in ("OrderStatus.FILLED", "filled"):
+    if _status_is(o.status, "FILLED"):
         filled_buy = float(o.filled_avg_price)
         print(f"  filled @ ${filled_buy:.4f} after {i+1}s")
         break
     print(f"  status: {o.status}")
 else:
     print("  TIMEOUT — cancel + abort")
-    tc.cancel_order_by_id(order.id)
+    try: tc.cancel_order_by_id(order.id)
+    except Exception: pass
     sys.exit(1)
 
 # 4. Hold 5s
@@ -113,11 +135,27 @@ filled_sell = None
 for i in range(15):
     time.sleep(1)
     o = tc.get_order_by_id(close_order.id)
-    if str(o.status) in ("OrderStatus.FILLED", "filled"):
+    if _status_is(o.status, "FILLED"):
         filled_sell = float(o.filled_avg_price)
         print(f"  filled @ ${filled_sell:.4f} after {i+1}s")
         break
     print(f"  status: {o.status}")
+else:
+    # Audit-Iter 32 (Bug MT-2): sell timeout ohne cleanup → stranded position.
+    # Versuche close_position nochmal, dann manual cancel der pending order.
+    print("  SELL-TIMEOUT — position may be stranded! Attempting cleanup…")
+    try:
+        tc.cancel_order_by_id(close_order.id)
+        print(f"    cancelled close order {close_order.id}")
+    except Exception as e:
+        print(f"    cancel failed: {e}")
+    try:
+        # Retry close
+        tc.close_position(sym)
+        print(f"    second close attempt submitted for {sym}")
+    except Exception as e:
+        print(f"    second close failed: {e}")
+    print("  CHECK alpaca dashboard manually for open positions!")
 
 if filled_buy and filled_sell:
     pnl = filled_sell - filled_buy
