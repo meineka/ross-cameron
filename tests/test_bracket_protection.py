@@ -55,18 +55,22 @@ def test_cancel_open_orders_iterates():
 
 # ─── protect_position ────────────────────────────────────────────────────────
 def test_protect_position_cancels_then_resubmits_stop_and_tp():
+    """Audit-Iter 7: jetzt OCO-Order (atomic) statt 2 separater Orders.
+    Bug-Fix BO-1: separate Orders konnten oversold/SHORT auslösen."""
+    from alpaca.trading.enums import OrderClass
     import bot
     ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=False)
     ex.client = MagicMock()
     ex.client.get_orders.return_value = []
+    ex.client.submit_order.return_value = MagicMock(id="oco-1")
     ex.protect_position("AAA", 5, stop=9.0, take_profit=11.0)
-    # Mindestens zwei submits: Stop + TP
+    # Genau EINE OCO-Order (atomic — Stop + TP nested)
     sides = [c[0][0] for c in ex.client.submit_order.call_args_list]
-    assert len(sides) == 2
-    # Eine ist Stop, eine Limit
-    has_stop = any(getattr(s, "stop_price", None) == 9.0 for s in sides)
-    has_tp   = any(getattr(s, "limit_price", None) == 11.0 for s in sides)
-    assert has_stop and has_tp
+    assert len(sides) == 1
+    oco = sides[0]
+    assert oco.order_class == OrderClass.OCO
+    assert float(oco.stop_loss.stop_price) == 9.0
+    assert float(oco.take_profit.limit_price) == 11.0
 
 
 # ─── submit_sell_limit cancelt erst Children ─────────────────────────────────

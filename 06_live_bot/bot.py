@@ -656,31 +656,67 @@ class AlpacaExecutor:
             log.error("REPAIR failed for %s: %s", symbol, e)
             return False
 
-    def protect_position(self, symbol: str, shares: int, stop: float, take_profit: float) -> None:
+    def protect_position(self, symbol: str, shares: int, stop: float, take_profit: float) -> bool:
         """Setze für eine bestehende long-Position broker-seitig OCO-Schutz
-        (Stop + Take-Profit). Nötig nach T1-Partial oder Pyramiding-Add."""
-        if self.dry_run or shares < 1:
-            return
+        (Stop + Take-Profit). Nötig nach T1-Partial oder Pyramiding-Add.
+
+        Audit-Iter 7 (2026-05-12) — CRITICAL Bug-Fix BO-1/BO-3:
+          Vorher zwei separate Orders (StopOrder + LimitOrder). Wenn Stop fillt,
+          blieb TP offen → wenn Preis das TP-Level später streifte → OVERSOLD
+          (Account wurde SHORT). Jetzt OCO: One-Cancels-Other atomic, kein
+          Drift möglich. Sanity-Check stop < take_profit + Validity-Guards.
+
+        Returns: True wenn protection-Order beim Broker ist, False sonst."""
+        if self.dry_run:
+            log.info("[DRY] PROTECT %s %d  STOP=%.2f  TP=%.2f",
+                     symbol, shares, stop, take_profit)
+            return True
+        if shares < 1:
+            log.warning("protect_position: shares=%d for %s — skip", shares, symbol)
+            return False
+        if stop >= take_profit:
+            log.error("protect_position %s INVALID: stop %.2f >= tp %.2f — skip",
+                      symbol, stop, take_profit)
+            return False
         # Alte Schutz-Orders weg, damit Quantity passt
         self.cancel_open_orders_for(symbol)
-        # Stop-Order
-        try:
-            from alpaca.trading.requests import StopOrderRequest
-            self.client.submit_order(StopOrderRequest(
-                symbol=symbol, qty=shares, side=OrderSide.SELL,
-                time_in_force=TimeInForce.DAY, stop_price=round(stop, 2),
-            ))
-        except Exception as e:
-            log.warning("protect-stop %s err: %s", symbol, e)
-        # Take-Profit-Limit
+        # OCO atomic Schutz — eines greift, das andere wird auto-cancelled
         try:
             self.client.submit_order(LimitOrderRequest(
                 symbol=symbol, qty=shares, side=OrderSide.SELL,
-                time_in_force=TimeInForce.DAY, limit_price=round(take_profit, 2),
+                time_in_force=TimeInForce.DAY,
+                limit_price=round(take_profit, 2),
+                order_class=OrderClass.OCO,
+                take_profit=TakeProfitRequest(limit_price=round(take_profit, 2)),
+                stop_loss=StopLossRequest(stop_price=round(stop, 2)),
             ))
+            log.info("  PROTECT-OCO %s %d  STOP=%.2f  TP=%.2f",
+                     symbol, shares, stop, take_profit)
+            return True
         except Exception as e:
-            log.warning("protect-tp %s err: %s", symbol, e)
-        log.info("  PROTECT %s %d  STOP=%.2f  TP=%.2f", symbol, shares, stop, take_profit)
+            log.error("protect-OCO %s failed: %s — falling back to separate stop+tp",
+                      symbol, e)
+            # Fallback: separate orders. Risiko von oversold im Edge-Case
+            # akzeptiert vs. Risiko von unprotected position.
+            ok_stop = False
+            try:
+                from alpaca.trading.requests import StopOrderRequest
+                self.client.submit_order(StopOrderRequest(
+                    symbol=symbol, qty=shares, side=OrderSide.SELL,
+                    time_in_force=TimeInForce.DAY, stop_price=round(stop, 2),
+                ))
+                ok_stop = True
+            except Exception as e2:
+                log.error("fallback-stop %s err: %s", symbol, e2)
+            try:
+                self.client.submit_order(LimitOrderRequest(
+                    symbol=symbol, qty=shares, side=OrderSide.SELL,
+                    time_in_force=TimeInForce.DAY,
+                    limit_price=round(take_profit, 2),
+                ))
+            except Exception as e2:
+                log.error("fallback-tp %s err: %s", symbol, e2)
+            return ok_stop  # mindestens Stop muss stehen
 
     def cancel_open_orders_for(self, symbol: str) -> int:
         """Cancel alle offenen Orders eines Symbols — nötig vor T1-Partial oder
