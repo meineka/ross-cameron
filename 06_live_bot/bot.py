@@ -411,7 +411,12 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
     # Price-Range-Check (Cameron-Veto: Preis $2-$20)
     if c[i] < PRICE_MIN or c[i] > PRICE_MAX:
         return False, {}
-    if np.isnan(vol_sma[i]) or v[i] < vol_sma[i] * BREAKOUT_VOL_FACTOR:
+    # Audit-Iter 20 (Bug PAT-1): vol_sma=0 (zero-volume window) → v[i]<0=False
+    # → passt Filter mit nullen Volumen. Jetzt explizit: muss positiver
+    # avg-Volume sein UND v[i] >= avg * factor.
+    if np.isnan(vol_sma[i]) or vol_sma[i] <= 0:
+        return False, {}
+    if v[i] < vol_sma[i] * BREAKOUT_VOL_FACTOR:
         return False, {}
 
     for fl in range(FLAG_MIN_CANDLES, FLAG_MAX_CANDLES + 1):
@@ -434,7 +439,13 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
             p_h = p_end - p_start
             if p_h <= 0: continue
             fl_low = l[fs:fe].min()
-            if (p_end - fl_low) / p_h * 100 > FLAG_RETRACE_MAX_PCT: continue
+            # Audit-Iter 20 (Bug PAT-3): retrace muss positiv sein. Wenn
+            # fl_low > p_end (flag stieg über pole-top), retrace_pct wird
+            # negativ und der Filter passt → ungewünschte Pattern-Treffer.
+            retrace_amt = p_end - fl_low
+            if retrace_amt < 0:
+                continue
+            if retrace_amt / p_h * 100 > FLAG_RETRACE_MAX_PCT: continue
             prh = h[fs:fe].max()
             if h[i] <= prh: continue
             ep = prh + SLIPPAGE_CENTS
