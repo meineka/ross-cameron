@@ -1,17 +1,32 @@
 """Schreibt jede Iteration status.json — operator sieht Live-State ohne Log-Grep.
 
 Felder: timestamp, account_equity, positions, watchlist, day-stats, last_health.
+
+Audit-Iter 26 (2026-05-12) — Bug-Fixes SD-1/SD-2/SD-3:
+  SD-1: atomic write via tmp+rename — read-during-write zeigte sonst
+        partial JSON für externe Monitore.
+  SD-2: silent except-Pass → throttled warning (alle 100 fails 1 log),
+        damit disk-full nicht ewig unbemerkt bleibt.
+  SD-3: trades_today war wrong field — DayState heißt trades_completed_today.
+        Status JSON reportete IMMER 0 statt echter trade-count.
 """
 from __future__ import annotations
 import json
+import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
+log = logging.getLogger("status")
+
 STATUS_FILE = Path(__file__).parent / "status.json"
+_write_fail_count = 0
 
 
 def write_status(bot) -> None:
-    """Wird von Bot.run() periodisch aufgerufen. Best-effort — Fehler still."""
+    """Wird von Bot.run() periodisch aufgerufen. Best-effort —
+    schreibt atomic via tmp+rename, throttled warning bei wiederholtem Fail."""
+    global _write_fail_count
     try:
         d = bot.day
         positions = []
@@ -32,13 +47,36 @@ def write_status(bot) -> None:
             "realized_pnl": round(d.realized_pnl, 2),
             "peak_pnl": round(d.peak_pnl, 2),
             "spy_pct": round(d.spy_pct_today, 3),
-            "trades_today": getattr(d, "trades_today", 0),
+            # Audit-Iter 26 (Bug SD-3): korrekter Field-Name. Fallback auf
+            # trades_today behalten für Backwards-Compat falls jemand
+            # an älteren Bots arbeitet.
+            "trades_today": getattr(d, "trades_completed_today",
+                                      getattr(d, "trades_today", 0)),
             "consecutive_losses": d.consecutive_losses,
             "spiral_locked": d.spiral_locked,
             "ws_reconnects": d.ws_reconnects,
             "positions_open": positions,
             "watchlist": watchlist,
         }
-        STATUS_FILE.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-    except Exception:
-        pass
+        serialized = json.dumps(payload, indent=2, default=str)
+    except Exception as e:
+        _write_fail_count += 1
+        if _write_fail_count % 100 == 1:
+            log.warning("status payload-build failed (#%d): %s",
+                        _write_fail_count, e)
+        return
+    # Atomic write (Bug SD-1): write to tmp + rename
+    tmp = STATUS_FILE.with_suffix(".json.tmp")
+    try:
+        tmp.write_text(serialized, encoding="utf-8")
+        os.replace(str(tmp), str(STATUS_FILE))
+        # Bei Success: counter reset (recovered)
+        if _write_fail_count > 0:
+            log.info("status write recovered after %d fails", _write_fail_count)
+            _write_fail_count = 0
+    except OSError as e:
+        _write_fail_count += 1
+        if _write_fail_count % 100 == 1:
+            log.warning("status write failed (#%d): %s", _write_fail_count, e)
+        try: tmp.unlink(missing_ok=True)
+        except Exception: pass
