@@ -317,10 +317,27 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
             pass
         df = df.sort_values(["ticker","date"])
         df["prev_close"] = df.groupby("ticker")["close"].shift(1)
-        df["intraday_pct"] = (df["high"] - df["prev_close"]) / df["prev_close"] * 100
+        # Audit-Iter 16 (Bug SCN-2/SCN-3): defensive against div-by-zero.
+        # Wenn prev_close=0 (corrupt data) → intraday_pct=inf → False-Positive
+        # passed Filter. Gleiches für avg_vol_20=0.
+        df["intraday_pct"] = (df["high"] - df["prev_close"]) / df["prev_close"].replace(0, np.nan) * 100
         df["avg_vol_20"] = df.groupby("ticker")["volume"].transform(lambda s: s.rolling(20, min_periods=5).mean())
-        df["rvol_proxy"] = df["volume"] / df["avg_vol_20"]
+        df["rvol_proxy"] = df["volume"] / df["avg_vol_20"].replace(0, np.nan)
+        # Sicherheit: nicht-finite (NaN/inf) Values rauswerfen
+        df = df[
+            np.isfinite(df["intraday_pct"]) & np.isfinite(df["rvol_proxy"])
+        ]
         latest = df.groupby("ticker").tail(1)
+        # Audit-Iter 16 (Bug SCN-7): nur Bars mit Datum heute oder gestern
+        # akzeptieren — verhindert dass halted/delisted Stocks aus letzter
+        # gehandelter Bar (z.B. 2 Wochen alt) im Watchlist landen.
+        try:
+            today_utc = pd.Timestamp.now(tz="UTC").normalize()
+            min_date = today_utc - pd.Timedelta(days=4)
+            latest_dt = pd.to_datetime(latest["date"], utc=True, errors="coerce")
+            latest = latest[latest_dt >= min_date]
+        except Exception:
+            pass
         latest = latest[
             (latest["close"].between(PRICE_MIN, PRICE_MAX))
             & (latest["intraday_pct"] >= DAILY_GAIN_MIN_PCT)
