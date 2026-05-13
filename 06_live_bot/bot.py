@@ -426,6 +426,21 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
             log.info("  Batch %d/%d processed; %d candidates so far", batch_idx, n_batches, cumulative)
 
     log.info("  Failed batches: %d/%d", failed_batches, n_batches)
+    # Audit-Iter 31 (Bug TS-1): two_source_scan alert — vorher dead code.
+    # Wenn yfinance >20% Batches verliert, signalisiere Alpaca-Fallback.
+    # Aktuelle Implementation: nur log-Warning (echtes Wiring späteres Work).
+    from two_source_scan import (
+        should_fallback_to_alpaca, yfinance_failure_ratio,
+        YFINANCE_FAIL_THRESHOLD_PCT,
+    )
+    if should_fallback_to_alpaca(n_batches, failed_batches):
+        ratio = yfinance_failure_ratio(n_batches, failed_batches)
+        log.warning("=" * 60)
+        log.warning("YFINANCE-DEGRADED: %.1f%% batches failed (>%.0f%% threshold)",
+                    ratio, YFINANCE_FAIL_THRESHOLD_PCT)
+        log.warning("Watchlist may be incomplete. Alpaca-fallback nicht aktiv "
+                    "(TODO wire alpaca_universe_snapshot here)")
+        log.warning("=" * 60)
     if not cands:
         log.warning("  NO CANDIDATES found — empty result. Possible reasons:")
         log.warning("    - market closed today (holiday/weekend)")
