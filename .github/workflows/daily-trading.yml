@@ -14,9 +14,12 @@ name: Daily Cameron-Bot Trading
 
 on:
   schedule:
-    # 10:00 UTC = 12:00 CEST (Sommerzeit) = 11:00 CET (Winterzeit)
-    # 5–10 Min Buffer vor Pre-Market-Scan-Start
-    - cron: '0 10 * * 1-5'
+    # 09:47 UTC = 11:47 CEST (Sommerzeit) = 10:47 CET (Winterzeit)
+    # WICHTIG: NICHT top-of-hour (0 10) — GitHub-Schedule-Trigger werden bei
+    # Top-of-Hour wegen Server-Last-Spike oft delayed oder komplett skipped
+    # (siehe https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule).
+    # 09:47 UTC = 40min Buffer vor 12:27 CEST Pre-Market-Scan, off-hour minute.
+    - cron: '47 9 * * 1-5'
   workflow_dispatch:    # erlaubt manuellen Trigger via UI
 
 jobs:
