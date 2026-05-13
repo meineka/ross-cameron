@@ -186,6 +186,8 @@ class TickerState:
     half_filled: bool = False
     shares: int = 0
     initial_shares: int = 0         # for pyramiding-tracking
+    t1_shares_sold: int = 0         # tatsächlich am T1 verkaufte Shares
+                                    # (Audit-Iter 12: bei Pyramiding ≠ initial*0.5)
     adds_count: int = 0             # #1 add-counter
     last_add_price: float = 0.0
     pole_candles: int = 0
@@ -1327,9 +1329,11 @@ class Bot:
             # Audit-Iter 11 (2026-05-12) — Bug-Fix MP-1:
             # Nach T1-Partial fehlte hier die T1-Realisierung. Stop-Exit
             # hatte den Fix, MACD-Exit übersah die Gewinne der half-position.
+            # Audit-Iter 12 — Bug-Fix PYR-1: t1_shares_sold statt (initial-shares),
+            # bei Pyramiding war (initial-shares) falsch.
             pnl = (bar["close"] - ts.entry_price) * ts.shares
             if ts.half_filled:
-                pnl += (ts.target1_price - ts.entry_price) * (ts.initial_shares - ts.shares)
+                pnl += (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
             self.day.trades_completed_today += 1
@@ -1409,6 +1413,7 @@ class Bot:
             self.executor.submit_sell_limit(ts.symbol, half, ts.target1_price, "T1_50pct")
             self.logger.log({"event": "T1", "symbol": ts.symbol, "shares": half, "price": ts.target1_price})
             ts.half_filled = True
+            ts.t1_shares_sold = half       # Audit-Iter 12 (Bug PYR-1): exakte Anzahl
             ts.shares -= half
             # Restposition braucht neue broker-seitige Schutzkette: Stop auf BE, TP=T2
             self.executor.protect_position(ts.symbol, ts.shares,
@@ -1421,8 +1426,10 @@ class Bot:
         # T2 — Audit-Iter 4: 1-Share-Trades springen T1 → T2 direkt (kein half_filled)
         if bar["high"] >= ts.target2_price and ts.shares > 0:
             self.executor.submit_sell_limit(ts.symbol, ts.shares, ts.target2_price, "T2")
+            # Audit-Iter 12 (Bug PYR-1): t1_shares_sold statt initial_shares*0.5
+            # — bei Pyramiding war initial*0.5 ≠ tatsächliche T1-Menge
             if ts.half_filled:
-                r1 = (ts.target1_price - ts.entry_price) * ts.initial_shares * 0.5
+                r1 = (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
                 r2 = (ts.target2_price - ts.entry_price) * ts.shares
             else:
                 r1 = 0.0
@@ -1442,8 +1449,11 @@ class Bot:
         if bar["low"] <= stop:
             self.executor.submit_sell_limit(ts.symbol, ts.shares, stop - SLIPPAGE_CENTS, "stop_or_BE")
             pnl = (stop - ts.entry_price) * ts.shares
+            # Audit-Iter 12 (Bug PYR-1): t1_shares_sold statt (initial - shares).
+            # Bei Pyramiding waren mehr Shares im Spiel als initial — und T1 sold
+            # tatsächlich (initial+adds)//2 nicht initial//2.
             if ts.half_filled:
-                pnl += (ts.target1_price - ts.entry_price) * (ts.initial_shares - ts.shares)
+                pnl += (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
             self.day.trades_completed_today += 1

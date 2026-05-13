@@ -46,9 +46,11 @@ def _make_bot_with_position(symbol="AAA", entry=10.0, target1=10.5,
     if half_filled:
         ts.half_filled = True
         ts.shares = initial // 2
+        ts.t1_shares_sold = initial // 2  # Audit-Iter 12: t1_shares_sold tracking
     else:
         ts.half_filled = False
         ts.shares = initial
+        ts.t1_shares_sold = 0
     ts.bars_since_entry = 5
     ts.bars = []
     b.tickers[symbol] = ts
