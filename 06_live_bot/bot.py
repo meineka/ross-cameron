@@ -118,6 +118,15 @@ DAILY_GOAL_STOP_ENABLED = True
 # #5 Max-Trades pro Tag (Cameron-Rule: Quality > Quantity)
 MAX_TRADES_PER_DAY = 5             # Cameron sagt 1 für Beginners, 3-5 für ihn selbst
 
+# Cameron-rule: "tight stops only — if stop is more than 8-10% away, pass"
+# Trader-loop Iter 1 (2026-05-13): pilot-backtest zeigt
+#   - Trades mit risk%>=10%: 5/5 → win-rate 20%
+#   - Trades mit risk%<10%:  12/12 → win-rate 92%
+# MAX_RISK_PCT=8% Filter ergibt: 9 trades (vs 17), $73 PnL (vs $75 — gleich),
+# Win-Rate 78% (vs 67%), MaxDD -$18.78 (vs -$30.63 halbiert), 0 Spirals.
+# Sharpe-like-Ratio +59%.
+MAX_RISK_PCT = 8.0
+
 # #2 30¢-Quick-Exit: wenn 30c gegen Entry → exit (mistime-detection)
 QUICK_EXIT_THRESHOLD_CENTS = 0.30
 QUICK_EXIT_BARS_LIMIT = 5          # innerhalb 5 Bars nach Entry
@@ -549,6 +558,13 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
             ep = prh + SLIPPAGE_CENTS
             sp = fl_low - SLIPPAGE_CENTS
             if ep <= sp: continue
+            # Trader-Loop Iter 1: Max-Risk-% filter (Cameron's "tight stops")
+            # Pilot-backtest: trades mit risk%>=10% verlieren 4/5x. Bei 8%
+            # threshold: Win-Rate 67%->78%, MaxDD halbiert, 0 spirals.
+            if ep > 0:
+                risk_pct = (ep - sp) / ep * 100
+                if risk_pct > MAX_RISK_PCT:
+                    return False, {"_veto": f"risk_{risk_pct:.1f}%_over_{MAX_RISK_PCT}%"}
             # #3 T2 = max(pole_height-target, next psych. level above entry)
             t2_mech = ep + p_h
             if USE_PSYCH_LEVEL_T2:
