@@ -1083,6 +1083,19 @@ class Bot:
                             except Exception as e:
                                 log.warning("ws.stop_ws() raised: %s", e)
                             break
+                    # Audit-Iter 18 (Bug WS-2): wenn stop_ws() den Thread nicht
+                    # innerhalb 10s killt, force-cancel. Verhindert hängenden
+                    # ws_task der den ws_loop blockiert während resubscribe.
+                    if not ws_task.done():
+                        try:
+                            await asyncio.wait_for(ws_task, timeout=10.0)
+                        except asyncio.TimeoutError:
+                            log.warning("ws_task did not stop within 10s — cancelling")
+                            ws_task.cancel()
+                            try:
+                                await asyncio.wait_for(ws_task, timeout=2.0)
+                            except (asyncio.CancelledError, asyncio.TimeoutError):
+                                pass
                     log.warning("WS disconnected — reconnect (clean)")
                     self.day.ws_reconnects += 1
                 except Exception as e:
