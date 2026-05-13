@@ -4,6 +4,11 @@ Verhindert die Situation vom 2026-05-11: Bot lief 24 h obwohl der WS-Connect
 defekt war, weil der Bug erst beim ersten Bar-Subscribe auftrat.
 
 Jeder Check returns (ok: bool, msg: str). Fehler → abort vor sleep-loop.
+
+Audit-Iter 13 (2026-05-12) — Bug-Fixes PF-1/PF-6/PF-7:
+  PF-1: trading_blocked / account_blocked werden jetzt geprüft
+  PF-6: min-equity-check (≥ $500 default)
+  PF-7: leere keys werden früh erkannt (klare Fehlermeldung)
 """
 from __future__ import annotations
 import logging
@@ -12,15 +17,36 @@ from typing import Optional
 
 log = logging.getLogger("preflight")
 
+MIN_EQUITY_USD = 500.0  # darunter macht Cameron-1%-Risk-Rule wenig Sinn
 
-def check_alpaca_auth(api_key: str, api_secret: str) -> tuple[bool, str]:
+
+def check_alpaca_auth(api_key: str, api_secret: str,
+                       min_equity: float = MIN_EQUITY_USD) -> tuple[bool, str]:
+    """Audit-Iter 13:
+      - PF-7: leere Keys früh erkennen
+      - PF-1: trading_blocked + account_blocked prüfen
+      - PF-6: min-equity-Check"""
+    if not api_key or not api_secret:
+        return False, "Alpaca-Auth FAIL: api_key/api_secret leer (env vars set?)"
     try:
         from alpaca.trading.client import TradingClient
         c = TradingClient(api_key, api_secret, paper=True)
         acc = c.get_account()
-        return True, f"Alpaca OK — equity ${float(acc.equity):,.0f}"
     except Exception as e:
         return False, f"Alpaca-Auth FAIL: {e}"
+    # PF-1: Blocked-Account Detection
+    if getattr(acc, "account_blocked", False):
+        return False, "Alpaca-Auth FAIL: account_blocked=True (contact broker)"
+    if getattr(acc, "trading_blocked", False):
+        return False, "Alpaca-Auth FAIL: trading_blocked=True (PDT/margin issue)"
+    # PF-6: min-Equity
+    try:
+        equity = float(acc.equity)
+    except (TypeError, ValueError):
+        return False, f"Alpaca-Auth FAIL: kann acc.equity nicht parsen ({acc.equity!r})"
+    if equity < min_equity:
+        return False, f"Alpaca-Auth FAIL: equity ${equity:,.2f} unter min ${min_equity:,.0f}"
+    return True, f"Alpaca OK — equity ${equity:,.0f}"
 
 
 def check_ws_init(api_key: str, api_secret: str) -> tuple[bool, str]:
