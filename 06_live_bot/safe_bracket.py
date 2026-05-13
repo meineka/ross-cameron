@@ -98,20 +98,48 @@ def safe_bracket_buy(
         return {"status": "failed", "reason": str(e)}
 
     # 2. Wait for fill
+    # Audit-Iter 27 (Bug SB-2/SB-6): robuste Status-Comparison + None-Safety
+    def _status_is(status, target_name: str) -> bool:
+        """Tolerant gegen Enum-Repr-Änderungen: prüft .value/.name/str()."""
+        if status is None:
+            return False
+        for accessor in (
+            getattr(status, "value", None),
+            getattr(status, "name", None),
+            str(status),
+            str(status).rsplit(".", 1)[-1] if "." in str(status) else None,
+        ):
+            if accessor is None:
+                continue
+            if str(accessor).strip().upper() == target_name.upper():
+                return True
+        return False
+
     fill_price = None
     for _ in range(wait_seconds):
         time.sleep(1)
         try:
             o = tc.get_order_by_id(o.id)
-            if str(o.status) in ("OrderStatus.FILLED", "filled"):
-                fill_price = float(o.filled_avg_price)
+            if _status_is(o.status, "FILLED"):
+                fp = o.filled_avg_price
+                if fp is None or float(fp) <= 0:
+                    log.warning("safe_bracket: status=FILLED but filled_avg_price=%r — retry", fp)
+                    continue  # API-Quirk, retry next iteration
+                fill_price = float(fp)
                 break
-            if str(o.status) in ("OrderStatus.CANCELED", "OrderStatus.REJECTED",
-                                 "canceled", "rejected"):
+            if _status_is(o.status, "CANCELED") or _status_is(o.status, "REJECTED"):
                 return {"status": "failed", "reason": str(o.status), "order_id": str(o.id)}
+        except Exception as e:
+            log.debug("safe_bracket poll err: %s", e)
+    if fill_price is None:
+        # Audit-Iter 27 (SB-6 follow-up): wenn wir auf timeout gehen UND der
+        # Order noch live ist, könnte er später noch fillen → cancel attempt
+        # damit kein stranded order übrig bleibt.
+        try:
+            tc.cancel_order_by_id(o.id)
+            log.warning("safe_bracket: timeout — cancelled stale order %s", o.id)
         except Exception:
             pass
-    if fill_price is None:
         return {"status": "timeout", "order_id": str(o.id)}
 
     # 3. Post-Fill-Validation: Stop < Fill?
