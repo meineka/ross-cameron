@@ -92,14 +92,24 @@ def test_backoff_reset():
 
 # ─── #4 Position-Recovery ────────────────────────────────────────────────────
 def test_position_recovery_flatten_calls_close_all():
+    """Audit-Iter 6: stateful mock — position fades after close_all submitted."""
     from position_recovery import recover_or_flatten
     tc = MagicMock()
-    tc.get_all_positions.return_value = [
-        MagicMock(symbol="AAA", qty="10", avg_entry_price="5.0"),
-    ]
-    n = recover_or_flatten(tc)
+    state = {"closed": False}
+
+    def list_side(*a, **kw):
+        if state["closed"]:
+            return []
+        return [MagicMock(symbol="AAA", qty="10", avg_entry_price="5.0")]
+
+    def close_side(*a, **kw):
+        state["closed"] = True
+
+    tc.get_all_positions.side_effect = list_side
+    tc.close_all_positions.side_effect = close_side
+    n = recover_or_flatten(tc, verify_timeout_sec=0.5, poll_interval_sec=0.05)
     assert n == 1
-    tc.close_all_positions.assert_called_once_with(cancel_orders=True)
+    tc.close_all_positions.assert_called_with(cancel_orders=True)
 
 
 def test_position_recovery_no_positions():

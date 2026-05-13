@@ -1589,12 +1589,24 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
         log.error("Pre-Flight FAIL — daemon aborts (fix config + restart)")
         return
 
-    # Position-Recovery: bei Crash mit offenen Positions → flatten
+    # Position-Recovery: bei Crash/Restart mit offenen Positions → flatten.
+    # Audit-Iter 6: return-value checken, bei FAILED nicht weiterstarten.
     try:
         from alpaca.trading.client import TradingClient
-        recover_or_flatten(TradingClient(api_key, api_secret, paper=True))
+        _rc = recover_or_flatten(TradingClient(api_key, api_secret, paper=True))
+        if _rc == -1:
+            log.error("=" * 60)
+            log.error("POSITION-RECOVERY FAILED — bot wartet 5min und versucht erneut")
+            log.error("=" * 60)
+            await asyncio.sleep(300)
+            # Zweiter Versuch
+            _rc = recover_or_flatten(TradingClient(api_key, api_secret, paper=True))
+            if _rc == -1:
+                log.error("RECOVERY-RETRY auch failed — daemon aborts (manuell prüfen!)")
+                return
     except Exception as e:
-        log.error("position-recovery failed: %s", e)
+        log.error("position-recovery raised: %s — daemon aborts", e, exc_info=True)
+        return
     while True:
         # Mid-day-resume: wenn Restart während Trading-Fenster (06:27–HARD_FLAT) an Werktag → sofort traden statt morgen warten
         ny_now = datetime.now(NY_TZ)
