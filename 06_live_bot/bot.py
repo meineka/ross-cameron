@@ -53,7 +53,7 @@ from alpaca.data.timeframe import TimeFrame
 # Lokale Module für Verbesserungen
 sys.path.insert(0, str(Path(__file__).parent))
 from pre_flight import run_preflight
-from watchlist_persist import save_watchlist, load_watchlist_if_fresh
+from watchlist_persist import save_watchlist, load_watchlist_if_fresh, load_watchlist_with_scores
 from reconnect_backoff import ReconnectBackoff
 from slippage_log import record_fill
 from status_dashboard import write_status
@@ -1067,8 +1067,20 @@ class Bot:
                         spy_pct, SPY_TREND_VETO_PCT)
             log.warning("=" * 60)
 
-        # 1. Premarket-Scan
-        candidates = await asyncio.to_thread(premarket_scan, TOP_N)
+        # 1. Premarket-Scan — Audit-Iter 30 (Bug WP-6): bei Mid-Day-Resume
+        # erst load_watchlist_with_scores versuchen statt fresh re-scan.
+        # Spart 60-90s scan-time bei Cloud-Restart innerhalb Trading-Window.
+        candidates = None
+        loaded = load_watchlist_with_scores()
+        if loaded is not None and loaded[0]:
+            syms, scores = loaded
+            log.info("MID-DAY-RESUME: Watchlist aus Disk geladen (%d Symbols)", len(syms))
+            candidates = [
+                TickerState(symbol=s, rank=i+1, score=float(scores.get(s, 0.0)))
+                for i, s in enumerate(syms)
+            ]
+        if not candidates:
+            candidates = await asyncio.to_thread(premarket_scan, TOP_N)
         if not candidates:
             log.warning("=" * 60)
             log.warning("KEINE WATCHLIST heute — wahrscheinlich Markt-Holiday oder Filter zu streng")
