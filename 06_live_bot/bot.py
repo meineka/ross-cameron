@@ -114,7 +114,11 @@ DAILY_GOAL_USD = 150.0              # symmetric (Cameron-Rule)
 INTRADAY_DRAWDOWN_PCT_OF_PROFITS = 50.0
 
 LIQUIDITY_CAP_PCT_OF_AVG_VOL = 1.0
-QUARTER_SIZE_UNLOCK_CENTS = 0.20
+# Review-fix 2026-05-13 (Reviewer #12): spec sagt "$0.50/share cumulative
+# gain before unlocking full size". Vorher 0.20 (zu früh full size).
+# Name geändert zu USD_PER_SHARE — "CENTS" war irreführend.
+QUARTER_SIZE_UNLOCK_USD_PER_SHARE = 0.50
+QUARTER_SIZE_UNLOCK_CENTS = QUARTER_SIZE_UNLOCK_USD_PER_SHARE  # backwards-compat alias
 
 # ── 8 Easy-Wins (Cameron-Compliance) ───────────────────────────────────────
 # #4 Daily-Goal-Stop: bei erreichen STOP
@@ -475,7 +479,10 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
         if not passes_float_filter(sym, FLOAT_MAX_SHARES):
             log.info("    REJECT %s (float > %s)", sym, f"{FLOAT_MAX_SHARES:,}")
             continue
-        if CATALYST_REQUIRED and not passes_catalyst_filter(sym):
+        # Review-fix 2026-05-13 (Reviewer #9): wenn CATALYST_REQUIRED=True,
+        # MUSS strict=True sein. Vorher: default permissive → no-news/error
+        # passed silently → Catalyst-Pillar war faktisch aus.
+        if CATALYST_REQUIRED and not passes_catalyst_filter(sym, strict=True):
             log.info("    REJECT %s (no recent catalyst)", sym)
             continue
         filtered.append(row)
@@ -1582,8 +1589,20 @@ class Bot:
             return
 
         # Position-Size
+        # Review-fix 2026-05-13 (Reviewer #11): liquidity-cap + post-power-size
+        # waren tot weil compute_position_size optional args ny_time/avg_volume
+        # nie übergeben bekam. Jetzt liefern wir beide.
         equity = self.executor.get_equity()
-        shares = compute_position_size(params["entry_price"], params["stop_price"], equity, self.day)
+        # avg_volume from rolling bar window (best-effort proxy)
+        try:
+            avg_vol = sum(b.get("volume", 0) for b in list(ts.bars)[-20:]) / 20
+        except Exception:
+            avg_vol = None
+        shares = compute_position_size(
+            params["entry_price"], params["stop_price"], equity, self.day,
+            avg_volume=avg_vol if avg_vol and avg_vol > 0 else None,
+            ny_time=ny_time,
+        )
         if shares < 1:
             self.day.patterns_rejected_size_zero += 1
             log.info("  REJECT %s: size=0 (entry $%.2f stop $%.2f risk-per-share $%.2f → max-shares 0)",
