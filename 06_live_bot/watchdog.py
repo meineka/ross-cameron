@@ -9,6 +9,7 @@ Start:
 """
 from __future__ import annotations
 import os, sys, io, time, subprocess, logging
+from collections import deque
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -27,27 +28,41 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("watchdog")
 
 CHECK_INTERVAL_SEC = 300  # 5 Min
+# Audit-Iter 14: Crashloop-Protection
+MAX_RESTARTS_PER_HOUR = 5
+RESTART_WINDOW_SEC = 3600
 HERE = Path(__file__).resolve().parent
 
 
+class CheckUnknown(Exception):
+    """is_bot_running konnte den State nicht ermitteln (wmic timeout etc).
+    Audit-Iter 14: caller MUSS unterscheiden zwischen 'tot' und 'unklar',
+    sonst false-positive restart bei wmic-Hänger."""
+
+
 def is_bot_running() -> tuple[bool, list[int]]:
-    """True if any python.exe process is running bot.py --daemon."""
+    """True if any python.exe process is running bot.py --daemon.
+
+    Audit-Iter 14 (Bug-Fix WD-3): bei check-failure jetzt CheckUnknown
+    statt False zurück. Vorher: wmic hängt → return False → unnötiger
+    Restart neben noch lebendem Bot → 2 Bots parallel.
+    """
     try:
         out = subprocess.check_output(
             ["wmic", "process", "where", "name='python.exe'", "get", "ProcessId,CommandLine", "/format:csv"],
             text=True, timeout=10,
         )
-        pids: list[int] = []
-        for line in out.splitlines():
-            if "bot.py" in line and "--daemon" in line:
-                # CSV: Node,CommandLine,ProcessId
-                parts = line.rsplit(",", 1)
-                if len(parts) == 2 and parts[1].strip().isdigit():
-                    pids.append(int(parts[1].strip()))
-        return len(pids) > 0, pids
     except Exception as e:
         log.warning("is_bot_running check failed: %s", e)
-        return False, []
+        raise CheckUnknown(str(e))
+    pids: list[int] = []
+    for line in out.splitlines():
+        if "bot.py" in line and "--daemon" in line:
+            # CSV: Node,CommandLine,ProcessId
+            parts = line.rsplit(",", 1)
+            if len(parts) == 2 and parts[1].strip().isdigit():
+                pids.append(int(parts[1].strip()))
+    return len(pids) > 0, pids
 
 
 def start_bot():
@@ -96,20 +111,50 @@ def start_bot():
     return proc.pid
 
 
+def _restart_loop_should_abort(restart_times: deque[float],
+                                 now: float | None = None) -> bool:
+    """Audit-Iter 14 (Bug-Fix WD-1): wenn > MAX_RESTARTS_PER_HOUR in den
+    letzten RESTART_WINDOW_SEC → Crashloop, kein weiterer Restart."""
+    now = now if now is not None else time.time()
+    cutoff = now - RESTART_WINDOW_SEC
+    while restart_times and restart_times[0] < cutoff:
+        restart_times.popleft()
+    return len(restart_times) >= MAX_RESTARTS_PER_HOUR
+
+
 def main():
     log.info("=" * 60)
-    log.info("WATCHDOG START — checks every %d sec", CHECK_INTERVAL_SEC)
+    log.info("WATCHDOG START — checks every %d sec (max %d restarts/h)",
+             CHECK_INTERVAL_SEC, MAX_RESTARTS_PER_HOUR)
     log.info("=" * 60)
+    restart_times: deque[float] = deque()
     while True:
-        running, pids = is_bot_running()
+        try:
+            running, pids = is_bot_running()
+        except CheckUnknown as e:
+            # Audit-Iter 14: bei unklarem State NICHT restarten — könnte
+            # ein zweiter Bot daneben gestartet werden
+            log.warning("Skip cycle (state unknown): %s", e)
+            time.sleep(CHECK_INTERVAL_SEC)
+            continue
         if running:
             log.info("Bot OK — PIDs %s", pids)
         else:
+            if _restart_loop_should_abort(restart_times):
+                log.error("=" * 60)
+                log.error("CRASHLOOP DETECTED: %d restarts in last %d sec — STOP",
+                          len(restart_times), RESTART_WINDOW_SEC)
+                log.error("Manual investigation needed. Watchdog exits.")
+                log.error("=" * 60)
+                return
             log.warning("Bot NOT running → restarting…")
             try:
-                start_bot()
+                pid = start_bot()
+                if pid is not None:
+                    restart_times.append(time.time())
             except Exception as e:
                 log.error("Restart failed: %s", e)
+                restart_times.append(time.time())
         time.sleep(CHECK_INTERVAL_SEC)
 
 
