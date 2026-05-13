@@ -230,27 +230,98 @@ class DayState:
 
 
 # ─── Premarket-Scanner ──────────────────────────────────────────────────────
-def fetch_us_universe() -> list[str]:
-    """yfinance/NASDAQ-Trader: alle US-Tickers."""
+_UNIVERSE_CACHE_FILE = Path(__file__).parent / "universe_cache.json"
+_UNIVERSE_CACHE_TTL_SEC = 4 * 3600  # 4h
+
+
+def _load_cached_universe() -> tuple[list[str] | None, float | None]:
+    """Returns (tickers, age_seconds) or (None, None) if no/invalid cache."""
+    if not _UNIVERSE_CACHE_FILE.exists():
+        return None, None
+    try:
+        import time as _t
+        data = json.loads(_UNIVERSE_CACHE_FILE.read_text(encoding="utf-8"))
+        tickers = data.get("tickers")
+        ts = data.get("ts")
+        if not isinstance(tickers, list) or not isinstance(ts, (int, float)):
+            return None, None
+        return tickers, _t.time() - ts
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None, None
+
+
+def _save_cached_universe(tickers: list[str]) -> None:
+    """Atomic write (tmp + rename) damit crash mid-write keine corrupt JSON."""
+    import time as _t
+    tmp = _UNIVERSE_CACHE_FILE.with_suffix(".json.tmp")
+    try:
+        tmp.write_text(
+            json.dumps({"ts": _t.time(), "tickers": tickers}),
+            encoding="utf-8",
+        )
+        os.replace(str(tmp), str(_UNIVERSE_CACHE_FILE))
+    except OSError as e:
+        log.warning("universe cache save failed: %s", e)
+        try: tmp.unlink(missing_ok=True)
+        except Exception: pass
+
+
+def fetch_us_universe(use_cache: bool = True, max_retries: int = 2) -> list[str]:
+    """NASDAQ-Trader: alle US-Tickers (nasdaqlisted + otherlisted).
+
+    Audit-Iter 25 (2026-05-12) — Bug-Fixes UV-2/UV-4/UV-9:
+      - in-memory + disk-Cache mit 4h TTL (UV-4)
+      - retry mit backoff per URL (UV-2)
+      - stale-cache-fallback wenn beide URLs failen (UV-9)
+      - User-Agent header (UV-8)
+    """
+    import time as _t
+    # 1. Fresh-Cache-Hit?
+    if use_cache:
+        cached, age = _load_cached_universe()
+        if cached is not None and age is not None and age < _UNIVERSE_CACHE_TTL_SEC:
+            log.info("universe: cache hit (age %.0fmin, %d tickers)",
+                     age/60, len(cached))
+            return cached
     import requests, io as _io
     urls = [
         "https://www.nasdaqtrader.com/dynamic/symdir/nasdaqlisted.txt",
         "https://www.nasdaqtrader.com/dynamic/symdir/otherlisted.txt",
     ]
+    headers = {"User-Agent": "Cameron-Bot/1.0 (paper-trading)"}
     tickers: set[str] = set()
     for u in urls:
-        try:
-            r = requests.get(u, timeout=20)
-            df = pd.read_csv(_io.StringIO(r.text), sep="|")
-            col = "Symbol" if "Symbol" in df.columns else "ACT Symbol"
-            df = df[df.get("Test Issue", "N") == "N"]
-            if "ETF" in df.columns:
-                df = df[df["ETF"] == "N"]
-            tickers.update(df[col].dropna().astype(str).tolist())
-        except Exception as e:
-            log.warning("universe fetch fail %s: %s", u, e)
+        for attempt in range(max_retries + 1):
+            try:
+                r = requests.get(u, timeout=20, headers=headers)
+                r.raise_for_status()
+                if not r.text.strip():
+                    raise ValueError("empty response")
+                df = pd.read_csv(_io.StringIO(r.text), sep="|")
+                col = "Symbol" if "Symbol" in df.columns else "ACT Symbol"
+                df = df[df.get("Test Issue", "N") == "N"]
+                if "ETF" in df.columns:
+                    df = df[df["ETF"] == "N"]
+                tickers.update(df[col].dropna().astype(str).tolist())
+                break  # success
+            except Exception as e:
+                log.warning("universe fetch %s attempt %d/%d: %s",
+                            u, attempt + 1, max_retries + 1, e)
+                if attempt < max_retries:
+                    _t.sleep(2 * (attempt + 1))
     tickers = {t for t in tickers if t.isalpha() and 1 <= len(t) <= 5}
-    return sorted(tickers)
+    # 2. Cache-Fallback wenn alle URLs failed (UV-9)
+    if not tickers and use_cache:
+        cached, age = _load_cached_universe()
+        if cached is not None:
+            log.warning("universe: ALL URLs failed — fallback to stale cache "
+                        "(age %.0fmin, %d tickers)", (age or 0)/60, len(cached))
+            return cached
+    result = sorted(tickers)
+    # 3. Cache speichern für nächste Calls + zukünftigen Fallback
+    if result and use_cache:
+        _save_cached_universe(result)
+    return result
 
 
 def premarket_scan(top_n: int = TOP_N, max_retries: int = 2) -> list[TickerState]:
