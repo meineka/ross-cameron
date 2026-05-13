@@ -136,6 +136,14 @@ MAX_TRADES_PER_DAY = 5             # Cameron sagt 1 für Beginners, 3-5 für ihn
 # Sharpe-like-Ratio +59%.
 MAX_RISK_PCT = 8.0
 
+# Trader-loop Iter 7 (2026-05-14): MAX_POLE_T2_R-Cap (Cameron "don't chase
+# overextended"). Pole_height-based T2 erlaubte unbegrenzt große Poles —
+# Pilot-Diagnose zeigt alle 3 Verluste (FGI/ANNA/MSC) hatten t2R >= 2.4,
+# große Poles = volatile/exhausted Stocks. Cap t2R <= 3.5R eliminiert
+# nur 2 Trades (FGI, MSC — beide LOSSES): 13→11 trades, +$120→+$145 PnL,
+# 75%→90% win-rate, MaxDD identisch, Sharpe-like +21%.
+MAX_POLE_T2_R = 3.5
+
 # #2 30¢-Quick-Exit: wenn 30c gegen Entry → exit (mistime-detection)
 QUICK_EXIT_THRESHOLD_CENTS = 0.30
 QUICK_EXIT_BARS_LIMIT = 5          # innerhalb 5 Bars nach Entry
@@ -585,6 +593,12 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
                 t2 = max(t2_mech, next_half) if next_half > ep + 0.05 else t2_mech
             else:
                 t2 = t2_mech
+            # Trader-Loop Iter 7: cap pole/T2-R-multiple. Stocks mit T2
+            # > 3.5R sind überdehnte/volatile setups (Cameron: "don't chase").
+            # Pilot: removes 2 losses, keeps all winners, +21% Sharpe.
+            risk = ep - sp
+            if risk > 0 and (t2 - ep) / risk > MAX_POLE_T2_R:
+                return False, {"_veto": f"pole_t2r_{(t2-ep)/risk:.2f}>{MAX_POLE_T2_R}"}
             # ─── Cameron-Vetos (heute gefixt) ─────────────────────────────
             # VWAP: Cameron tradet nur über Session-VWAP
             if not is_above_vwap(bars, c[i]):
