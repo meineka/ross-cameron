@@ -91,6 +91,10 @@ POST_POWER_SIZE_MULT = 0.75
 TOP_N = 10
 TIMEFRAME = "5Min"
 
+# Bar-Aggregation: WS gibt 1-Min, Cameron tradet 5-Min-Charts.
+# Pattern + Pole/Flag-Thresholds sind für 5-Min kalibriert.
+BAR_AGGREGATION_MINUTES = 5
+
 POLE_MIN_CANDLES, POLE_MAX_CANDLES = 3, 7
 POLE_MIN_MOVE_PCT = 5.0
 POLE_TOPPING_TAIL_MAX = 0.4
@@ -1033,6 +1037,10 @@ class Bot:
         self.logger = TradeLogger()
         self.api_key = api_key
         self.api_secret = api_secret
+        # Audit 2026-05-13 (Option A): WS liefert 1-Min, Cameron-Pattern braucht
+        # 5-Min. Aggregator schließt 1-min bars in 5-min Buckets.
+        from bar_aggregator import BarAggregator
+        self.aggregator = BarAggregator(bucket_minutes=BAR_AGGREGATION_MINUTES)
 
     async def run(self):
         log.info("=" * 60)
@@ -1083,11 +1091,25 @@ class Bot:
         log.info("Subscribing to Alpaca-WS for %d symbols (IEX-Feed)…", len(self.tickers))
 
         async def on_bar(bar):
+            """1-Min-WS-Bar → Aggregator → ggf. 5-Min-Bar → handle_bar."""
             self.day.bars_received += 1
             try:
-                await self.handle_bar(bar)
+                sym = bar.symbol
+                if sym not in self.tickers:
+                    return  # früh raus für deleted symbols
+                bar_dict = {
+                    "open": float(bar.open), "high": float(bar.high),
+                    "low": float(bar.low), "close": float(bar.close),
+                    "volume": float(bar.volume),
+                    "timestamp": bar.timestamp,
+                }
+                aggregated = self.aggregator.add(sym, bar_dict)
+                if aggregated is None:
+                    return  # 5-min-Bucket noch nicht komplett
+                await self.handle_bar_5min(sym, aggregated)
             except Exception as e:
-                log.error("handle_bar error for %s: %s", bar.symbol, e, exc_info=True)
+                log.error("on_bar error for %s: %s",
+                          getattr(bar, "symbol", "?"), e, exc_info=True)
 
         # 3. Time-Cuts + Health-Check + Intraday-Re-Scan Loop
         self._pending_ws_resubscribe = False
@@ -1360,21 +1382,33 @@ class Bot:
         log.info("=" * 60)
 
     async def handle_bar(self, bar):
-        """Audit-Bug-Fix 2026-05-12 (Iteration 3): outer try/except.
-        Eine Daten-Anomalie auf einem Symbol darf nicht den ganzen WS-Callback
-        killen — alle anderen Symbole würden ihre Bar verlieren."""
+        """Backwards-Compat-Wrapper: nimmt SDK-Bar, extrahiert + delegiert
+        an handle_bar_5min. Tests die noch SDK-bar direkt passen funktionieren
+        weiter (sehen aber kein 5-min-Aggregation)."""
         try:
             sym = bar.symbol
             if sym not in self.tickers: return
-            ts = self.tickers[sym]
             bar_dict = {
-                "open": bar.open, "high": bar.high, "low": bar.low,
-                "close": bar.close, "volume": bar.volume,
+                "open": float(bar.open), "high": float(bar.high),
+                "low": float(bar.low), "close": float(bar.close),
+                "volume": float(bar.volume),
                 "timestamp": bar.timestamp,
             }
+            await self.handle_bar_5min(sym, bar_dict)
+        except Exception as e:
+            log.error("handle_bar wrapper error: %s", e, exc_info=True)
+
+    async def handle_bar_5min(self, sym: str, bar_dict: dict):
+        """Verarbeitet einen aggregierten 5-Min-Bar. Pattern-Detection +
+        Position-Management. Bar-Dict hat keys: open/high/low/close/volume/
+        timestamp (datetime)."""
+        try:
+            if sym not in self.tickers: return
+            ts = self.tickers[sym]
             ts.bars.append(bar_dict)
             try:
-                ny_time = bar.timestamp.astimezone(timezone(timedelta(hours=-4))).time()
+                ts_dt = bar_dict["timestamp"]
+                ny_time = ts_dt.astimezone(timezone(timedelta(hours=-4))).time()
             except Exception:
                 ny_time = datetime.now(NY_TZ).time()
 
