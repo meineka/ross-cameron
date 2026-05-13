@@ -63,6 +63,19 @@ The committed changes need to remain robust under future-data validation.
   No multi-trade-day with loss to spare. All configs identical.
 - **Status:** SKIP — selectivity filters already produce ≤1 trade/day.
 
+### Iter 8: BREAKOUT_VOL_FACTOR sweep
+- **Hypothesis:** Cameron's "2x volume minimum on breakout" — current 1.5x
+  is looser than spec. Tighter (2x/2.5x/3x) or looser (1.25x)?
+- **Backtest:**
+  - 1.25x:  14 trd / +$158.80 / 92% / Sharpe 12.72  (+9%)
+  - 1.50x cur: 11 trd / +$145.44 / 90% / Sharpe 11.65
+  - 1.75x:  10 trd / +$139.24 / 90% / Sharpe 11.16
+  - 2.00x:  10 trd / +$136.99 / 90% / Sharpe 10.98
+  - 2.50x:   6 trd / +$76.83  / 83% / Sharpe 6.16
+- **Status:** SKIP. 1.25x optimum aber Cameron-Spec-Konflikt (2x-min), und
+  3 zusätzliche Wins können overfit sein. 2.0x (Cameron-konform) verliert
+  -$8. Kein klares Theorie-Signal — pure number-tuning. Bleib bei 1.5x.
+
 ### Iter 6: TIME_NEW_ENTRIES_START shift (skip Power-Hour Early)
 - **Hypothesis:** Diagnose der 13 trades zeigte 9:30-10:15 hat 40% win-rate
   (+$3.95 net) vs 10:30+ 100% win-rate (+$116.52). Shift entry-start
