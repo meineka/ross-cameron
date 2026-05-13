@@ -560,13 +560,39 @@ def compute_spy_size_multiplier(spy_pct: float) -> float:
 
 # ─── Trade-Logger ───────────────────────────────────────────────────────────
 class TradeLogger:
+    """Audit-Iter 17 (2026-05-12) — Bug-Fixes LOG-1/LOG-2/LOG-3:
+      LOG-1: explicit flush + fsync — crash zwischen buffer und disk wäre
+             sonst verlorene trade-events nach Cloud-Killing.
+      LOG-2: threading.Lock — bot ist primär async aber on_bar Handler
+             könnten parallel feuern (mehrere Symbols), JSONL würde
+             corrupt mit interleaved lines.
+      LOG-3: try/except — disk-full / permission-error darf nicht den
+             ganzen Bot crashen mid-trade.
+    """
     def __init__(self):
+        import threading
         self.path = DATA_DIR / "trades_live.jsonl"
+        self._lock = threading.Lock()
 
     def log(self, event: dict):
         event["ts"] = datetime.now(timezone.utc).isoformat()
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(event) + "\n")
+        try:
+            line = json.dumps(event) + "\n"
+        except (TypeError, ValueError) as e:
+            log.warning("TradeLogger: cannot serialize event: %s", e)
+            return
+        try:
+            with self._lock:
+                with self.path.open("a", encoding="utf-8") as f:
+                    f.write(line)
+                    f.flush()
+                    try:
+                        import os as _os
+                        _os.fsync(f.fileno())
+                    except (OSError, AttributeError):
+                        pass  # fsync nicht auf allen FS verfügbar
+        except (OSError, IOError) as e:
+            log.warning("TradeLogger: write failed: %s", e)
 
 
 # ─── Alpaca-Executor ────────────────────────────────────────────────────────
