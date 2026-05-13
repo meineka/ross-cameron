@@ -37,21 +37,32 @@ ERROR_PATTERNS = [
 
 
 def get_recent_log_lines(minutes: int = 30) -> list[str]:
-    """Lese Zeilen aus log die letzten N Minuten."""
+    """Lese Zeilen aus log die letzten N Minuten.
+
+    Audit-Iter 29 (Bug AU-7): Multi-line tracebacks haben nur in der ersten
+    Zeile einen Timestamp. Folge-Lines (mit File-Paths + Exception-Message)
+    wurden silent gedroppt. Jetzt: wenn line keinen Timestamp hat, aber die
+    VORHERIGE line in der Window war → mit-includen (= traceback-Erweiterung).
+    """
     if not LOG.exists():
         return []
     cutoff = datetime.now() - timedelta(minutes=minutes)
     lines = LOG.read_text(encoding="utf-8", errors="replace").splitlines()
     out = []
+    last_in_window = False
     for line in lines:
         m = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
         if m:
             try:
                 ts = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
-                if ts >= cutoff:
+                last_in_window = ts >= cutoff
+                if last_in_window:
                     out.append(line)
             except Exception:
-                pass
+                last_in_window = False
+        elif last_in_window:
+            # Traceback-Folgezeile (kein eigener Timestamp)
+            out.append(line)
     return out
 
 
@@ -60,12 +71,23 @@ def classify_errors(lines: list[str]) -> list[dict]:
 
     Audit-Bug-Fix 2026-05-12: WARNING-Lines wie SPIRAL-DETECTION / DAILY GOAL
     waren bisher unreachable für die info-Pattern. Jetzt werden sie auch matched.
+
+    Audit-Iter 29 (Bug AU-5): pre-filter ließ INFO-Lines durchfallen, aber
+    KeyboardInterrupt + NO CANDIDATES + DAILY GOAL werden teilweise als INFO
+    geloggt. Jetzt: pre-filter checkt ZUSÄTZLICH ob die Line einen der
+    ERROR_PATTERNS matched → INFO-Lines werden mit-erfasst wenn relevant.
     """
     findings = []
     for line in lines:
-        if ("ERROR" not in line and "Traceback" not in line
-                and "FAIL" not in line and "WARNING" not in line):
-            continue
+        is_error_like = (
+            "ERROR" in line or "Traceback" in line
+            or "FAIL" in line or "WARNING" in line or "CRITICAL" in line
+        )
+        if not is_error_like:
+            # Audit-Iter 29 (AU-5): auch INFO-Lines wenn sie ein Pattern matchen
+            if not any(re.search(p, line, re.IGNORECASE)
+                       for p, *_ in ERROR_PATTERNS):
+                continue
         for pattern, category, severity, fixable, hint in ERROR_PATTERNS:
             if re.search(pattern, line, re.IGNORECASE):
                 findings.append({
@@ -77,38 +99,99 @@ def classify_errors(lines: list[str]) -> list[dict]:
                 })
                 break
         else:
-            findings.append({
-                "line": line,
-                "category": "unknown",
-                "severity": "high",
-                "auto_fixable": False,
-                "fix_hint": "needs human review",
-            })
+            if is_error_like:
+                # Nur unmatched ERROR/WARNING/FAIL als "unknown" tracken
+                findings.append({
+                    "line": line,
+                    "category": "unknown",
+                    "severity": "high",
+                    "auto_fixable": False,
+                    "fix_hint": "needs human review",
+                })
     return findings
+
+
+def _check_bot_alive_cross_platform() -> tuple[bool, int, int]:
+    """Returns (alive, memory_kb, pid_count).
+
+    Audit-Iter 29 (Bug AU-1/AU-2/AU-3):
+      AU-1: tasklist ist Windows-only — Cloud (Linux) hatte silent false
+      AU-2: matched JEDES python.exe — auch audit selbst → false alive
+      AU-3: aggregated memory across all python.exe → misleading
+    Jetzt: cross-platform via psutil ODER fallback zu tasklist/pgrep,
+    plus explicit cmdline-check für 'bot.py' + '--daemon'."""
+    alive = False
+    mem_kb = 0
+    count = 0
+    # Try psutil (cross-platform, accurate)
+    try:
+        import psutil
+        for p in psutil.process_iter(["name", "cmdline", "memory_info"]):
+            try:
+                cmdline = " ".join(p.info.get("cmdline") or [])
+                if "bot.py" in cmdline and "--daemon" in cmdline:
+                    alive = True
+                    count += 1
+                    if p.info.get("memory_info"):
+                        mem_kb += p.info["memory_info"].rss // 1024
+            except Exception:
+                pass
+        return alive, mem_kb, count
+    except ImportError:
+        pass
+    # Fallback: OS-specific
+    import os as _os
+    if _os.name == "nt":
+        # Windows: tasklist with cmdline via wmic
+        try:
+            out = subprocess.check_output(
+                ["wmic", "process", "where", "name='python.exe'",
+                 "get", "CommandLine,WorkingSetSize", "/format:csv"],
+                text=True, timeout=5,
+            )
+            for line in out.splitlines():
+                if "bot.py" in line and "--daemon" in line:
+                    alive = True
+                    count += 1
+                    parts = line.rsplit(",", 1)
+                    if len(parts) == 2:
+                        try:
+                            mem_kb += int(parts[1].strip()) // 1024
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+    else:
+        # Linux/Mac: pgrep -af + ps for memory
+        try:
+            out = subprocess.check_output(
+                ["pgrep", "-af", "bot.py.*--daemon"],
+                text=True, timeout=5,
+            )
+            pids = []
+            for line in out.splitlines():
+                parts = line.split(None, 1)
+                if parts and parts[0].isdigit():
+                    pids.append(parts[0])
+            count = len(pids)
+            alive = count > 0
+            for pid in pids:
+                try:
+                    rss = subprocess.check_output(
+                        ["ps", "-o", "rss=", "-p", pid],
+                        text=True, timeout=2,
+                    ).strip()
+                    mem_kb += int(rss)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return alive, mem_kb, count
 
 
 def get_bot_status() -> dict:
     """Process + Activity-Status + Memory + Heartbeat-File."""
-    bot_alive = False
-    bot_memory_kb = 0
-    try:
-        out = subprocess.check_output(
-            ["tasklist", "/FI", "IMAGENAME eq python.exe", "/FO", "CSV"],
-            text=True, timeout=5
-        )
-        for line in out.splitlines()[1:]:
-            if "python.exe" in line:
-                bot_alive = True
-                # CSV: "name","pid","session","sessionN","mem"
-                parts = line.split(",")
-                if len(parts) >= 5:
-                    mem_str = parts[4].strip().strip('"').replace(".", "").replace(",", "").replace(" K", "").replace("K", "")
-                    try:
-                        bot_memory_kb = max(bot_memory_kb, int(mem_str))
-                    except Exception:
-                        pass
-    except Exception:
-        pass
+    bot_alive, bot_memory_kb, bot_pid_count = _check_bot_alive_cross_platform()
     log_size = LOG.stat().st_size if LOG.exists() else 0
     last_modified_sec_ago = (datetime.now().timestamp() - LOG.stat().st_mtime) if LOG.exists() else -1
     last_lines = LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-3:] if LOG.exists() else []
@@ -133,6 +216,7 @@ def get_bot_status() -> dict:
         disk_used_pct = -1
     return {
         "bot_process_alive": bot_alive,
+        "bot_pid_count": bot_pid_count,  # Audit-Iter 29: explicit count
         "bot_memory_kb": bot_memory_kb,
         "bot_memory_mb": round(bot_memory_kb / 1024, 1),
         "log_file_size": log_size,
