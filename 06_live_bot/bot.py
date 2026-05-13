@@ -472,6 +472,12 @@ def compute_position_size(
         return 0
     if entry <= stop:
         return 0
+    # Audit-Iter 15 (Bug PSZ-9): negative/zero equity = broken account
+    # (margin call, paper-reset). Vorher fiel der Equity-Cap raus und max_shares
+    # blieb beim MAX_LOSS_PER_TRADE_USD-Limit → bot tradete trotz Konto-Problem.
+    # Jetzt: explizit 0 returnen wenn equity unbrauchbar.
+    if account_equity is not None and account_equity <= 0:
+        return 0
     raw_risk_per_share = entry - stop
     # Minimum-Stop $0.05 (5 cents): bei engerem Stop ist Pattern-Detection
     # vermutlich Artefakt — verhindert 50000-Shares-Position
