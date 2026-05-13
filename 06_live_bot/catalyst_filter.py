@@ -43,12 +43,17 @@ def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS,
     try:
         import yfinance as yf
         news = yf.Ticker(symbol).news or []
-        # yfinance unzuverlässig: bei empty list NICHT veto-en (Cameron's
-        # Filter darf nicht an unserer Data-Source scheitern)
+        # Audit-Iter 2026-05-14: strict mode bedeutet "echtes news-veto",
+        # NICHT "data-source-empty veto". yfinance.news ist notorisch
+        # unreliable (rate limits, off-hours empty, etc). Bei TOTALLY-EMPTY:
+        # Data-Source-Issue, immer permissive — caller weiß sonst nicht
+        # warum 0 Kandidaten durchkommen. Bei news_count>0 aber none recent:
+        # echtes "kein catalyst" → strict darf veto-en.
         if not news:
-            result = False if strict else True
-            _cache[symbol] = (result, now)
-            return result
+            # data source returned nothing — likely API/timing issue, not
+            # genuine "no catalyst". Don't veto even in strict mode.
+            _cache[symbol] = (True, now)
+            return True
         cutoff = now - lookback_hours * 3600
         for n in news:
             ts_pub = n.get("providerPublishTime") or n.get("pubDate") or 0
@@ -60,14 +65,16 @@ def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS,
             if ts_pub >= cutoff:
                 _cache[symbol] = (True, now)
                 return True
-        # Hatten news, aber keine recent → V1: lass durch. Strict: veto.
+        # Hatten news, aber keine recent — DAS ist echtes "no catalyst".
+        # Strict: veto. Permissive: pass (V1 behavior).
         result = False if strict else True
         _cache[symbol] = (result, now)
         return result
     except Exception as e:
         log.debug("catalyst fetch %s: %s", symbol, e)
-        # Bei Exception NICHT cachen — nächster Call retry
-        return False if strict else True
+        # API-Exception ist ebenfalls data-source-issue, nicht "no catalyst".
+        # Bei Exception NICHT cachen + immer permissive (data-source-trust)
+        return True
 
 
 def passes_catalyst_filter(symbol: str, strict: bool = False) -> bool:

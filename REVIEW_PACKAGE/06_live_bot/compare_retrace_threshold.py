@@ -43,7 +43,10 @@ def run_one_day(target_date: str, retrace_pct: float) -> dict:
 
 def main():
     # Get all available dates from pilot data
-    bars_path = Path(__file__).parent.parent / "04_backtest" / "data_pilot" / "intraday_5m.parquet"
+    from bot import find_pilot_data_paths
+    bars_path, _ = find_pilot_data_paths()
+    if bars_path is None:
+        raise FileNotFoundError("pilot data not found")
     bars = pd.read_parquet(bars_path)
     tc = next(c for c in bars.columns if "time" in c.lower() or "date" in c.lower())
     bars[tc] = pd.to_datetime(bars[tc], utc=True)

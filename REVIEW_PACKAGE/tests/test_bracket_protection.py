@@ -17,16 +17,26 @@ sys.path.insert(0, str(ROOT / "06_live_bot"))
 
 # ─── Executor.submit_bracket_buy ─────────────────────────────────────────────
 def test_executor_bracket_buy_sends_stop_and_tp():
+    """Review-fix 2026-05-13: now returns dict with fill info, not order_id."""
     import bot
+    import unittest.mock as _m
     ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=False)
     ex.client = MagicMock()
     fake_order = MagicMock(id="abc-123")
     ex.client.submit_order.return_value = fake_order
-    rid = ex.submit_bracket_buy("AAA", 10, entry=10.0, stop=9.0, take_profit=12.0)
-    assert rid == "abc-123"
-    call = ex.client.submit_order.call_args[0][0]
-    # Bracket-Konfiguration
+    filled = MagicMock()
+    filled.status = "filled"
+    filled.filled_avg_price = 10.0
+    filled.filled_qty = 10
+    ex.client.get_order_by_id.return_value = filled
+    with _m.patch("time.sleep"):
+        result = ex.submit_bracket_buy("AAA", 10, entry=10.0, stop=9.0, take_profit=12.0,
+                                         wait_fill_seconds=2)
+    assert result["status"] == "filled"
+    assert result["order_id"] == "abc-123"
+    # Bracket-Konfiguration im submit-call
     from alpaca.trading.enums import OrderClass
+    call = ex.client.submit_order.call_args[0][0]
     assert call.order_class == OrderClass.BRACKET
     assert call.stop_loss.stop_price == 9.0
     assert call.take_profit.limit_price == 12.0
@@ -34,11 +44,12 @@ def test_executor_bracket_buy_sends_stop_and_tp():
 
 
 def test_executor_dry_run_bracket_no_real_call():
+    """Dry-run returns filled-status simulating success."""
     import bot
     ex = bot.AlpacaExecutor("k", "s", paper=True, dry_run=True)
     ex.client = MagicMock()
-    rid = ex.submit_bracket_buy("AAA", 5, 10, 9, 12)
-    assert rid is not None
+    result = ex.submit_bracket_buy("AAA", 5, 10, 9, 12)
+    assert result["status"] == "filled"
     ex.client.submit_order.assert_not_called()
 
 

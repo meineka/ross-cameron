@@ -88,29 +88,52 @@ def test_float_zero_treated_as_unknown():
     assert float_filter.passes_float_filter("BUG") is True
 
 
-# ─── Catalyst: strict mode ───────────────────────────────────────────────────
-def test_catalyst_strict_false_when_no_news():
-    """Strict-Mode: bei empty news list returns False (= veto).
-    Cache wird per Aufruf geclearted da strict-Wert das Ergebnis bestimmt."""
+# ─── Catalyst: strict mode (post 2026-05-14 semantik) ───────────────────────
+# Audit-Iter 2026-05-14: strict-Mode unterscheidet jetzt zwischen:
+#   - "API empty/error" (data-source issue) → IMMER permissive
+#   - "API returned news but ALL old" (genuine no-catalyst) → strict veto
+# Diese Semantik vermeidet false-positives bei yfinance-rate-limits
+# (alle Kandidaten fallen sonst raus weil yfinance "leer" ist).
+def test_catalyst_empty_news_permissive_even_in_strict():
+    """Empty news list = data-source-issue, nicht genuine no-catalyst."""
     import catalyst_filter
     with patch("yfinance.Ticker") as mock_ticker:
         m = MagicMock()
-        m.news = []  # keine news
+        m.news = []
         mock_ticker.return_value = m
         catalyst_filter.clear_cache()
-        assert catalyst_filter.has_recent_news("ABC", strict=True) is False
+        # Both strict and non-strict permissive on empty (data-source-trust)
+        assert catalyst_filter.has_recent_news("ABC", strict=True) is True
         catalyst_filter.clear_cache()
         assert catalyst_filter.has_recent_news("ABC", strict=False) is True
     catalyst_filter.clear_cache()
 
 
-def test_catalyst_strict_false_on_api_failure():
-    """Strict-Mode: bei Exception returns False statt True."""
+def test_catalyst_api_failure_permissive_even_in_strict():
+    """API failure = data-source-issue, permissive in both modes."""
     import catalyst_filter
     catalyst_filter.clear_cache()
     with patch("yfinance.Ticker", side_effect=RuntimeError("API down")):
-        assert catalyst_filter.has_recent_news("ABC", strict=True) is False
+        assert catalyst_filter.has_recent_news("ABC", strict=True) is True
         assert catalyst_filter.has_recent_news("ABC", strict=False) is True
+
+
+def test_catalyst_strict_rejects_only_old_news():
+    """Real strict semantic: news vorhanden aber alle alt → veto."""
+    import catalyst_filter
+    import time as _t
+    old_ts = _t.time() - 48*3600  # 48h old, lookback default 24h
+    with patch("yfinance.Ticker") as mock_ticker:
+        m = MagicMock()
+        m.news = [{"providerPublishTime": old_ts, "title": "stale"}]
+        mock_ticker.return_value = m
+        catalyst_filter.clear_cache()
+        # Strict: rejects (real no-catalyst)
+        assert catalyst_filter.has_recent_news("OLD", strict=True) is False
+        catalyst_filter.clear_cache()
+        # Non-strict: passes (V1 permissive)
+        assert catalyst_filter.has_recent_news("OLD", strict=False) is True
+    catalyst_filter.clear_cache()
 
 
 def test_catalyst_does_not_cache_on_exception():
@@ -158,12 +181,22 @@ def test_catalyst_clear_cache_works():
 
 # ─── Integration: passes_*_filter API stable ─────────────────────────────────
 def test_passes_catalyst_filter_accepts_strict_param():
-    """API-Compat: passes_catalyst_filter muss strict-Param weiterreichen."""
+    """API-Compat: passes_catalyst_filter muss strict-Param weiterreichen.
+    Post-2026-05-14: API failure → permissive in both modes (data-source-trust)."""
     import catalyst_filter
     catalyst_filter.clear_cache()
-    with patch("yfinance.Ticker", side_effect=RuntimeError("down")):
+    # Use stale-news case to verify strict-flag actually controls behavior
+    import time as _t
+    old_ts = _t.time() - 48*3600
+    with patch("yfinance.Ticker") as mock_ticker:
+        m = MagicMock()
+        m.news = [{"providerPublishTime": old_ts}]
+        mock_ticker.return_value = m
+        catalyst_filter.clear_cache()
         assert catalyst_filter.passes_catalyst_filter("X", strict=True) is False
+        catalyst_filter.clear_cache()
         assert catalyst_filter.passes_catalyst_filter("X", strict=False) is True
+    catalyst_filter.clear_cache()
 
 
 def test_passes_float_filter_returns_true_unknown():
