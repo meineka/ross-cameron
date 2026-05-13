@@ -1624,27 +1624,44 @@ class ReplayBot:
         log.info("=" * 60)
 
     def _manage(self, ts, bar, ny_t):
-        # Same logic as Bot.manage_position but synchronous + replay-stubs
+        """Audit-Iter 19 (2026-05-12) — Replay-Live-Parität:
+          REP-1: T2-Exit zählte T1-Gewinn nicht (mirrored live bot fix MP-1/PYR-1)
+          REP-2: Stop-Exit zählte T1-Gewinn nicht
+          REP-5: trades_completed_today wurde nicht incremented → MAX_TRADES_PER_DAY
+                 greift nicht in Replay → unrealistic
+        """
         if not ts.half_filled and bar["high"] >= ts.target1_price:
             half = max(1, ts.shares // 2)
             self.submit_sell(ts.symbol, half, ts.target1_price, "T1")
-            ts.half_filled = True; ts.shares -= half
+            ts.half_filled = True
+            ts.t1_shares_sold = half  # Audit-Iter 19: t1_shares_sold tracking
+            ts.shares -= half
             self.day.cents_per_share_cumulative += (ts.target1_price - ts.entry_price)
             if self.day.cents_per_share_cumulative >= QUARTER_SIZE_UNLOCK_CENTS:
                 self.day.quarter_size_unlocked = True
             return
         if ts.half_filled and bar["high"] >= ts.target2_price:
             self.submit_sell(ts.symbol, ts.shares, ts.target2_price, "T2")
-            pnl = (ts.target2_price - ts.entry_price) * ts.shares
+            # Audit-Iter 19 (REP-1): T1-Gewinn jetzt mit-gezählt
+            r1 = (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
+            r2 = (ts.target2_price - ts.entry_price) * ts.shares
+            pnl = r1 + r2
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
             self.day.consecutive_losses = 0
-            ts.in_position = False; return
+            self.day.trades_completed_today += 1  # REP-5
+            ts.in_position = False
+            return
         stop = ts.stop_price if not ts.half_filled else ts.entry_price
         if bar["low"] <= stop:
             self.submit_sell(ts.symbol, ts.shares, stop, "stop")
             pnl = (stop - ts.entry_price) * ts.shares
+            # Audit-Iter 19 (REP-2): T1-Gewinn bei half_filled-stop dazu
+            if ts.half_filled:
+                pnl += (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
             self.day.realized_pnl += pnl
+            self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
+            self.day.trades_completed_today += 1  # REP-5
             if pnl <= 0:
                 self.day.consecutive_losses += 1
                 if self.day.consecutive_losses >= 2:

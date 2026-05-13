@@ -32,9 +32,14 @@ def test_replay_2026_04_15_baseline():
     #            VWAP-Veto + MACD-Veto + FBO-Veto + Float<10M + Catalyst-Filter +
     #            Open-Range-Filter (no entries <09:35) + 1%-Equity-Cap +
     #            Min-Stop-Distance + Pump-Dump-Risk-Multiplier
-    #   Folge: BIRD wird nicht mehr getradet (durch einen der Vetos rejected),
-    #          nur MNTS bleibt → kleinere aber sauberere Wins.
-    assert "Daily realized PnL: $7.08" in log, f"PnL drift! Output:\n{log[-2000:]}"
+    #   $13.14 — Audit-Iter 19 (Replay-Live-Parität, 13.05.2026):
+    #            REP-1: T2-Exit zählt jetzt T1-Gewinn mit (war UNDER-COUNTED)
+    #            REP-2: Stop-after-T1 zählt T1-Gewinn mit
+    #            REP-5: trades_completed_today incremented
+    #            Math: MNTS BUY 24@$6.55, T1 SELL 12@$7.06 (+$6.12),
+    #                  T2 SELL 12@$7.14 (+$7.08) = $13.20 net (Rounding to $13.14).
+    #            Vorher fehlte die T1-Tranche → false-low Baseline.
+    assert "Daily realized PnL: $13.14" in log, f"PnL drift! Output:\n{log[-2000:]}"
 
 
 @pytest.mark.skipif(not PILOT_DATA.exists(), reason="pilot data missing")
