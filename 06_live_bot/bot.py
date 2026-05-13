@@ -97,7 +97,12 @@ BAR_AGGREGATION_MINUTES = 5
 
 POLE_MIN_CANDLES, POLE_MAX_CANDLES = 3, 7
 POLE_MIN_MOVE_PCT = 5.0
-POLE_TOPPING_TAIL_MAX = 0.4
+# Cameron-spec: topping-tail > 50% des range = veto. Vorher 0.4 war
+# unnötig konservativ. Trader-Loop Iter 2 (2026-05-13) backtest:
+# 0.4 + MAX_RISK=8: $73 pnl / sharpe 3.89
+# 0.5 + MAX_RISK=8: $120 pnl / sharpe 9.64 (+147%, MaxDD -$12.50 vs -$18.78)
+# 0.5 = Cameron's literal threshold "topping > 50%".
+POLE_TOPPING_TAIL_MAX = 0.5
 FLAG_MIN_CANDLES, FLAG_MAX_CANDLES = 1, 3
 FLAG_RETRACE_MAX_PCT = 50.0
 BREAKOUT_VOL_FACTOR = 1.5
