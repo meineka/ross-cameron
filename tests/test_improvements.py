@@ -218,22 +218,20 @@ def test_no_hardcoded_secret_in_repo():
 
 # ─── #12 Day-Summary persist ─────────────────────────────────────────────────
 def test_day_summary_persist(tmp_path, monkeypatch):
+    """Audit-Iter 28: use real DayState instead of MagicMock — neue getattr()
+    Calls in day_summary_persist würden sonst MagicMock-Objekte zurückbekommen."""
     import day_summary_persist as dsp
+    import bot
     monkeypatch.setattr(dsp, "RESULTS_DIR", tmp_path)
-    day = MagicMock()
+    day = bot.DayState(date="2026-05-13")
     day.realized_pnl = 25.50
     day.peak_pnl = 30.00
     day.bars_received = 100
     day.patterns_detected = 5
     day.patterns_rejected_macd = 1
     day.patterns_rejected_fbo = 1
-    day.patterns_rejected_pullback_count = 0
-    day.patterns_rejected_size_zero = 0
-    day.orders_submitted = 3
-    day.orders_failed = 0
     day.consecutive_losses = 1
-    day.spiral_locked = False
-    day.ws_reconnects = 0
+    day.orders_submitted = 3
     out = dsp.write_day_summary(day, spy_pct=0.5)
     assert out.exists()
     p = json.loads(out.read_text())
@@ -262,21 +260,19 @@ def test_float_filter_large_fails(monkeypatch):
     assert float_filter.passes_float_filter("BIG") is False
 
 
-# ─── #16 Alpha-Proxy in day-summary ──────────────────────────────────────────
-def test_day_summary_includes_alpha(tmp_path, monkeypatch):
+# ─── #16 Day-Summary SPY pct (Audit-Iter 28: alpha_proxy entfernt, war broken) ─
+def test_day_summary_includes_spy_pct(tmp_path, monkeypatch):
+    """Audit-Iter 28: alpha_proxy hatte hardcoded *1000 (broken für variable
+    Account-Sizes), wurde entfernt. spy_pct + spy_size_multiplier sind die
+    sinnvollen Regime-Metriken die jetzt drin sind."""
     import day_summary_persist as dsp
+    import bot
     monkeypatch.setattr(dsp, "RESULTS_DIR", tmp_path)
-    day = MagicMock()
-    for k in ["realized_pnl", "peak_pnl", "bars_received", "patterns_detected",
-              "patterns_rejected_macd", "patterns_rejected_fbo",
-              "patterns_rejected_pullback_count", "patterns_rejected_size_zero",
-              "orders_submitted", "orders_failed", "consecutive_losses",
-              "ws_reconnects"]:
-        setattr(day, k, 0)
-    day.spiral_locked = False
+    day = bot.DayState(date="2026-05-13")
     out = dsp.write_day_summary(day, spy_pct=1.0)
     p = json.loads(out.read_text())
-    assert "alpha_proxy" in p
+    assert p["spy_pct"] == 1.0
+    assert "spy_size_multiplier" in p
 
 
 # ─── #10 CI ──────────────────────────────────────────────────────────────────
