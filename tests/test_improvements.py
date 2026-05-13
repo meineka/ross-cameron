@@ -242,21 +242,23 @@ def test_day_summary_persist(tmp_path, monkeypatch):
 
 
 # ─── #14 Float-Filter ────────────────────────────────────────────────────────
+# Audit-Iter 10: cache schema von dict[str, float|None] zu dict[str, (val, ts)]
+# umgestellt für TTL-Support.
 def test_float_filter_unknown_passes(monkeypatch):
-    import float_filter
-    monkeypatch.setattr(float_filter, "_cache", {"ZZZ": None})
+    import float_filter, time
+    monkeypatch.setattr(float_filter, "_cache", {"ZZZ": (None, time.time())})
     assert float_filter.passes_float_filter("ZZZ") is True  # unknown → pass
 
 
 def test_float_filter_small_passes(monkeypatch):
-    import float_filter
-    monkeypatch.setattr(float_filter, "_cache", {"AAA": 5_000_000})
+    import float_filter, time
+    monkeypatch.setattr(float_filter, "_cache", {"AAA": (5_000_000.0, time.time())})
     assert float_filter.passes_float_filter("AAA") is True
 
 
 def test_float_filter_large_fails(monkeypatch):
-    import float_filter
-    monkeypatch.setattr(float_filter, "_cache", {"BIG": 500_000_000})
+    import float_filter, time
+    monkeypatch.setattr(float_filter, "_cache", {"BIG": (500_000_000.0, time.time())})
     assert float_filter.passes_float_filter("BIG") is False
 
 
