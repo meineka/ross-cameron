@@ -41,14 +41,25 @@ def macd_bear_cross(closes: Sequence[float]) -> bool:
 
 # ─── RSI ─────────────────────────────────────────────────────────────────────
 def rsi(closes: Sequence[float], period: int = 14) -> float:
-    c = pd.Series(closes)
+    """Audit-Iter 9 (2026-05-12) — Bug-Fix IND-6:
+    Vorher: bei monotone uptrend (alle delta > 0) ist loss == 0 → durch
+    replace(0, NaN) wurde rs = NaN → return 50. Aber bei reinem Aufwärtstrend
+    sollte RSI = 100 sein. Folge: false_breakout_veto RSI>80-Regel feuerte
+    NICHT bei parabolischen Chases — genau der Setup den sie filtern soll.
+    """
+    c = pd.Series(closes, dtype=float)
     delta = c.diff()
     gain = delta.where(delta > 0, 0.0).rolling(period).mean()
     loss = -delta.where(delta < 0, 0.0).rolling(period).mean()
-    rs = gain / loss.replace(0, np.nan)
-    out = 100 - (100 / (1 + rs))
-    val = out.iloc[-1]
-    return float(val) if pd.notna(val) else 50.0
+    avg_gain = gain.iloc[-1]
+    avg_loss = loss.iloc[-1]
+    if pd.isna(avg_gain) or pd.isna(avg_loss):
+        return 50.0  # zu wenig Daten
+    if avg_loss == 0:
+        # Reiner Up- oder Flat-Trend
+        return 100.0 if avg_gain > 0 else 50.0
+    rs = avg_gain / avg_loss
+    return float(100 - (100 / (1 + rs)))
 
 
 # ─── False-Breakout-Filter (FBO 5-Indicator) ─────────────────────────────────
@@ -60,30 +71,53 @@ def false_breakout_veto(bars: list[dict]) -> tuple[bool, str]:
       2) Volume < 1.5× SMA20 (separate check exists, doppeln zur Sicherheit)
       3) Close in unterstem Drittel der Bar-Range
       4) RSI > 80 (overbought, Mean-Reversion-Risk)
-      5) Keine 2 grünen Bestätigungs-Bars vor Breakout
+      5) Keine grünen Bestätigungs-Bars vor Breakout
+
+    Audit-Iter 9 (2026-05-12) — Bug-Fix IND-3:
+    Vorher KeyError wenn bar key fehlt. Jetzt defensive: jeder Bar wird
+    auf required-keys validiert, bar mit fehlenden Daten → return (False, "")
+    statt crash (caller bekommt "alles ok" — etwas was UPSTREAM filter
+    bereits aussortiert haben sollte, dieser Filter aber nicht auch
+    wegen Daten-Glitch abstürzen darf).
     """
     if len(bars) < 22:
         return False, ""
     b = bars[-1]
-    rng = b["high"] - b["low"]
+    # Defensive key-check (IND-3)
+    required = ("open", "high", "low", "close")
+    if not all(k in b and b[k] is not None for k in required):
+        return False, ""
+    try:
+        bo, bh, bl, bc = float(b["open"]), float(b["high"]), float(b["low"]), float(b["close"])
+    except (TypeError, ValueError):
+        return False, ""
+    rng = bh - bl
     if rng <= 0:
         return False, ""
     # 1) Topping-Tail
-    upper_wick = b["high"] - max(b["close"], b["open"])
+    upper_wick = bh - max(bc, bo)
     if upper_wick / rng > 0.5:
         return True, "topping_tail>50%"
     # 3) Close im unteren Drittel
-    if (b["close"] - b["low"]) / rng < 0.33:
+    if (bc - bl) / rng < 0.33:
         return True, "close_in_lower_third"
     # 4) RSI overbought
-    closes = [x["close"] for x in bars]
-    r = rsi(closes, 14)
-    if r > 80:
-        return True, f"rsi_overbought_{r:.0f}"
-    # 5) 2 grüne Bestätigungs-Bars davor
+    try:
+        closes = [float(x["close"]) for x in bars if "close" in x and x["close"] is not None]
+    except (TypeError, ValueError):
+        closes = []
+    if len(closes) >= 22:
+        r = rsi(closes, 14)
+        if r > 80:
+            return True, f"rsi_overbought_{r:.0f}"
+    # 5) Mindestens 1 grünes Bestätigungs-Bar in den vorherigen 2
     prev2 = bars[-3:-1]
     if len(prev2) == 2:
-        greens = sum(1 for x in prev2 if x["close"] > x["open"])
-        if greens < 1:  # mindestens 1 grün davor
+        try:
+            greens = sum(1 for x in prev2
+                         if "close" in x and "open" in x and x["close"] > x["open"])
+        except (TypeError, ValueError):
+            greens = 2  # bei malformed bars nicht veto-en
+        if greens < 1:
             return True, "no_green_confirm_bars"
     return False, ""

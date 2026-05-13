@@ -123,12 +123,19 @@ def test_fbo_vetos_close_lower_third():
 
 
 def test_fbo_passes_clean_breakout():
+    """Audit-Iter 9: realistischer Wobble in Basis-Bars (±5c) statt 23x
+    identische closes. Mit dem RSI-Fix (Bug IND-6) returnt sonst RSI=100
+    in der Synthetik-Konsolidierung weil loss=0."""
     from indicators import false_breakout_veto
-    bars = [{"open": 10, "high": 10.1, "low": 9.9, "close": 10.05, "volume": 1000}
-            for _ in range(23)]
-    bars.append({"open": 10.05, "high": 10.15, "low": 10.0, "close": 10.12, "volume": 1500})
-    bars.append({"open": 10.12, "high": 10.20, "low": 10.10, "close": 10.18, "volume": 1500})
-    bars.append({"open": 10.18, "high": 10.40, "low": 10.18, "close": 10.38, "volume": 3000})
+    bars = []
+    # Konsolidierung um 10.05 mit ±0.05 wobble (typische 30-Sec Bewegung)
+    for i in range(23):
+        c = 10.05 + (0.05 if i % 2 == 0 else -0.05)
+        bars.append({"open": 10.0, "high": 10.10, "low": 9.95, "close": c, "volume": 1000})
+    # Moderate Breakout (nicht parabolic): +1.3% über 3 bars
+    bars.append({"open": 10.05, "high": 10.10, "low": 10.0, "close": 10.08, "volume": 1500})
+    bars.append({"open": 10.08, "high": 10.13, "low": 10.05, "close": 10.11, "volume": 1500})
+    bars.append({"open": 10.11, "high": 10.18, "low": 10.10, "close": 10.16, "volume": 3000})
     vetoed, why = false_breakout_veto(bars)
     assert vetoed is False, f"unexpected veto: {why}"
 
