@@ -80,6 +80,23 @@ The committed changes need to remain robust under future-data validation.
   No multi-trade-day with loss to spare. All configs identical.
 - **Status:** SKIP — selectivity filters already produce ≤1 trade/day.
 
+### Iter 21: Re-Validation on extended 42-day pilot (NO COMMIT)
+- **MAX_POLE_T2_R=3.5 (Iter 7):** RE-CONFIRMED optimal.
+  - 3.0: $150.71 / Sharpe 18.61
+  - **3.5: $164.81 / Sharpe 22.89 ← still best**
+  - 4.0: $156.11 / Sharpe 17.94
+  - 5.0+: $143.61 / Sharpe 11.49
+- **BREAKOUT_VOL 1.25x:** Still +$13.36 PnL (15 trd). 1.25 is Cameron-
+  spec-violation (he says 2x). Skip same as Iter 8.
+- **POLE_MIN_MOVE 4%:** Still +$13.36 PnL (13 trd, 100% WR, MDD=$0).
+  4% is Cameron-spec-violation (5% min). Skip same as Iter 14.
+- **New 5-13 trade:** REPL — Buy 4.76, T1 4.95, T2 5.00, +$14.09.
+  Valid bull-flag setup that live-bot missed. Strong validation
+  of 1-min/5-min-mismatch-bug user flagged.
+- **Verdict:** All current committed configs (Iter 1/2/7/9) hold optimal
+  on extended pilot. Below-spec loosenings still positive but principled
+  SKIP.
+
 ### Iter 18+19: more filter-tuning (alle SKIP)
 - **Iter 18 POLE_VOLUME_RISING-Toleranz (0.7..1.5x):** Alle identisch
   ($150/11trd). Constraint non-binding für pole-length<4.
