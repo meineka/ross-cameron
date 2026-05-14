@@ -11,6 +11,24 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 24: Swap POWER_HOUR vs POST_POWER size-mults (Iter 3a-revisit)
+- **Hypothesis:** Pilot trade-time-analysis shows Power-Hour (9:30-10:30)
+  = 75% WR (volatile chop), Post-Power (10:30+) = 100% WR (clean Mid-
+  Morning). Bot's 1.0/0.75 sizes UP during chop, DOWN during clean —
+  backwards.
+- **Iter 3a was SKIPPED** because ReplayBot ignored POWER_HOUR_SIZE_MULT.
+  After Iter 23 ReplayBot passes ny_time → swap now testable.
+- **Backtest:**
+  - 1.0/0.75 (orig): $329.98 / Sharpe 45.83
+  - 1.0/1.0 EQUAL:   $413.37 / Sharpe 57.41
+  - **0.75/1.0 SWAP: $391.13 / MDD -$5.40 / Sharpe 72.43** ← selected
+  - 0.5/1.0 AGGR:    $370.82 / MDD -$3.60 / Sharpe 103.01
+  - 0.25/1.0 V-AGGR: $350.25 / MDD -$1.80 / Sharpe 194.58
+- **Selected 0.75/1.0:** Symmetric mirror of original. Cameron-conform
+  "size down in chop, full size in clean". +$61 PnL, -$1.80 MDD, +58% Sharpe.
+- **4 unit-tests updated** (compliance + size_multipliers).
+- **Commit:** `ff71e49`
+
 ### Iter 23: Time-based Quarter-Size-Unlock @ 10:00 NY (HUGE WIN)
 - **Hypothesis:** Bot's Quarter-Size-Unlock fires nur nach cumul $0.50/share
   T1-Gains. Pilot hat fast nur 1 trade/day → Bot ist PERMANENT
@@ -81,15 +99,15 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative effect Iter 1+2+7+9+22+23 (42-day pilot):**
+**Cumulative effect Iter 1+2+7+9+22+23+24 (42-day pilot):**
 
 | Metric | Original (39d) | Now (42d) | Δ |
 |---|---:|---:|---|
 | Trades | 17 | 12 | -5 |
-| PnL | $75.17 | **$329.98** | **+339%** |
+| PnL | $75.17 | **$391.13** | **+420%** |
 | Win-Rate | 67% | 91% | +24% |
-| MaxDD | -$30.63 | -$7.20 | -77% |
-| Sharpe-like | 2.45 | **45.83** | **+1771%** |
+| MaxDD | -$30.63 | **-$5.40** | -82% |
+| Sharpe-like | 2.45 | **72.43** | **+2856%** |
 
 ## Tested but NOT committed (negative or inconclusive)
 
