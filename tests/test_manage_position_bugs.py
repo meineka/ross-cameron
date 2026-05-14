@@ -17,13 +17,14 @@ def test_t1_skipped_for_one_share_position():
 
 
 def test_t2_works_for_one_share_without_t1():
-    """1-Share-Trade muss T2 ohne vorheriges T1 erreichen können."""
+    """1-Share-Trade muss T2 ohne vorheriges T1 erreichen können.
+    Review-V2 P0.1: now via submit_sell_with_confirm."""
     src = (ROOT / "06_live_bot" / "bot.py").read_text(encoding="utf-8")
-    # Locate T2-block via comment markers
-    t2_start = src.find("# T2 — Audit-Iter 4")
+    # Locate T2-block via current comment marker
+    t2_start = src.find("# T2 — Review-V2 P0.1")
     assert t2_start > 0, "T2-block marker fehlt"
-    t2_block = src[t2_start:t2_start + 800]
-    # T2-Trigger soll nicht mehr nur via half_filled gehen
+    t2_block = src[t2_start:t2_start + 1000]
+    # T2-Trigger soll auch ohne half_filled (1-Share-Path) triggern
     assert "ts.shares > 0" in t2_block, \
         "T2 muss auch ohne half_filled triggern können"
 

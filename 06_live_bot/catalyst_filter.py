@@ -1,18 +1,25 @@
-"""Catalyst-Filter MVP — 5. Cameron-Pillar (News-Required).
+"""Catalyst-Filter — 5. Cameron-Pillar (News-Required).
 
-V1: yfinance.Ticker.news (kostenlos, Yahoo-News-Feed).
-V2 (später): SEC EDGAR 8-K / PR-Newswire RSS.
+Data source: yfinance.Ticker.news (free, Yahoo-Feed). V2 (later): SEC
+EDGAR 8-K / PR-Newswire RSS for stricter validation.
 
-⚠️  V1-Behavior: Diese Funktion kann aktuell NIE False returnen — yfinance-News
-ist unzuverlässig genug dass wir "don't veto on tooling fail" angenommen
-haben. Daily-Move + RVOL sind als Catalyst-Proxy gewählt. Wenn das ändern
-soll, V2 mit SEC-EDGAR/PR-Newswire bauen + strict_mode-Param hier
-einbauen.
+Review-V2 P1.3 fix (2026-05-14):
+==================================
+Previous "strict=True" was permissive on empty/error (data-source-trust).
+Reviewer correctly identified that as wrong: if catalyst is REQUIRED for
+trading, unknown catalyst must mean NO trade. Otherwise "required" is a
+lie.
 
-Audit-Iter 10 (2026-05-12) — Bug-Fix CAT-1:
-  - clear_cache() für Tests/Daily-Reset
-  - strict=True optional: bei API-Failure False statt True (für
-    Live-Setups die wirklich nur mit bestätigtem Catalyst traden wollen)
+NEW semantic — three explicit modes:
+  - "off":    never block (filter disabled entirely)
+  - "soft":   only block on stale news (news returned but all old). Empty
+              and errors PASS with warning. This is the old behavior under
+              `strict=False`.
+  - "strict": block on ANY unknown — empty news, API exception, or all-stale.
+              "I don't know if there's a catalyst" → "I won't trade".
+              This is what CATALYST_REQUIRED=True should give a live trader.
+
+Legacy `strict=False` → mode="soft", `strict=True` → mode="strict".
 """
 from __future__ import annotations
 import logging
@@ -31,10 +38,31 @@ def clear_cache() -> None:
     _cache.clear()
 
 
+def _resolve_mode(strict: bool | None, mode: str | None) -> str:
+    """Translate legacy strict-bool to mode-string."""
+    if mode is not None:
+        if mode not in ("off", "soft", "strict"):
+            raise ValueError(f"catalyst mode must be off|soft|strict, got {mode!r}")
+        return mode
+    if strict is True:
+        return "strict"
+    return "soft"  # legacy default (V1 permissive)
+
+
 def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS,
-                    strict: bool = False) -> bool:
-    """strict=True: bei API-Failure False statt True. Default False für
-    V1-Permissive."""
+                    strict: bool | None = None, mode: str | None = None) -> bool:
+    """Returns True if symbol has fresh news (or in soft-mode on unknown).
+
+    mode="off" → always True (filter disabled).
+    mode="soft" → True on empty/error, False only when news exists but all stale.
+    mode="strict" → False on empty/error/all-stale (fail-closed).
+
+    Legacy: strict=False maps to "soft", strict=True maps to "strict".
+    """
+    resolved = _resolve_mode(strict, mode)
+    if resolved == "off":
+        return True
+
     now = time.time()
     if symbol in _cache:
         val, ts = _cache[symbol]
@@ -43,15 +71,13 @@ def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS,
     try:
         import yfinance as yf
         news = yf.Ticker(symbol).news or []
-        # Audit-Iter 2026-05-14: strict mode bedeutet "echtes news-veto",
-        # NICHT "data-source-empty veto". yfinance.news ist notorisch
-        # unreliable (rate limits, off-hours empty, etc). Bei TOTALLY-EMPTY:
-        # Data-Source-Issue, immer permissive — caller weiß sonst nicht
-        # warum 0 Kandidaten durchkommen. Bei news_count>0 aber none recent:
-        # echtes "kein catalyst" → strict darf veto-en.
         if not news:
-            # data source returned nothing — likely API/timing issue, not
-            # genuine "no catalyst". Don't veto even in strict mode.
+            # Empty news feed. Soft-mode: treat as data-source-quirk, pass.
+            # Strict-mode: treat as "unknown catalyst", block.
+            if resolved == "strict":
+                # Don't cache the negative — yfinance may recover next call.
+                log.info("catalyst STRICT-block %s: empty news feed", symbol)
+                return False
             _cache[symbol] = (True, now)
             return True
         cutoff = now - lookback_hours * 3600
@@ -65,18 +91,27 @@ def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS,
             if ts_pub >= cutoff:
                 _cache[symbol] = (True, now)
                 return True
-        # Hatten news, aber keine recent — DAS ist echtes "no catalyst".
-        # Strict: veto. Permissive: pass (V1 behavior).
-        result = False if strict else True
-        _cache[symbol] = (result, now)
-        return result
+        # News exist but all older than lookback → genuine "no fresh catalyst".
+        # BOTH soft and strict block here. (Soft only passes empty/error.)
+        log.info("catalyst block %s: news exist but none in last %dh", symbol, lookback_hours)
+        _cache[symbol] = (False, now)
+        return False
     except Exception as e:
         log.debug("catalyst fetch %s: %s", symbol, e)
-        # API-Exception ist ebenfalls data-source-issue, nicht "no catalyst".
-        # Bei Exception NICHT cachen + immer permissive (data-source-trust)
+        # API-error: strict blocks (don't know = don't trade), soft passes.
+        if resolved == "strict":
+            # Don't cache — retry on next call
+            log.warning("catalyst STRICT-block %s: yfinance error %s", symbol, e)
+            return False
         return True
 
 
-def passes_catalyst_filter(symbol: str, strict: bool = False) -> bool:
-    """V1: News in 24h reicht. Wahrer Cameron-Filter (PR-Type-Match) später."""
-    return has_recent_news(symbol, strict=strict)
+def passes_catalyst_filter(symbol: str, strict: bool | None = None,
+                           mode: str | None = None) -> bool:
+    """Cameron Pillar-5 news-required filter.
+
+    Legacy strict-bool API preserved. Recommended: use mode="strict" for
+    live trading with CATALYST_REQUIRED=True, mode="soft" for paper, "off"
+    to disable.
+    """
+    return has_recent_news(symbol, strict=strict, mode=mode)

@@ -26,11 +26,26 @@ sys.path.insert(0, str(ROOT / "06_live_bot"))
 def _make_bot_with_position(symbol="AAA", entry=10.0, target1=10.5,
                               target2=11.0, stop=9.5, initial=10,
                               half_filled=False):
-    """Bot mit gemocktem executor + Position bereits offen."""
+    """Bot mit gemocktem executor + Position bereits offen.
+
+    Review-V2 P0.1/P0.2: executor.submit_sell_with_confirm/buy_with_confirm
+    return dicts. Helper configures default fully-filled-at-limit responses
+    so tests don't need to wire each one. Tests that test partial/timeout
+    can override side_effect.
+    """
     import bot as bot_mod
     b = bot_mod.Bot.__new__(bot_mod.Bot)
     b.executor = MagicMock()
     b.executor.dry_run = False
+    # Default: fully-filled-at-limit (legacy-equivalent behavior)
+    def _default_sell_confirm(sym, shares, price, reason, **kwargs):
+        return {"status": "filled", "filled_qty": shares,
+                "avg_fill_price": price, "order_id": f"mock-{sym}"}
+    def _default_buy_confirm(sym, shares, price, **kwargs):
+        return {"status": "filled", "filled_qty": shares,
+                "avg_fill_price": price, "order_id": f"mock-{sym}"}
+    b.executor.submit_sell_with_confirm.side_effect = _default_sell_confirm
+    b.executor.submit_buy_with_confirm.side_effect = _default_buy_confirm
     b.day = bot_mod.DayState()
     b.day.realized_pnl = 0.0
     b.day.consecutive_losses = 0
@@ -70,14 +85,14 @@ async def test_macd_exit_after_t1_includes_t1_pnl():
     """
     import bot as bot_mod
     b, ts = _make_bot_with_position(half_filled=True)  # half_filled=True
-    # MACD-cross simulieren: 30+ closes mit bear-cross-Pattern
-    # Einfacher: mit patch macd_bear_cross direkt True returnen
     bar = {"open": 10.32, "high": 10.34, "low": 10.28, "close": 10.30, "volume": 1000}
-    # 30 dummy bars in ts.bars damit len-check passt
     ts.bars = [{"close": 10.0 + i * 0.01} for i in range(35)]
     with patch("bot.macd_bear_cross", return_value=True):
         await b.manage_position(ts, bar, None)
-    expected_pnl = (10.30 - 10.0) * 5 + (10.5 - 10.0) * 5
+    # Review-V2 P0.1: PnL now uses actual fill price (bar.close - SLIPPAGE)
+    # rather than bar.close directly. Slippage is real cost on exit.
+    sell_price = 10.30 - bot_mod.SLIPPAGE_CENTS  # what mock-exec returns
+    expected_pnl = (sell_price - 10.0) * 5 + (10.5 - 10.0) * 5
     assert abs(b.day.realized_pnl - expected_pnl) < 1e-6, \
         f"expected ${expected_pnl}, got ${b.day.realized_pnl}"
 
@@ -91,7 +106,8 @@ async def test_macd_exit_without_t1_only_counts_current_shares():
     ts.bars = [{"close": 10.0 + i * 0.01} for i in range(35)]
     with patch("bot.macd_bear_cross", return_value=True):
         await b.manage_position(ts, bar, None)
-    expected = (10.30 - 10.0) * 10
+    sell_price = 10.30 - bot_mod.SLIPPAGE_CENTS  # actual fill via confirm
+    expected = (sell_price - 10.0) * 10
     assert abs(b.day.realized_pnl - expected) < 1e-6
 
 
@@ -148,6 +164,10 @@ async def test_stop_exit_after_t1_includes_t1_pnl_regression():
     # Erwartet: pnl = (entry_price-old_entry)*remaining + T1_gain
     # Aber: stop=ts.entry_price WEIL half_filled (BE-Move). So stop=10.0.
     # bar.low=9.78 <= 10.0 → True. pnl = (10.0-10.0)*5 + (10.5-10.0)*5 = 2.50
-    expected_pnl = (10.0 - 10.0) * 5 + (10.5 - 10.0) * 5
+    # Stop-exit confirm-mode: sells at (stop - SLIPPAGE_CENTS) per code,
+    # actual fill price = stop - SLIPPAGE
+    import bot as _bm
+    sell_price = 10.0 - _bm.SLIPPAGE_CENTS
+    expected_pnl = (sell_price - 10.0) * 5 + (10.5 - 10.0) * 5
     assert abs(b.day.realized_pnl - expected_pnl) < 1e-6, \
         f"expected ${expected_pnl}, got ${b.day.realized_pnl}"

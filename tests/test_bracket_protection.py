@@ -107,11 +107,13 @@ def test_bot_entry_uses_bracket_in_source():
 
 
 def test_t1_partial_reprotects_remaining():
-    """Nach T1-Partial muss protect_position für Rest aufgerufen werden."""
+    """Nach T1-Partial muss protect_position für Rest aufgerufen werden.
+    Review-V2 P0.1: now via submit_sell_with_confirm (fill-poll)."""
     src = (ROOT / "06_live_bot" / "bot.py").read_text(encoding="utf-8")
-    idx = src.find("submit_sell_limit(ts.symbol, half, ts.target1_price")
-    assert idx > 0
-    after = src[idx: idx + 600]
+    # Match new confirm-variant T1 block
+    idx = src.find("submit_sell_with_confirm(\n                ts.symbol, half, ts.target1_price")
+    assert idx > 0, "T1 block not found with confirm-variant"
+    after = src[idx: idx + 1200]
     assert "protect_position" in after
 
 
@@ -119,9 +121,10 @@ def test_pyramiding_add_reprotects():
     """Nach Add: Bracket der originalen Position covert nicht mehr alle Shares
     → protect_position auf gesamte neue Position."""
     src = (ROOT / "06_live_bot" / "bot.py").read_text(encoding="utf-8")
-    idx = src.find("Move stop to BE on first add")
+    idx = src.find("ADD-TO-WINNER")
     assert idx > 0
-    after = src[idx: idx + 500]
+    # Look forward from the ADD log statement for protect_position
+    after = src[idx: idx + 2000]
     assert "protect_position" in after
 
 

@@ -85,6 +85,12 @@ DAILY_GAIN_MIN_PCT = 10.0
 RVOL_MIN_PROXY = 5.0  # Cameron-strict (war fälschlich 2.0)
 FLOAT_MAX_SHARES = 10_000_000  # 5. Cameron-Pillar
 CATALYST_REQUIRED = True  # 5. Cameron-Pillar
+# Review-V2 P1.3: catalyst-filter mode. "soft" (default) passes on
+# data-source issues (empty news, yfinance error) — preserves V1 behavior
+# and tolerates yfinance off-hours rate-limits. "strict" fails-closed —
+# unknown catalyst means no trade. "off" disables filter entirely.
+# For live trading with real money, set CATALYST_MODE="strict".
+CATALYST_MODE = "soft"
 POWER_HOUR_END = dtime(10, 30)
 # Trader-loop Iter 24 (2026-05-14): swap Power-Hour vs Post-Power.
 # Pilot diagnosis: 9:30-10:30 = 75% WR (volatile chop), 10:30+ = 100% WR
@@ -528,11 +534,11 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
         if not passes_float_filter(sym, FLOAT_MAX_SHARES):
             log.info("    REJECT %s (float > %s)", sym, f"{FLOAT_MAX_SHARES:,}")
             continue
-        # Review-fix 2026-05-13 (Reviewer #9): wenn CATALYST_REQUIRED=True,
-        # MUSS strict=True sein. Vorher: default permissive → no-news/error
-        # passed silently → Catalyst-Pillar war faktisch aus.
-        if CATALYST_REQUIRED and not passes_catalyst_filter(sym, strict=True):
-            log.info("    REJECT %s (no recent catalyst)", sym)
+        # Review-V2 P1.3: use configurable CATALYST_MODE.
+        # "soft" (default) tolerates yfinance off-hours empty/error.
+        # "strict" fails-closed for live trading.
+        if CATALYST_REQUIRED and not passes_catalyst_filter(sym, mode=CATALYST_MODE):
+            log.info("    REJECT %s (no recent catalyst, mode=%s)", sym, CATALYST_MODE)
             continue
         filtered.append(row)
         if len(filtered) >= top_n:
@@ -810,8 +816,7 @@ class AlpacaExecutor:
             return 25000.0
 
     def submit_buy_limit(self, symbol: str, shares: int, price: float) -> str | None:
-        """Plain Limit-Buy (für Pyramiding-Adds — Stop/TP der Hauptposition liegt
-        bereits broker-seitig als Bracket)."""
+        """LEGACY: returns order_id only, no fill-poll. Use submit_buy_with_confirm()."""
         if self.dry_run:
             log.info("[DRY] BUY %s %d @ %.2f", symbol, shares, price)
             return f"dryrun-{symbol}-{datetime.now().timestamp()}"
@@ -826,6 +831,96 @@ class AlpacaExecutor:
         except Exception as e:
             log.error("submit_buy err %s: %s", symbol, e)
             return None
+
+    def submit_buy_with_confirm(self, symbol: str, shares: int, price: float,
+                                wait_fill_seconds: float = 8.0) -> dict:
+        """Review-V2 P0.2 fix: Pyramid-Add with fill lifecycle.
+
+        Submits limit buy, polls until filled / partially-filled / timeout
+        / rejected. NO market-fallback (adds are optional — if they don't
+        fill, the main position is unharmed).
+
+        Returns dict (same shape as submit_sell_with_confirm):
+          {"status": "filled",   "filled_qty": N, "avg_fill_price": P, ...}
+          {"status": "partial",  "filled_qty": N, "remaining_qty": M, ...}
+          {"status": "rejected"/"timeout", "filled_qty": 0/partial, ...}
+        """
+        if self.dry_run:
+            log.info("[DRY] BUY %s %d @ %.2f", symbol, shares, price)
+            return {"status": "filled", "filled_qty": shares,
+                    "avg_fill_price": price,
+                    "order_id": f"dryrun-{symbol}-{datetime.now().timestamp()}"}
+        try:
+            req = LimitOrderRequest(
+                symbol=symbol, qty=shares, side=OrderSide.BUY,
+                time_in_force=TimeInForce.DAY, limit_price=round(price, 2),
+            )
+            o = self.client.submit_order(req)
+            order_id = o.id
+            log.info("BUY-CONFIRM %s %d @ %.2f → %s (waiting fill)",
+                     symbol, shares, price, order_id)
+        except Exception as e:
+            log.error("submit_buy_with_confirm err %s: %s", symbol, e)
+            return {"status": "failed", "reason": str(e), "filled_qty": 0}
+
+        import time as _t
+        deadline = _t.time() + wait_fill_seconds
+        while _t.time() < deadline:
+            _t.sleep(0.5)
+            try:
+                refreshed = self.client.get_order_by_id(order_id)
+            except Exception:
+                continue
+            status_str = str(getattr(refreshed.status, "value", refreshed.status)).strip().upper().rsplit(".", 1)[-1]
+            if status_str == "FILLED":
+                fp = getattr(refreshed, "filled_avg_price", None)
+                fq = getattr(refreshed, "filled_qty", None)
+                try:
+                    avg_price = float(fp) if fp else price
+                except (TypeError, ValueError):
+                    avg_price = price
+                try:
+                    fill_qty = int(float(fq)) if fq else shares
+                except (TypeError, ValueError):
+                    fill_qty = shares
+                log.info("BUY-CONFIRM %s FILLED @ $%.4f qty=%d/%d",
+                         symbol, avg_price, fill_qty, shares)
+                return {"status": "filled", "filled_qty": fill_qty,
+                        "avg_fill_price": avg_price, "order_id": order_id}
+            if status_str in ("REJECTED", "CANCELED", "EXPIRED"):
+                log.warning("BUY-CONFIRM %s status=%s", symbol, status_str)
+                return {"status": "rejected", "filled_qty": 0,
+                        "order_id": order_id}
+
+        # Timeout — capture any partial, then cancel
+        try:
+            refreshed = self.client.get_order_by_id(order_id)
+            fq = getattr(refreshed, "filled_qty", None)
+            try:
+                partial_qty = int(float(fq)) if fq else 0
+            except (TypeError, ValueError):
+                partial_qty = 0
+            fp = getattr(refreshed, "filled_avg_price", None)
+            try:
+                partial_avg = float(fp) if fp else price
+            except (TypeError, ValueError):
+                partial_avg = price
+        except Exception:
+            partial_qty, partial_avg = 0, price
+        try:
+            self.client.cancel_order_by_id(order_id)
+        except Exception:
+            pass
+        if partial_qty > 0:
+            log.warning("BUY-CONFIRM %s PARTIAL %d/%d, canceled remainder",
+                        symbol, partial_qty, shares)
+            return {"status": "partial", "filled_qty": partial_qty,
+                    "avg_fill_price": partial_avg,
+                    "remaining_qty": shares - partial_qty,
+                    "order_id": order_id}
+        log.warning("BUY-CONFIRM %s TIMEOUT no fill — canceled", symbol)
+        return {"status": "timeout", "filled_qty": 0,
+                "remaining_qty": shares, "order_id": order_id}
 
     def submit_bracket_buy(self, symbol: str, shares: int, entry: float,
                            stop: float, take_profit: float,
@@ -1087,12 +1182,16 @@ class AlpacaExecutor:
         return submitted
 
     def submit_sell_limit(self, symbol: str, shares: int, price: float, reason: str) -> str | None:
-        """Vor jedem Script-side Sell: erst Bracket-Children canceln damit nicht
-        Stop+TP gleichzeitig mit unserem Sell feuern. Im dry-run skip cancel."""
+        """LEGACY shim — submits limit sell, returns order_id only. DOES NOT
+        poll fills. Use submit_sell_with_confirm() for new code. Kept for
+        backwards-compat with older callers.
+
+        Review-V2 P0.1 noted this primitive treats submit-only as fill.
+        manage_position() now uses submit_sell_with_confirm() instead.
+        """
         if self.dry_run:
             log.info("[DRY] SELL %s %d @ %.2f (%s)", symbol, shares, price, reason)
             return f"dryrun-{symbol}-{datetime.now().timestamp()}"
-        # Bracket-Children weg, dann unser Sell
         self.cancel_open_orders_for(symbol)
         try:
             req = LimitOrderRequest(
@@ -1105,6 +1204,167 @@ class AlpacaExecutor:
         except Exception as e:
             log.error("submit_sell err %s: %s", symbol, e)
             return None
+
+    def submit_sell_with_confirm(self, symbol: str, shares: int, price: float,
+                                 reason: str, wait_fill_seconds: float = 8.0,
+                                 market_fallback: bool = True) -> dict:
+        """Review-V2 P0.1 fix: Exit-Order with full fill lifecycle.
+
+        Cancels protection (bracket-children), submits limit sell, polls
+        until filled / partially-filled / timeout / rejected. On timeout
+        and market_fallback=True, cancels limit and submits market sell to
+        guarantee flat.
+
+        Returns dict:
+          {"status": "filled",  "filled_qty": N, "avg_fill_price": P,
+           "order_id": "..."}
+          {"status": "partial", "filled_qty": N, "avg_fill_price": P,
+           "remaining_qty": M, "order_id": "..."}
+          {"status": "rejected", "filled_qty": 0, "order_id": "..."}
+          {"status": "timeout_market_filled", ...}  ← after market fallback
+          {"status": "failed", "reason": "...", "filled_qty": 0}
+
+        Caller MUST mutate position state with filled_qty / avg_fill_price,
+        not the requested values.
+        """
+        if self.dry_run:
+            log.info("[DRY] SELL %s %d @ %.2f (%s)", symbol, shares, price, reason)
+            return {"status": "filled", "filled_qty": shares,
+                    "avg_fill_price": price,
+                    "order_id": f"dryrun-{symbol}-{datetime.now().timestamp()}"}
+        self.cancel_open_orders_for(symbol)
+        # Submit the limit
+        try:
+            req = LimitOrderRequest(
+                symbol=symbol, qty=shares, side=OrderSide.SELL,
+                time_in_force=TimeInForce.DAY, limit_price=round(price, 2),
+            )
+            o = self.client.submit_order(req)
+            order_id = o.id
+            log.info("SELL-CONFIRM %s %d @ %.2f (%s) → %s (waiting fill)",
+                     symbol, shares, price, reason, order_id)
+        except Exception as e:
+            log.error("submit_sell_with_confirm submit err %s: %s", symbol, e)
+            return {"status": "failed", "reason": str(e), "filled_qty": 0}
+
+        # Poll for fill
+        import time as _t
+        deadline = _t.time() + wait_fill_seconds
+        last_status = "PENDING"
+        while _t.time() < deadline:
+            _t.sleep(0.5)
+            try:
+                refreshed = self.client.get_order_by_id(order_id)
+            except Exception as e:
+                log.debug("sell-poll err %s: %s", symbol, e)
+                continue
+            status = refreshed.status
+            status_str = str(getattr(status, "value", status)).strip().upper().rsplit(".", 1)[-1]
+            last_status = status_str
+            if status_str == "FILLED":
+                fp = getattr(refreshed, "filled_avg_price", None)
+                fq = getattr(refreshed, "filled_qty", None)
+                try:
+                    avg_price = float(fp) if fp else price
+                except (TypeError, ValueError):
+                    avg_price = price
+                try:
+                    fill_qty = int(float(fq)) if fq else shares
+                except (TypeError, ValueError):
+                    fill_qty = shares
+                log.info("SELL-CONFIRM %s FILLED @ $%.4f qty=%d/%d (%s)",
+                         symbol, avg_price, fill_qty, shares, reason)
+                return {"status": "filled", "filled_qty": fill_qty,
+                        "avg_fill_price": avg_price, "order_id": order_id}
+            if status_str in ("REJECTED", "CANCELED", "EXPIRED"):
+                log.warning("SELL-CONFIRM %s status=%s — NOT filled",
+                            symbol, status_str)
+                return {"status": "rejected", "filled_qty": 0,
+                        "order_id": order_id}
+        # Timeout — check for partial fill before fallback
+        try:
+            refreshed = self.client.get_order_by_id(order_id)
+            fq = getattr(refreshed, "filled_qty", None)
+            try:
+                partial_qty = int(float(fq)) if fq else 0
+            except (TypeError, ValueError):
+                partial_qty = 0
+        except Exception:
+            partial_qty = 0
+
+        # Cancel the unfilled portion
+        try:
+            self.client.cancel_order_by_id(order_id)
+        except Exception:
+            pass
+
+        remaining = shares - partial_qty
+        if partial_qty > 0:
+            fp = getattr(refreshed, "filled_avg_price", None)
+            try:
+                partial_avg = float(fp) if fp else price
+            except (TypeError, ValueError):
+                partial_avg = price
+            log.warning("SELL-CONFIRM %s PARTIAL fill %d/%d @ $%.4f, %d remaining",
+                        symbol, partial_qty, shares, partial_avg, remaining)
+        else:
+            partial_avg = price
+
+        if not market_fallback or remaining == 0:
+            return {"status": "partial" if partial_qty else "timeout",
+                    "filled_qty": partial_qty,
+                    "avg_fill_price": partial_avg if partial_qty else 0.0,
+                    "remaining_qty": remaining, "order_id": order_id}
+
+        # Market-fallback for the remaining shares
+        try:
+            from alpaca.trading.requests import MarketOrderRequest
+            mkt_req = MarketOrderRequest(
+                symbol=symbol, qty=remaining, side=OrderSide.SELL,
+                time_in_force=TimeInForce.DAY,
+            )
+            mo = self.client.submit_order(mkt_req)
+            log.warning("SELL-CONFIRM %s MARKET-FALLBACK %d shares → %s",
+                        symbol, remaining, mo.id)
+            # Poll market-order briefly
+            mkt_deadline = _t.time() + 5.0
+            mkt_avg = price
+            mkt_filled = 0
+            while _t.time() < mkt_deadline:
+                _t.sleep(0.5)
+                try:
+                    refreshed = self.client.get_order_by_id(mo.id)
+                except Exception:
+                    continue
+                ms = str(getattr(refreshed.status, "value", refreshed.status)).strip().upper().rsplit(".", 1)[-1]
+                if ms == "FILLED":
+                    fp = getattr(refreshed, "filled_avg_price", None)
+                    fq = getattr(refreshed, "filled_qty", None)
+                    try:
+                        mkt_avg = float(fp) if fp else price
+                    except (TypeError, ValueError):
+                        mkt_avg = price
+                    try:
+                        mkt_filled = int(float(fq)) if fq else remaining
+                    except (TypeError, ValueError):
+                        mkt_filled = remaining
+                    break
+            total_filled = partial_qty + mkt_filled
+            # Weighted avg
+            if total_filled > 0:
+                blended = ((partial_qty * partial_avg) + (mkt_filled * mkt_avg)) / total_filled
+            else:
+                blended = 0.0
+            return {"status": "timeout_market_filled",
+                    "filled_qty": total_filled,
+                    "avg_fill_price": blended,
+                    "remaining_qty": shares - total_filled,
+                    "order_id": order_id, "market_order_id": mo.id}
+        except Exception as e:
+            log.error("market-fallback submit err %s: %s", symbol, e)
+            return {"status": "timeout", "filled_qty": partial_qty,
+                    "avg_fill_price": partial_avg if partial_qty else 0.0,
+                    "remaining_qty": remaining, "order_id": order_id}
 
     def market_close_all(self, max_attempts: int = 3,
                          verify_timeout_sec: float = 30.0,
@@ -1744,26 +2004,53 @@ class Bot:
             "actual_stop": actual_stop, "actual_t1": actual_t1, "actual_t2": actual_t2,
             "spy_mult": self.day.spy_size_multiplier,
         })
+        # Review-V2 P0.3 fix: ACTIVELY verify broker-side protection matches
+        # our recomputed stop/TP. Before this was dead code. If actual_stop
+        # diverges from planned stop (HSPT-style fill below stop), the
+        # bracket-children are still on the old plan — we must repair them.
+        try:
+            repaired = self.executor.verify_and_repair_protection(
+                symbol=sym, fill_price=actual_fill_price,
+                planned_stop=params["stop_price"], planned_tp=actual_t2,
+                shares=actual_shares,
+            )
+            if repaired:
+                log.warning("ENTRY %s: protection repaired (old plan superseded by actual fill)", sym)
+        except Exception as e:
+            log.error("ENTRY %s: verify_and_repair_protection raised — UNSAFE: %s", sym, e)
+            # Note: position is open, protection state unknown. Live bot
+            # should consider this a critical event but we don't auto-flat
+            # — that's a follow-up safety improvement.
 
     async def manage_position(self, ts: TickerState, bar: dict, ny_time: dtime):
         ts.bars_since_entry += 1
 
         # Cameron MACD-Exit: bei bear-cross sofort raus (fade-away-Schutz)
+        # Review-V2 P0.1: use confirm-variant. ONLY mutate state on confirmed fill.
         closes_now = [b["close"] for b in ts.bars]
         if len(closes_now) >= 30 and macd_bear_cross(closes_now):
-            self.executor.submit_sell_limit(
+            res = self.executor.submit_sell_with_confirm(
                 ts.symbol, ts.shares, bar["close"] - SLIPPAGE_CENTS, "macd_bear_cross"
             )
-            # Audit-Iter 11 (2026-05-12) — Bug-Fix MP-1:
-            # Nach T1-Partial fehlte hier die T1-Realisierung. Stop-Exit
-            # hatte den Fix, MACD-Exit übersah die Gewinne der half-position.
-            # Audit-Iter 12 — Bug-Fix PYR-1: t1_shares_sold statt (initial-shares),
-            # bei Pyramiding war (initial-shares) falsch.
-            pnl = (bar["close"] - ts.entry_price) * ts.shares
+            actual_fill = res.get("filled_qty", 0)
+            actual_price = res.get("avg_fill_price", bar["close"])
+            status = res.get("status")
+            if actual_fill == 0:
+                log.error("MACD-EXIT %s NOT-FILLED (%s) — keeping in_position=True, broker may still be long",
+                          ts.symbol, status)
+                return  # do NOT mutate state
+            # Real PnL with actual fill price + qty
+            pnl = (actual_price - ts.entry_price) * actual_fill
             if ts.half_filled:
                 pnl += (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
+            if actual_fill < ts.shares:
+                # Partial exit — reduce shares but stay in position
+                ts.shares -= actual_fill
+                log.warning("MACD-EXIT %s PARTIAL %d/%d filled — %d remain",
+                            ts.symbol, actual_fill, ts.shares + actual_fill, ts.shares)
+                return  # don't mark fully flat, don't count as completed trade yet
             self.day.trades_completed_today += 1
             if pnl <= 0:
                 self.day.consecutive_losses += 1
@@ -1771,24 +2058,39 @@ class Bot:
                     self.day.spiral_locked = True
                     log.warning("SPIRAL-DETECTION: 2 consecutive losses → STOP")
             else:
-                # Audit-Bug-Fix 2026-05-12 (Iter 4): MACD-Win soll counter resetten
                 self.day.consecutive_losses = 0
-            self._check_daily_goal()  # MP-fix: war nur in T2/Stop-Exit
+            self._check_daily_goal()
             self.logger.log({"event": "macd_exit", "symbol": ts.symbol,
-                             "shares": ts.shares, "price": bar["close"], "pnl": pnl})
-            log.info("  MACD-EXIT %s @ $%.2f (PnL $%.2f)", ts.symbol, bar["close"], pnl)
+                             "shares": actual_fill, "price": actual_price, "pnl": pnl,
+                             "fill_status": status})
+            log.info("  MACD-EXIT %s @ $%.4f (PnL $%.2f, status=%s)",
+                     ts.symbol, actual_price, pnl, status)
             ts.in_position = False
             return
 
         # #2 30¢-Quick-Exit: wenn 30c against entry und noch im Frühphase
+        # Review-V2 P0.1: confirm-variant
         if not ts.half_filled and ts.bars_since_entry <= QUICK_EXIT_BARS_LIMIT:
             against = ts.entry_price - bar["close"]
             if against >= QUICK_EXIT_THRESHOLD_CENTS:
-                # Stock läuft nicht in unsere Richtung — exit jetzt statt warten
-                self.executor.submit_sell_limit(ts.symbol, ts.shares, bar["close"] - SLIPPAGE_CENTS, "quick_exit_30c")
-                pnl = (bar["close"] - ts.entry_price) * ts.shares
+                res = self.executor.submit_sell_with_confirm(
+                    ts.symbol, ts.shares, bar["close"] - SLIPPAGE_CENTS, "quick_exit_30c"
+                )
+                actual_fill = res.get("filled_qty", 0)
+                actual_price = res.get("avg_fill_price", bar["close"])
+                status = res.get("status")
+                if actual_fill == 0:
+                    log.error("QUICK-EXIT %s NOT-FILLED (%s) — keeping in_position",
+                              ts.symbol, status)
+                    return
+                pnl = (actual_price - ts.entry_price) * actual_fill
                 self.day.realized_pnl += pnl
                 self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
+                if actual_fill < ts.shares:
+                    ts.shares -= actual_fill
+                    log.warning("QUICK-EXIT %s PARTIAL %d filled, %d remain",
+                                ts.symbol, actual_fill, ts.shares)
+                    return
                 self.day.quick_exits += 1
                 self.day.trades_completed_today += 1
                 if pnl <= 0:
@@ -1797,93 +2099,135 @@ class Bot:
                         self.day.spiral_locked = True
                         log.warning("SPIRAL-DETECTION: 2 consecutive losses → STOP")
                 else:
-                    # Quick-Exit-Win (rare) auch consecutive_losses resetten
                     self.day.consecutive_losses = 0
-                self._check_daily_goal()  # MP-fix: war nur in T2/Stop-Exit
+                self._check_daily_goal()
                 self.logger.log({"event": "quick_exit", "symbol": ts.symbol,
-                                 "shares": ts.shares, "price": bar["close"], "pnl": pnl})
-                log.info("  QUICK-EXIT %s: -%.2fc against entry within %d bars (PnL $%.2f)",
-                         ts.symbol, against * 100, ts.bars_since_entry, pnl)
+                                 "shares": actual_fill, "price": actual_price,
+                                 "pnl": pnl, "fill_status": status})
+                log.info("  QUICK-EXIT %s @ $%.4f PnL $%.2f (status=%s)",
+                         ts.symbol, actual_price, pnl, status)
                 ts.in_position = False
                 return
 
         # #1 Position-Adding (Pyramiding) auf Winners
+        # Review-V2 P0.2: confirm-variant — only mutate position state on actual fill
         if ADD_TO_WINNER_ENABLED and ts.adds_count < MAX_ADDS_PER_TRADE:
             add_trigger_price = ts.last_add_price + ADD_TRIGGER_CENTS
             if bar["high"] >= add_trigger_price and bar["close"] > ts.entry_price:
                 add_shares = max(1, int(ts.initial_shares * ADD_FRACTION))
-                self.executor.submit_buy_limit(ts.symbol, add_shares, add_trigger_price)
+                res = self.executor.submit_buy_with_confirm(
+                    ts.symbol, add_shares, add_trigger_price
+                )
+                actual_fill = res.get("filled_qty", 0)
+                actual_price = res.get("avg_fill_price", add_trigger_price)
+                status = res.get("status")
+                if actual_fill == 0:
+                    log.warning("ADD-TO-WINNER %s NOT-FILLED (%s) — no state change",
+                                ts.symbol, status)
+                    return  # main position unchanged, no protection update
                 old_avg = ts.entry_price
-                # neue Average-Cost-Basis
-                ts.entry_price = (old_avg * ts.shares + add_trigger_price * add_shares) / (ts.shares + add_shares)
-                ts.shares += add_shares
+                old_shares = ts.shares
+                ts.entry_price = (old_avg * old_shares + actual_price * actual_fill) / (old_shares + actual_fill)
+                ts.shares += actual_fill
                 ts.adds_count += 1
-                ts.last_add_price = add_trigger_price
+                ts.last_add_price = actual_price
                 self.day.adds_executed += 1
-                self.logger.log({"event": "add", "symbol": ts.symbol, "shares": add_shares,
-                                 "price": add_trigger_price, "new_avg": ts.entry_price,
-                                 "total_shares": ts.shares, "adds": ts.adds_count})
-                log.info("  ADD-TO-WINNER %s: +%d @ $%.2f → total %d, avg $%.2f (#%d)",
-                         ts.symbol, add_shares, add_trigger_price, ts.shares,
-                         ts.entry_price, ts.adds_count)
-                # Move stop to BE on first add (Cameron-Rule)
+                self.logger.log({"event": "add", "symbol": ts.symbol, "shares": actual_fill,
+                                 "price": actual_price, "new_avg": ts.entry_price,
+                                 "total_shares": ts.shares, "adds": ts.adds_count,
+                                 "fill_status": status})
+                log.info("  ADD-TO-WINNER %s: +%d @ $%.4f → total %d, avg $%.4f (#%d, %s)",
+                         ts.symbol, actual_fill, actual_price, ts.shares,
+                         ts.entry_price, ts.adds_count, status)
                 if ts.adds_count == 1:
                     ts.stop_price = old_avg
-                # Add cancelt Bracket — neuer Schutz für komplette Restposition
                 self.executor.protect_position(
                     ts.symbol, ts.shares, stop=ts.stop_price, take_profit=ts.target2_price,
                 )
                 return
 
-        # T1 — Audit-Bug-Fix 2026-05-12 (Iter 4): mind. 2 Shares nötig für Partial
+        # T1 — Review-V2 P0.1: confirm-variant
         if not ts.half_filled and bar["high"] >= ts.target1_price and ts.shares >= 2:
             half = ts.shares // 2
-            self.executor.submit_sell_limit(ts.symbol, half, ts.target1_price, "T1_50pct")
-            self.logger.log({"event": "T1", "symbol": ts.symbol, "shares": half, "price": ts.target1_price})
+            res = self.executor.submit_sell_with_confirm(
+                ts.symbol, half, ts.target1_price, "T1_50pct"
+            )
+            actual_fill = res.get("filled_qty", 0)
+            actual_price = res.get("avg_fill_price", ts.target1_price)
+            status = res.get("status")
+            if actual_fill == 0:
+                log.warning("T1 %s NOT-FILLED (%s) — bracket still active, retry next bar",
+                            ts.symbol, status)
+                return  # bracket may still hit, retry on next bar
+            self.logger.log({"event": "T1", "symbol": ts.symbol,
+                             "shares": actual_fill, "price": actual_price,
+                             "fill_status": status})
             ts.half_filled = True
-            ts.t1_shares_sold = half       # Audit-Iter 12 (Bug PYR-1): exakte Anzahl
-            ts.shares -= half
-            # Restposition braucht neue broker-seitige Schutzkette: Stop auf BE, TP=T2
+            ts.t1_shares_sold = actual_fill
+            ts.shares -= actual_fill
             self.executor.protect_position(ts.symbol, ts.shares,
                                            stop=ts.entry_price, take_profit=ts.target2_price)
-            self.day.cents_per_share_cumulative += (ts.target1_price - ts.entry_price)
+            self.day.cents_per_share_cumulative += (actual_price - ts.entry_price)
             if self.day.cents_per_share_cumulative >= QUARTER_SIZE_UNLOCK_CENTS:
                 self.day.quarter_size_unlocked = True
                 log.info("Quarter-Size-Rule UNLOCKED today")
             return
-        # T2 — Audit-Iter 4: 1-Share-Trades springen T1 → T2 direkt (kein half_filled)
+        # T2 — Review-V2 P0.1: confirm-variant
         if bar["high"] >= ts.target2_price and ts.shares > 0:
-            self.executor.submit_sell_limit(ts.symbol, ts.shares, ts.target2_price, "T2")
-            # Audit-Iter 12 (Bug PYR-1): t1_shares_sold statt initial_shares*0.5
-            # — bei Pyramiding war initial*0.5 ≠ tatsächliche T1-Menge
+            res = self.executor.submit_sell_with_confirm(
+                ts.symbol, ts.shares, ts.target2_price, "T2"
+            )
+            actual_fill = res.get("filled_qty", 0)
+            actual_price = res.get("avg_fill_price", ts.target2_price)
+            status = res.get("status")
+            if actual_fill == 0:
+                log.warning("T2 %s NOT-FILLED (%s)", ts.symbol, status)
+                return
             if ts.half_filled:
                 r1 = (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
-                r2 = (ts.target2_price - ts.entry_price) * ts.shares
+                r2 = (actual_price - ts.entry_price) * actual_fill
             else:
                 r1 = 0.0
-                r2 = (ts.target2_price - ts.entry_price) * ts.shares
+                r2 = (actual_price - ts.entry_price) * actual_fill
             pnl = r1 + r2
-            self.logger.log({"event": "T2_exit", "symbol": ts.symbol, "shares": ts.shares,
-                            "price": ts.target2_price, "pnl": pnl})
+            self.logger.log({"event": "T2_exit", "symbol": ts.symbol,
+                             "shares": actual_fill, "price": actual_price, "pnl": pnl,
+                             "fill_status": status})
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
+            if actual_fill < ts.shares:
+                ts.shares -= actual_fill
+                log.warning("T2 %s PARTIAL %d filled, %d remain", ts.symbol, actual_fill, ts.shares)
+                return
             self.day.consecutive_losses = 0
             self.day.trades_completed_today += 1
             self._check_daily_goal()
             ts.in_position = False
             return
-        # Stop / BE
+        # Stop / BE — Review-V2 P0.1: confirm-variant with market-fallback
         stop = ts.stop_price if not ts.half_filled else ts.entry_price
         if bar["low"] <= stop:
-            self.executor.submit_sell_limit(ts.symbol, ts.shares, stop - SLIPPAGE_CENTS, "stop_or_BE")
-            pnl = (stop - ts.entry_price) * ts.shares
-            # Audit-Iter 12 (Bug PYR-1): t1_shares_sold statt (initial - shares).
-            # Bei Pyramiding waren mehr Shares im Spiel als initial — und T1 sold
-            # tatsächlich (initial+adds)//2 nicht initial//2.
+            res = self.executor.submit_sell_with_confirm(
+                ts.symbol, ts.shares, stop - SLIPPAGE_CENTS, "stop_or_BE",
+                market_fallback=True,  # critical: must exit on stop-hit
+            )
+            actual_fill = res.get("filled_qty", 0)
+            actual_price = res.get("avg_fill_price", stop)
+            status = res.get("status")
+            if actual_fill == 0:
+                log.critical("STOP %s NOT-FILLED (%s) — UNPROTECTED POSITION REMAINS, will retry next bar",
+                             ts.symbol, status)
+                return
+            pnl = (actual_price - ts.entry_price) * actual_fill
             if ts.half_filled:
                 pnl += (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
+            if actual_fill < ts.shares:
+                ts.shares -= actual_fill
+                log.critical("STOP %s PARTIAL %d filled, %d UNPROTECTED — next bar will retry",
+                             ts.symbol, actual_fill, ts.shares)
+                return
             self.day.trades_completed_today += 1
             if pnl <= 0:
                 self.day.consecutive_losses += 1
@@ -1893,8 +2237,10 @@ class Bot:
             else:
                 self.day.consecutive_losses = 0
             self._check_daily_goal()
-            self.logger.log({"event": "stop_exit", "symbol": ts.symbol, "shares": ts.shares,
-                            "price": stop, "pnl": pnl, "reason": "stop" if not ts.half_filled else "BE"})
+            self.logger.log({"event": "stop_exit", "symbol": ts.symbol,
+                            "shares": actual_fill, "price": actual_price, "pnl": pnl,
+                            "reason": "stop" if not ts.half_filled else "BE",
+                            "fill_status": status})
             ts.in_position = False
             return
 

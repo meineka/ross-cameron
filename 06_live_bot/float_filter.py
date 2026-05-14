@@ -47,8 +47,26 @@ def get_float(symbol: str) -> float | None:
     return _cache[symbol][0]
 
 
-def passes_float_filter(symbol: str, max_float: float = MAX_FLOAT) -> bool:
+def passes_float_filter(symbol: str, max_float: float = MAX_FLOAT,
+                        mode: str = "soft") -> bool:
+    """Cameron Pillar-5 float<10M filter.
+
+    Review-V2 P1.4 fix: three explicit modes.
+      off    → never block (filter disabled)
+      soft   → known float > max → block; unknown → pass with warning
+      strict → known float > max → block; unknown → BLOCK (fail-closed)
+
+    Default is "soft" (V1 behavior). Live bots that REQUIRE small-float
+    setups should pass mode="strict".
+    """
+    if mode == "off":
+        return True
+    if mode not in ("soft", "strict"):
+        raise ValueError(f"float filter mode must be off|soft|strict, got {mode!r}")
     f = get_float(symbol)
     if f is None:
-        return True  # unknown → don't veto
+        if mode == "strict":
+            log.info("float STRICT-block %s: unknown floatShares", symbol)
+            return False
+        return True  # soft: unknown → pass
     return f <= max_float

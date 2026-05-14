@@ -28,11 +28,20 @@ sys.path.insert(0, str(ROOT / "06_live_bot"))
 
 def _make_bot_with_position(entry=10.0, target1=10.5, target2=11.0,
                               stop=9.5, initial=100):
-    """Standard-Bot-Setup für manage_position-Tests."""
+    """Standard-Bot-Setup für manage_position-Tests.
+    Review-V2 P0: configure dict-returning confirm-methods."""
     import bot as bot_mod
     b = bot_mod.Bot.__new__(bot_mod.Bot)
     b.executor = MagicMock()
     b.executor.dry_run = False
+    def _sell_confirm(sym, shares, price, reason, **kwargs):
+        return {"status": "filled", "filled_qty": shares,
+                "avg_fill_price": price, "order_id": f"mock-{sym}"}
+    def _buy_confirm(sym, shares, price, **kwargs):
+        return {"status": "filled", "filled_qty": shares,
+                "avg_fill_price": price, "order_id": f"mock-{sym}"}
+    b.executor.submit_sell_with_confirm.side_effect = _sell_confirm
+    b.executor.submit_buy_with_confirm.side_effect = _buy_confirm
     b.day = bot_mod.DayState()
     b.day.realized_pnl = 0.0
     b.day.consecutive_losses = 0
@@ -133,11 +142,13 @@ async def test_stop_exit_pnl_correct_after_pyramid_t1():
     ts.half_filled = True
     ts.t1_shares_sold = 87
     ts.shares = 88
-    # Stop = entry_price (BE-Move nach T1)
+    # Stop = entry_price (BE-Move nach T1). Sell at (stop - SLIPPAGE).
+    import bot as _bm
     bar_stop = {"open": 10.10, "high": 10.10, "low": 10.0, "close": 10.05, "volume": 1000}
     ts.bars = [{"close": 10.0} for _ in range(5)]
     await b.manage_position(ts, bar_stop, None)
-    expected = (new_avg - new_avg) * 88 + (10.5 - new_avg) * 87
+    actual_sell = new_avg - _bm.SLIPPAGE_CENTS
+    expected = (actual_sell - new_avg) * 88 + (10.5 - new_avg) * 87
     assert abs(b.day.realized_pnl - expected) < 0.01
 
 
@@ -156,9 +167,11 @@ async def test_macd_exit_pnl_correct_after_pyramid_t1():
     # MACD-Exit bei $10.30
     bar = {"open": 10.32, "high": 10.34, "low": 10.28, "close": 10.30, "volume": 1000}
     ts.bars = [{"close": 10.0 + i * 0.01} for i in range(35)]
+    import bot as _bm
     with patch("bot.macd_bear_cross", return_value=True):
         await b.manage_position(ts, bar, None)
-    expected = (10.30 - new_avg) * 88 + (10.50 - new_avg) * 87
+    actual_sell = 10.30 - _bm.SLIPPAGE_CENTS
+    expected = (actual_sell - new_avg) * 88 + (10.50 - new_avg) * 87
     assert abs(b.day.realized_pnl - expected) < 0.01
 
 
@@ -181,5 +194,7 @@ async def test_stop_exit_pnl_without_t1_no_t1_addition():
     bar = {"open": 9.50, "high": 9.55, "low": 9.40, "close": 9.50, "volume": 1000}
     ts.bars = [{"close": 10.0} for _ in range(5)]
     await b.manage_position(ts, bar, None)
-    expected = (9.5 - 10.0) * 10  # only initial position loss
+    import bot as _bm
+    actual_sell = 9.5 - _bm.SLIPPAGE_CENTS
+    expected = (actual_sell - 10.0) * 10  # only initial position loss
     assert abs(b.day.realized_pnl - expected) < 0.01

@@ -88,38 +88,74 @@ def test_float_zero_treated_as_unknown():
     assert float_filter.passes_float_filter("BUG") is True
 
 
-# ─── Catalyst: strict mode (post 2026-05-14 semantik) ───────────────────────
-# Audit-Iter 2026-05-14: strict-Mode unterscheidet jetzt zwischen:
-#   - "API empty/error" (data-source issue) → IMMER permissive
-#   - "API returned news but ALL old" (genuine no-catalyst) → strict veto
-# Diese Semantik vermeidet false-positives bei yfinance-rate-limits
-# (alle Kandidaten fallen sonst raus weil yfinance "leer" ist).
-def test_catalyst_empty_news_permissive_even_in_strict():
-    """Empty news list = data-source-issue, nicht genuine no-catalyst."""
+# ─── Catalyst: strict/soft/off mode (Review-V2 P1.3 semantik) ───────────────
+# Reviewer-V2 corrected old semantic: if catalyst REQUIRED for live trading,
+# unknown catalyst must mean NO trade. New three-mode API:
+#   off    → always pass
+#   soft   → pass on empty/error, block only on all-stale (V1 permissive default)
+#   strict → block on ANY unknown (empty, error, or all-stale)
+
+def test_catalyst_empty_news_soft_permissive():
+    """Soft-mode (V1 default): empty news = data-source-quirk, pass."""
     import catalyst_filter
     with patch("yfinance.Ticker") as mock_ticker:
         m = MagicMock()
         m.news = []
         mock_ticker.return_value = m
         catalyst_filter.clear_cache()
-        # Both strict and non-strict permissive on empty (data-source-trust)
-        assert catalyst_filter.has_recent_news("ABC", strict=True) is True
-        catalyst_filter.clear_cache()
         assert catalyst_filter.has_recent_news("ABC", strict=False) is True
+        catalyst_filter.clear_cache()
+        assert catalyst_filter.has_recent_news("ABC", mode="soft") is True
     catalyst_filter.clear_cache()
 
 
-def test_catalyst_api_failure_permissive_even_in_strict():
-    """API failure = data-source-issue, permissive in both modes."""
+def test_catalyst_empty_news_strict_blocks():
+    """Strict-mode (Review-V2 fix): empty news = unknown catalyst = no trade."""
+    import catalyst_filter
+    with patch("yfinance.Ticker") as mock_ticker:
+        m = MagicMock()
+        m.news = []
+        mock_ticker.return_value = m
+        catalyst_filter.clear_cache()
+        assert catalyst_filter.has_recent_news("ABC", strict=True) is False
+        catalyst_filter.clear_cache()
+        assert catalyst_filter.has_recent_news("ABC", mode="strict") is False
+    catalyst_filter.clear_cache()
+
+
+def test_catalyst_api_failure_soft_permissive():
+    """Soft-mode: yfinance error → pass (data-source-trust)."""
     import catalyst_filter
     catalyst_filter.clear_cache()
     with patch("yfinance.Ticker", side_effect=RuntimeError("API down")):
-        assert catalyst_filter.has_recent_news("ABC", strict=True) is True
         assert catalyst_filter.has_recent_news("ABC", strict=False) is True
 
 
-def test_catalyst_strict_rejects_only_old_news():
-    """Real strict semantic: news vorhanden aber alle alt → veto."""
+def test_catalyst_api_failure_strict_blocks():
+    """Strict-mode (Review-V2 fix): yfinance error → block (fail-closed)."""
+    import catalyst_filter
+    catalyst_filter.clear_cache()
+    with patch("yfinance.Ticker", side_effect=RuntimeError("API down")):
+        assert catalyst_filter.has_recent_news("ABC", strict=True) is False
+        assert catalyst_filter.has_recent_news("ABC", mode="strict") is False
+
+
+def test_catalyst_off_mode_always_passes():
+    """Off-mode: filter completely disabled."""
+    import catalyst_filter
+    catalyst_filter.clear_cache()
+    with patch("yfinance.Ticker", side_effect=RuntimeError("API down")):
+        assert catalyst_filter.has_recent_news("ABC", mode="off") is True
+    with patch("yfinance.Ticker") as mock_ticker:
+        m = MagicMock(); m.news = []; mock_ticker.return_value = m
+        catalyst_filter.clear_cache()
+        assert catalyst_filter.has_recent_news("ABC", mode="off") is True
+
+
+def test_catalyst_stale_news_blocks_in_all_modes_except_off():
+    """Review-V2 fix: stale news = positive signal of no-catalyst.
+    Both soft and strict block. Only off-mode lets it through.
+    Old semantic where soft passed stale was inconsistent — fixed."""
     import catalyst_filter
     import time as _t
     old_ts = _t.time() - 48*3600  # 48h old, lookback default 24h
@@ -128,11 +164,14 @@ def test_catalyst_strict_rejects_only_old_news():
         m.news = [{"providerPublishTime": old_ts, "title": "stale"}]
         mock_ticker.return_value = m
         catalyst_filter.clear_cache()
-        # Strict: rejects (real no-catalyst)
+        # Strict: blocks (verified no fresh catalyst)
         assert catalyst_filter.has_recent_news("OLD", strict=True) is False
         catalyst_filter.clear_cache()
-        # Non-strict: passes (V1 permissive)
-        assert catalyst_filter.has_recent_news("OLD", strict=False) is True
+        # Soft: ALSO blocks (we know news exists but none fresh — real signal)
+        assert catalyst_filter.has_recent_news("OLD", strict=False) is False
+        catalyst_filter.clear_cache()
+        # Off: filter disabled, passes
+        assert catalyst_filter.has_recent_news("OLD", mode="off") is True
     catalyst_filter.clear_cache()
 
 
@@ -180,12 +219,12 @@ def test_catalyst_clear_cache_works():
 
 
 # ─── Integration: passes_*_filter API stable ─────────────────────────────────
-def test_passes_catalyst_filter_accepts_strict_param():
-    """API-Compat: passes_catalyst_filter muss strict-Param weiterreichen.
-    Post-2026-05-14: API failure → permissive in both modes (data-source-trust)."""
+def test_passes_catalyst_filter_accepts_strict_and_mode():
+    """API-Compat: legacy strict-bool + new mode-string both work.
+    Review-V2 P1.3: strict=True must mean fail-closed."""
     import catalyst_filter
     catalyst_filter.clear_cache()
-    # Use stale-news case to verify strict-flag actually controls behavior
+    # Stale news case: both strict and soft block (it's a real no-fresh signal)
     import time as _t
     old_ts = _t.time() - 48*3600
     with patch("yfinance.Ticker") as mock_ticker:
@@ -195,12 +234,30 @@ def test_passes_catalyst_filter_accepts_strict_param():
         catalyst_filter.clear_cache()
         assert catalyst_filter.passes_catalyst_filter("X", strict=True) is False
         catalyst_filter.clear_cache()
-        assert catalyst_filter.passes_catalyst_filter("X", strict=False) is True
+        assert catalyst_filter.passes_catalyst_filter("X", strict=False) is False
+        catalyst_filter.clear_cache()
+        assert catalyst_filter.passes_catalyst_filter("X", mode="off") is True
+    catalyst_filter.clear_cache()
+
+
+def test_passes_catalyst_filter_strict_blocks_unknown():
+    """Review-V2 P1.3 fix: strict-mode now blocks unknown (empty/error).
+    Previously was permissive — that was the bug."""
+    import catalyst_filter
+    catalyst_filter.clear_cache()
+    # Empty news in strict-mode = block
+    with patch("yfinance.Ticker") as mock_ticker:
+        m = MagicMock(); m.news = []; mock_ticker.return_value = m
+        assert catalyst_filter.passes_catalyst_filter("X", strict=True) is False
+    catalyst_filter.clear_cache()
+    # API error in strict-mode = block
+    with patch("yfinance.Ticker", side_effect=RuntimeError("down")):
+        assert catalyst_filter.passes_catalyst_filter("X", strict=True) is False
     catalyst_filter.clear_cache()
 
 
 def test_passes_float_filter_returns_true_unknown():
-    """unknown float (None) → True (kein veto)."""
+    """Soft (default): unknown float → True (no veto)."""
     import float_filter
     float_filter.clear_cache()
     float_filter._cache["U"] = (None, time.time())
@@ -208,8 +265,28 @@ def test_passes_float_filter_returns_true_unknown():
 
 
 def test_passes_float_filter_vetos_high_float():
-    """Float > 10M → False (veto)."""
+    """Float > 10M → False (veto, all modes except off)."""
     import float_filter
     float_filter.clear_cache()
     float_filter._cache["BIG"] = (50_000_000.0, time.time())
     assert float_filter.passes_float_filter("BIG") is False
+    assert float_filter.passes_float_filter("BIG", mode="soft") is False
+    assert float_filter.passes_float_filter("BIG", mode="strict") is False
+    assert float_filter.passes_float_filter("BIG", mode="off") is True
+
+
+def test_passes_float_filter_strict_blocks_unknown():
+    """Review-V2 P1.4 fix: strict-mode blocks unknown float."""
+    import float_filter
+    float_filter.clear_cache()
+    float_filter._cache["UNK"] = (None, time.time())
+    assert float_filter.passes_float_filter("UNK", mode="strict") is False
+    assert float_filter.passes_float_filter("UNK", mode="soft") is True
+    assert float_filter.passes_float_filter("UNK", mode="off") is True
+
+
+def test_passes_float_filter_invalid_mode_raises():
+    import float_filter
+    import pytest
+    with pytest.raises(ValueError):
+        float_filter.passes_float_filter("X", mode="bogus")
