@@ -11,6 +11,22 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 35: Pilot extended 145→167d (Sept 2025) + ANTI-OVERFIT decision
+- **Data:** 16 more days (2025-09-15 to 2025-10-14).
+- **New trades:** 4 added (1 win, 3 losses) — Sept was bad-luck heavy.
+- **Backtest 167d:** $669.42 / 79% / MDD -$100.13 / **Sharpe 6.69**
+  (vs 145d Sharpe 14.43, -54%).
+- **MAX_RISK sweep on 167d:** new "optimum" appears at 5.0% (Sharpe 11.58).
+- **CONSCIOUS SKIP — refusing to chase the cascade:**
+  - Already tightened 10→8→7→5.5
+  - Each pilot extension reveals "new optimum"
+  - This IS the overfit cascade trap
+  - True Sharpe ranges 6-15 across samples — both honest
+  - 5.5% is Cameron-conform, structural cliff at 5.5→6.0 still holds
+- **Honest reality acceptance:** ~12-15% intrinsic failure rate. Some
+  months have 3-loss-clusters (Sept 2025). Bot accepts this tail risk.
+- **Commit:** `52891c6`
+
 ### Iter 34: Cross-loss pattern analysis (SKIP — losses are random)
 - **Diag of both 145d losses:**
   | Date | Ticker | Risk% | Entry | Time | PnL |
@@ -257,18 +273,30 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative on EXTENDED 145-day pilot (all Iter 1@5.5/2/7/9/22/23/24/25@3.5R/29/30/31/32):**
+**HONEST Cumulative on 167-day pilot (~8 months):**
 
-| Metric | Original (39d) | Now (145d) | Δ |
+| Metric | Original (39d) | Now (167d) | Δ |
 |---|---:|---:|---|
-| Trades | 17 | 16 | -1 |
-| PnL | $75.17 | **$719.67** | **+857%** |
-| Win-Rate | 67% | **88%** | +21% |
-| MaxDD | -$30.63 | -$49.88 | +63% |
-| Sharpe-like | 2.45 | **14.43** | **+489%** |
+| Trades | 17 | 20 | +3 |
+| PnL | $75.17 | **$669.42** | **+790%** |
+| Win-Rate | 67% | **79%** | +12% |
+| MaxDD | -$30.63 | -$100.13 | -227% |
+| Sharpe-like | 2.45 | **6.69** | **+173%** |
 
-Note: 122d Sharpe was 20.74 — one new bad day on 2025-11-07 pulled Sharpe
-down to 14.43. Decision to NOT tighten MAX_RISK further (would be overfit).
+**Sharpe evolution by pilot-size (showing overfit-cascade risk):**
+
+| Pilot | Sharpe@5.5% | What was found |
+|---|---:|---|
+| 39d (orig) | 9.64 | baseline |
+| 42d | 85.71 | sample-bias illusion |
+| 61d | 7.68 | 1 big loss exposed |
+| 81d | 11.06 | 2 more losses |
+| 102d | 15.19 | added wins, stable |
+| 122d | 20.74 | added wins, peak |
+| 145d | 14.43 | 1 new loss |
+| **167d** | **6.69** | **3 more losses (Sept bad-luck)** |
+
+True average Sharpe across samples ~12. Bot is honest-robust at 5.5%.
 
 **Note on MDD:** 102-day pilot exposes worst-case DD. PnL/Sharpe still
 massively net-positive vs original.
