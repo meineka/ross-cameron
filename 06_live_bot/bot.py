@@ -2613,12 +2613,20 @@ class ReplayBot:
                 and ts.bars_since_entry <= QUICK_EXIT_BARS_LIMIT
                 and (ts.entry_price - bar["low"]) >= QUICK_EXIT_THRESHOLD_CENTS):
             qe_px = ts.entry_price - QUICK_EXIT_THRESHOLD_CENTS
-            filled, fill_price = self._executor_sell(ts, ts.shares, qe_px, "QE")
+            requested = ts.shares
+            filled, fill_price = self._executor_sell(ts, requested, qe_px, "QE")
             if filled == 0:
                 return  # broker rejected — keep position
+            # Phase-9 (ChatGPT-17:49): book PnL only on actually-filled qty;
+            # decrement shares precisely; only flat when shares==0
             pnl = (fill_price - ts.entry_price) * filled
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
+            ts.shares -= filled
+            if ts.shares > 0:
+                log.warning("QE %s PARTIAL %d/%d — %d remain, in_position=True",
+                            ts.symbol, filled, requested, ts.shares)
+                return  # partial: stay in position, no trade-count yet
             self.day.trades_completed_today += 1
             if pnl <= 0:
                 self.day.consecutive_losses += 1
@@ -2642,29 +2650,47 @@ class ReplayBot:
                 self.day.quarter_size_unlocked = True
             return
         if ts.half_filled and bar["high"] >= ts.target2_price:
-            filled, fill_price = self._executor_sell(ts, ts.shares, ts.target2_price, "T2")
+            requested = ts.shares
+            filled, fill_price = self._executor_sell(ts, requested, ts.target2_price, "T2")
             if filled == 0:
                 return
+            # Phase-9: T1-gain on the sold-half always counted; T2-leg counts
+            # only actually-filled shares. Trade-counted only when fully flat.
             r1 = (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
             r2 = (fill_price - ts.entry_price) * filled
             pnl = r1 + r2
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
+            ts.shares -= filled
+            if ts.shares > 0:
+                log.warning("T2 %s PARTIAL %d/%d — %d remain, in_position=True",
+                            ts.symbol, filled, requested, ts.shares)
+                return
             self.day.consecutive_losses = 0
-            self.day.trades_completed_today += 1  # REP-5
+            self.day.trades_completed_today += 1
             ts.in_position = False
             return
         stop = ts.stop_price if not ts.half_filled else ts.entry_price
         if bar["low"] <= stop:
-            filled, fill_price = self._executor_sell(ts, ts.shares, stop, "stop")
+            requested = ts.shares
+            filled, fill_price = self._executor_sell(ts, requested, stop, "stop")
             if filled == 0:
                 return
+            # Phase-9: PnL on filled only; T1-gain counts (was previously
+            # half_filled); partial stop is HIGH-SEVERITY simulated risk —
+            # log critical to surface in tests
             pnl = (fill_price - ts.entry_price) * filled
             if ts.half_filled:
                 pnl += (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
-            self.day.trades_completed_today += 1  # REP-5
+            ts.shares -= filled
+            if ts.shares > 0:
+                log.critical("STOP %s PARTIAL %d/%d — %d UNPROTECTED REMAIN",
+                             ts.symbol, filled, requested, ts.shares)
+                return  # next bar's _manage will retry stop (legacy) or
+                        # executor's market-fallback path
+            self.day.trades_completed_today += 1
             if pnl <= 0:
                 self.day.consecutive_losses += 1
                 if self.day.consecutive_losses >= 2:

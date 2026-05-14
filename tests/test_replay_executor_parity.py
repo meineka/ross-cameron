@@ -92,3 +92,107 @@ def test_replaybot_init_accepts_executor():
     assert rb2.executor is not None
     # Helper method present
     assert callable(getattr(rb2, "_executor_sell", None))
+
+
+# ─── Phase-9 (ChatGPT-17:49): partial-fill scenarios ─────────────────────────
+def _setup_partial_ts(executor):
+    """Helper: half-filled position with 5 shares remaining."""
+    import bot
+    ts = bot.TickerState(symbol="AAA", rank=1, score=1.0)
+    ts.in_position = True
+    ts.entry_price = 10.0
+    ts.stop_price = 9.5
+    ts.target1_price = 10.5
+    ts.target2_price = 11.0
+    ts.shares = 5
+    ts.initial_shares = 10
+    ts.half_filled = True
+    ts.t1_shares_sold = 5
+    ts.bars_since_entry = 10
+    rb = bot.ReplayBot(executor=executor)
+    rb.tickers["AAA"] = ts
+    executor.positions["AAA"] = 5
+    executor.avg_prices["AAA"] = 10.0
+    return rb, ts
+
+
+def test_replay_t2_partial_fill_keeps_remainder_position():
+    """T2 partial 3/5 → bot.shares=2, broker.qty=2, in_position=True."""
+    from fake_broker import FakeBroker
+    fb = FakeBroker()
+    fb.set_behavior("AAA", "partial", partial_qty=3)
+    rb, ts = _setup_partial_ts(fb)
+    rb._manage(ts, {"open": 11.0, "high": 11.1, "low": 10.9, "close": 11.0,
+                     "volume": 1000}, None)
+    assert ts.shares == 2, f"expected 2 shares remaining, got {ts.shares}"
+    assert ts.in_position is True, "must stay in_position with shares > 0"
+    assert fb.positions["AAA"] == 2, "broker truth must match"
+    assert rb.day.trades_completed_today == 0, \
+        "trade-counter must not increment on partial T2"
+
+
+def test_replay_stop_partial_fill_keeps_remainder_position():
+    """Stop partial 2/5 → bot.shares=3, broker.qty=3, in_position=True.
+    Critical: log.critical fires (unprotected position)."""
+    from fake_broker import FakeBroker
+    fb = FakeBroker()
+    fb.set_behavior("AAA", "partial", partial_qty=2)
+    rb, ts = _setup_partial_ts(fb)
+    # Bar with low below BE-stop (entry_price for half_filled)
+    rb._manage(ts, {"open": 9.95, "high": 9.97, "low": 9.0, "close": 9.5,
+                     "volume": 1000}, None)
+    assert ts.shares == 3, f"expected 3 shares remaining, got {ts.shares}"
+    assert ts.in_position is True
+    assert fb.positions["AAA"] == 3
+    assert rb.day.trades_completed_today == 0
+
+
+def test_replay_qe_partial_fill_keeps_remainder_position():
+    """QE partial 2/5 → bot.shares=3, broker.qty=3, in_position=True."""
+    from fake_broker import FakeBroker
+    import bot
+    fb = FakeBroker()
+    fb.set_behavior("AAA", "partial", partial_qty=2)
+    # QE only fires pre-T1
+    ts = bot.TickerState(symbol="AAA", rank=1, score=1.0)
+    ts.in_position = True
+    ts.entry_price = 10.0
+    ts.stop_price = 9.5
+    ts.target1_price = 10.5
+    ts.target2_price = 11.0
+    ts.shares = 5
+    ts.initial_shares = 5
+    ts.half_filled = False
+    ts.t1_shares_sold = 0
+    ts.bars_since_entry = 0  # within QE window
+    rb = bot.ReplayBot(executor=fb)
+    rb.tickers["AAA"] = ts
+    fb.positions["AAA"] = 5
+    fb.avg_prices["AAA"] = 10.0
+    # Bar with low driving 30c below entry → QE triggers
+    rb._manage(ts, {"open": 9.85, "high": 9.90, "low": 9.65, "close": 9.70,
+                     "volume": 1000}, None)
+    assert ts.shares == 3, f"expected 3 shares remaining, got {ts.shares}"
+    assert ts.in_position is True
+    assert fb.positions["AAA"] == 3
+    assert rb.day.trades_completed_today == 0
+
+
+def test_replay_partial_then_full_exits_cleanly():
+    """Partial 3 + later full-fill 2 should end flat with correct PnL."""
+    from fake_broker import FakeBroker
+    fb = FakeBroker()
+    fb.set_behavior("AAA", "partial", partial_qty=3)
+    rb, ts = _setup_partial_ts(fb)
+    # First T2-bar: partial 3
+    rb._manage(ts, {"open": 11.0, "high": 11.1, "low": 10.9, "close": 11.0,
+                     "volume": 1000}, None)
+    assert ts.shares == 2
+    # Switch FakeBroker to filled (next bar fills fully)
+    fb.set_behavior("AAA", "filled_at_limit")
+    rb._manage(ts, {"open": 11.0, "high": 11.05, "low": 10.95, "close": 11.0,
+                     "volume": 1000}, None)
+    assert ts.shares == 0
+    assert ts.in_position is False
+    assert fb.positions["AAA"] == 0
+    assert rb.day.trades_completed_today == 1

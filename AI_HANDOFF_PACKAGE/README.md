@@ -127,7 +127,7 @@ AI_HANDOFF_PACKAGE/
 │   ├── fetch_*.py                     ← pilot data fetchers (Sep-Nov-Dec-Jan-...)
 │   ├── test_*.py                      ← backtest sweep scripts
 │   └── diag_trades.py                 ← trade analyzer
-├── tests/                             ← 516 pytest tests (all passing)
+├── tests/                             ← 558+ pytest tests (run via pytest tests/)
 ├── 04_backtest/
 │   ├── bootstrap.py                   ← original pilot generator
 │   └── data_pilot/
@@ -168,7 +168,7 @@ for d in dates:
 print(f'Total PnL across {len(dates)} days: \${total:.2f}')
 "
 
-# Run quality gates (516 tests)
+# Run quality gates (current count: pytest tests/)
 python -m pytest tests/ -q
 
 # Live deployment (needs APCA_API_KEY_ID + APCA_API_SECRET_KEY)
