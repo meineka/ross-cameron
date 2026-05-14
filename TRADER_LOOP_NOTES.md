@@ -11,7 +11,21 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
-### Iter 28: Pilot extended 42→61 days + MAX_RISK_PCT 8.0 → 7.0 (HUGE)
+### Iter 29: Pilot extended 61→81 days + MAX_RISK_PCT 7.0 → 5.5 (BIGGER reality check)
+- **Step 1:** fetched 17 more days (2026-01-16 to 2026-02-13) via Alpaca.
+- **Step 2:** 81d revealed TWO more big losses (2026-01-22 -$37, 2026-02-04
+  -$49.88 capped). MDD jumps -$9 → -$87.
+- **Step 3:** MAX_RISK_PCT sweep on 81d shows cliff at 5.5→6.0:
+  - 5.5: 11 trd / $410 / 91% / MDD -$37 / Sharpe 11.06 ← selected
+  - 6.0: 14 trd / $366 / 79% / MDD -$87 / Sharpe 4.21 (3 toxic marginals)
+  - 7.0: 17 trd / $410 / 75% / MDD -$87 / Sharpe 4.72 (Iter 28)
+- **Decision:** Tighten further to 5.5%. Same PnL, MDD halved, Sharpe doubled.
+- **Lesson (now repeated 3x):** Each pilot extension reveals more bias.
+  MAX_RISK_PCT went 10 → 8 (Iter 1, 39d) → 7 (Iter 28, 61d) → 5.5 (Iter 29, 81d).
+  As pilot grows, "optimal" tightens because pilot exposes more bad-trade-tier.
+- **Commit:** `81f77ef`
+
+### Iter 28: Pilot extended 42→61 days + MAX_RISK_PCT 8.0 → 7.0
 - **Step 1 (DATA):** fetched 19 older days (Feb 17 - Mar 13) via Alpaca.
   Pilot extends to 61 days.
 - **Step 2 (REALITY CHECK):** 42d Sharpe 85.71 was sample-biased.
@@ -164,18 +178,26 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative effect on EXTENDED 61-day pilot (Iter 1@7 / 2 / 7 / 9 / 22 / 23 / 24 / 25 / 28):**
+**Cumulative on HONEST 81-day pilot (Iter 1@5.5 / 2 / 7 / 9 / 22 / 23 / 24 / 25 / 29):**
 
-| Metric | Original (39d) | Now (61d) | Δ |
+| Metric | Original (39d) | Now (81d) | Δ |
 |---|---:|---:|---|
-| Trades | 17 | 13 | -4 |
-| PnL | $75.17 | **$453.78** | **+504%** |
-| Win-Rate | 67% | **83%** | +16% |
-| MaxDD | -$30.63 | **-$9.07** | -70% |
-| Sharpe-like | 2.45 | **50.03** | **+1942%** |
+| Trades | 17 | 11 | -6 |
+| PnL | $75.17 | **$410.35** | **+446%** |
+| Win-Rate | 67% | **91%** | +24% |
+| MaxDD | -$30.63 | **-$37.10** | +21% (worse — see note) |
+| Sharpe-like | 2.45 | **11.06** | **+351%** |
 
-Note: 42-day pilot showed Sharpe 85 but that was sample-biased.
-Honest 61-day pilot reveals Sharpe 50 — still massive improvement.
+**Note on MDD:** 81-day pilot exposes worst-case drawdown. The original
+39-day baseline never saw a $50-cap full-size loss day. Honest pilot
+shows max-loss can hit $37 even with tighter MAX_RISK. PnL/Sharpe still
+strongly net-positive vs original.
+
+History of MAX_RISK_PCT tightening as pilot grew:
+- 39d: MAX_RISK=10 baseline → 8 (Iter 1, $75→$73)
+- 42d: stayed at 8 (Iter 21 confirmed) but Sharpe 85 was illusion
+- 61d: tightened 8→7 (Iter 28), MDD -$59→-$9, Sharpe 7.68→50.03
+- 81d: tightened 7→5.5 (Iter 29), MDD -$87→-$37, Sharpe 4.72→11.06
 
 ## Tested but NOT committed (negative or inconclusive)
 
