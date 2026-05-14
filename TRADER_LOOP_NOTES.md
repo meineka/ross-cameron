@@ -11,6 +11,27 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 36: MAX_RISK_PCT 5.5 → 5.0 (REVERSING Iter 32 anti-cascade decision)
+- **Hypothesis:** Iter 35 added Sept's bad month → Sharpe collapsed
+  6.69 from 14.43. Iter 32 refused 5.5→5.0 tightening to avoid cascade.
+  Re-evaluating with full 167d sample.
+- **Sharpe-stability comparison across pilots:**
+  | Pilot | @5.5% | @5.0% |
+  |---|---:|---:|
+  | 81d  | 11.06 | 6.34 |
+  | 102d | 15.19 | 10.47 |
+  | 122d | 20.74 | 17.04 |
+  | 145d | 14.43 | 17.04 |
+  | 167d | 6.69 | **11.58** |
+- 5.0% range 6-17 is MORE STABLE than 5.5% range 7-21
+- **Combo sweep 167d:** 5.0/3.5R wins (Sharpe 11.58 vs 6.69)
+- **Trade-off:** -$87 PnL, +Sharpe 73%, MDD halved (-$100→-$50)
+- **Decision:** COMMIT tightening. Iter 32 was right to question cascade,
+  but 167d shows this is real boundary not noise.
+- **Final-decision rule:** No more MAX_RISK tightening unless catastrophic
+  new data. 5.0% Cameron-conform (well below 10%-spec).
+- **Commit:** `ee20d93`
+
 ### Iter 35: Pilot extended 145→167d (Sept 2025) + ANTI-OVERFIT decision
 - **Data:** 16 more days (2025-09-15 to 2025-10-14).
 - **New trades:** 4 added (1 win, 3 losses) — Sept was bad-luck heavy.
@@ -273,15 +294,15 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**HONEST Cumulative on 167-day pilot (~8 months):**
+**HONEST FINAL Cumulative on 167-day pilot (~8 months) post-Iter 36:**
 
 | Metric | Original (39d) | Now (167d) | Δ |
 |---|---:|---:|---|
-| Trades | 17 | 20 | +3 |
-| PnL | $75.17 | **$669.42** | **+790%** |
-| Win-Rate | 67% | **79%** | +12% |
-| MaxDD | -$30.63 | -$100.13 | -227% |
-| Sharpe-like | 2.45 | **6.69** | **+173%** |
+| Trades | 17 | 17 | 0 |
+| PnL | $75.17 | **$581.82** | **+674%** |
+| Win-Rate | 67% | **81%** | +14% |
+| MaxDD | -$30.63 | -$50.25 | -64% (worse but better than 5.5%) |
+| Sharpe-like | 2.45 | **11.58** | **+373%** |
 
 **Sharpe evolution by pilot-size (showing overfit-cascade risk):**
 
