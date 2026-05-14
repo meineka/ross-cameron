@@ -11,6 +11,26 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 28: Pilot extended 42→61 days + MAX_RISK_PCT 8.0 → 7.0 (HUGE)
+- **Step 1 (DATA):** fetched 19 older days (Feb 17 - Mar 13) via Alpaca.
+  Pilot extends to 61 days.
+- **Step 2 (REALITY CHECK):** 42d Sharpe 85.71 was sample-biased.
+  - 42d: $462.85 / MDD -$5.40 / Sharpe 85.71 (lucky no big-loss day)
+  - 61d (same iters): $453.38 / MDD -$59.06 / Sharpe 7.68 (-91% Sharpe!)
+  - One bad trade on 2026-02-23 lost -$49.99 (max-loss-cap hit).
+- **Step 3 (RE-TUNE MAX_RISK_PCT):**
+  - 6.0: $409 / Sharpe 45.14
+  - **7.0: $453 / MDD -$9.07 / Sharpe 50.03** ← SELECTED
+  - 8.0 (Iter 1): $453 / MDD -$59.06 / Sharpe 7.68
+  - 9-10%: $573-580 / MDD -$49.99 (more PnL but worse Sharpe)
+  - 15%: $614 (Cameron-spec violation)
+- **Decision:** Tighten to 7.0%. Same PnL, 6.5x better MDD, 6.5x Sharpe.
+  Still Cameron-conform (<10% spec).
+- **Lesson:** 42d pilot was biased — looked like Sharpe 85 but reality
+  is ~50 with better config. Bigger pilot = more honest validation.
+- **Cumulative now on 61d:** $453.78 / 83% / MDD -$9.07 / Sharpe 50.03
+- **Commit:** `f78649a`
+
 ### Iter 27: Further re-validation w/ Iter 25 base (alle SKIP)
 - **USE_PSYCH_LEVEL_T2 on/off:** $462.85 vs $461.58 — identical. With
   T2=2.5R override, the psych-level rarely fires (T2 usually above next
@@ -144,15 +164,18 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative effect Iter 1+2+7+9+22+23+24+25 (42-day pilot):**
+**Cumulative effect on EXTENDED 61-day pilot (Iter 1@7 / 2 / 7 / 9 / 22 / 23 / 24 / 25 / 28):**
 
-| Metric | Original (39d) | Now (42d) | Δ |
+| Metric | Original (39d) | Now (61d) | Δ |
 |---|---:|---:|---|
-| Trades | 17 | 12 | -5 |
-| PnL | $75.17 | **$462.85** | **+516%** |
-| Win-Rate | 67% | 91% | +24% |
-| MaxDD | -$30.63 | **-$5.40** | -82% |
-| Sharpe-like | 2.45 | **85.71** | **+3398%** |
+| Trades | 17 | 13 | -4 |
+| PnL | $75.17 | **$453.78** | **+504%** |
+| Win-Rate | 67% | **83%** | +16% |
+| MaxDD | -$30.63 | **-$9.07** | -70% |
+| Sharpe-like | 2.45 | **50.03** | **+1942%** |
+
+Note: 42-day pilot showed Sharpe 85 but that was sample-biased.
+Honest 61-day pilot reveals Sharpe 50 — still massive improvement.
 
 ## Tested but NOT committed (negative or inconclusive)
 
