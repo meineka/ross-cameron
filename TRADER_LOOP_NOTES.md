@@ -80,6 +80,21 @@ The committed changes need to remain robust under future-data validation.
   No multi-trade-day with loss to spare. All configs identical.
 - **Status:** SKIP — selectivity filters already produce ≤1 trade/day.
 
+### Iter 10+11+12: Position-Management variants (alle SKIP)
+- **Iter 10 (Stop-Lock-in nach T1):** 0.25R/0.50R/0.75R/1R lock-in statt
+  BE. Alle SCHLECHTER ($133-146 vs $150.72 baseline). Stocks retracen
+  nach T1 oft auf BE bevor T2 läuft — engere Stops killen normale
+  Bewegung.
+- **Iter 11 (Trailing-Stop nach T1):** Trail 0.5R..2R unter höchstem
+  Post-T1-High. Trail 1.5R marginal +$3 (Noise bei N=11). Trail
+  schmaler verschlechtert.
+- **Iter 12 (Time-Exit):** 3..12 bars ohne T1 → market-close. ALLE
+  Configs $27-67 schlechter. Cameron's "5-10 min" rule meint
+  "if going against me" (= QE, schon implementiert), nicht "if
+  not moving yet". Winners brauchen 30-50min.
+- **Status:** Alle SKIP. Aktuelle Iter-9-Logik (QE + BE-stop + T2)
+  ist optimal für 5-min-bars-Cameron-strategy.
+
 ### Iter 8: BREAKOUT_VOL_FACTOR sweep
 - **Hypothesis:** Cameron's "2x volume minimum on breakout" — current 1.5x
   is looser than spec. Tighter (2x/2.5x/3x) or looser (1.25x)?
