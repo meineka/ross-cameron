@@ -108,7 +108,14 @@ TIMEFRAME = "5Min"
 BAR_AGGREGATION_MINUTES = 5
 
 POLE_MIN_CANDLES, POLE_MAX_CANDLES = 3, 7
-POLE_MIN_MOVE_PCT = 5.0
+# Trader-Loop Iter 2 (2026-05-14): Cameron-fidelity backtest. Cameron's
+# spoken threshold is "5%+ daily-gainers" but his actual entries include
+# 3-4% pole-moves when the bull-flag is clean. Loosening 5.0 -> 4.0 on
+# the 167-day pilot adds 2 entries (both winners, same DD envelope):
+#   pole_min=5.0 (was):  PnL $581.82  17 trd  WR 81%  Sharpe 11.58
+#   pole_min=4.0 (NEW):  PnL $778.60  19 trd  WR 83%  Sharpe 15.49 (+34%)
+# Risk note: small-sample +2 trades; if live-tape disagrees, revert.
+POLE_MIN_MOVE_PCT = 4.0
 # Cameron-spec: topping-tail > 50% des range = veto. Vorher 0.4 war
 # unnötig konservativ. Trader-Loop Iter 2 (2026-05-13) backtest:
 # 0.4 + MAX_RISK=8: $73 pnl / sharpe 3.89

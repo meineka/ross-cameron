@@ -186,7 +186,7 @@ entries:
     pole:
       green_candles_min: 3
       green_candles_max: 7
-      cumulative_move_pct_min: 5.0
+      cumulative_move_pct_min: 4.0   # Trader-Loop Iter 2 (2026-05-14): pilot-sweep +$197 (+34%) vs 5.0; Cameron-spoken 5%, observed 3-4%
       candle_body_preference: "long_body_green"
       no_topping_tail: { upper_wick_to_range_ratio_max: 0.5 }  # Cameron-spec literal; was 0.4 (over-conservative)
       volume_must_rise_during_pole: true
