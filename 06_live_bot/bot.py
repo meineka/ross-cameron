@@ -441,6 +441,7 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
     batch_size = 200
     n_batches = (len(tickers) + batch_size - 1) // batch_size
     failed_batches = 0
+    yfinance_missing_symbols: set[str] = set()  # Review-V2 P1.2: deferred delisted-mark
     for i in range(0, len(tickers), batch_size):
         batch = tickers[i:i + batch_size]
         batch_idx = i // batch_size + 1
@@ -455,6 +456,9 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
             failed_batches += 1
             continue
         if df.empty:
+            # entire batch returned nothing — DEFER delisted-marking until
+            # we've also checked Alpaca (Review-V2 P1.2). Track symbols.
+            yfinance_missing_symbols.update(batch)
             continue
         if isinstance(df.columns, pd.MultiIndex):
             df = df.stack(level=0, future_stack=True).rename_axis(["date","ticker"]).reset_index()
@@ -462,12 +466,13 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
             df = df.reset_index(); df["ticker"] = batch[0]
         df.columns = [c.lower() if isinstance(c, str) else c for c in df.columns]
         df = df.dropna(subset=["close","open","volume"])
-        # Tickers ohne Daten als delisted markieren (Fix vom 2026-05-12)
+        # Review-V2 P1.2: defer delisted-marking until two-source check.
+        # Tickers ohne yfinance-Daten könnten nur transient down sein.
         try:
             seen = set(df["ticker"].unique()) if "ticker" in df.columns else set()
-            dead_in_batch = [t for t in batch if t not in seen]
-            if dead_in_batch:
-                mark_batch_delisted(dead_in_batch)
+            for t in batch:
+                if t not in seen:
+                    yfinance_missing_symbols.add(t)
         except Exception:
             pass
         df = df.sort_values(["ticker","date"])
@@ -504,21 +509,77 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
             log.info("  Batch %d/%d processed; %d candidates so far", batch_idx, n_batches, cumulative)
 
     log.info("  Failed batches: %d/%d", failed_batches, n_batches)
-    # Audit-Iter 31 (Bug TS-1): two_source_scan alert — vorher dead code.
-    # Wenn yfinance >20% Batches verliert, signalisiere Alpaca-Fallback.
-    # Aktuelle Implementation: nur log-Warning (echtes Wiring späteres Work).
+    # Review-V2 P1.2: two_source_scan NOW WIRED.
+    # Previously was dead code with TODO. Now if yfinance >20% degraded,
+    # we query Alpaca for the missing symbols + use the result to:
+    #   1. RECOVER candidates that yfinance missed but Alpaca knows about
+    #   2. Only mark as delisted those that ALSO fail in Alpaca
+    # This prevents transient yfinance outages from poisoning the
+    # delisted-cache for 30 days.
     from two_source_scan import (
         should_fallback_to_alpaca, yfinance_failure_ratio,
-        YFINANCE_FAIL_THRESHOLD_PCT,
+        YFINANCE_FAIL_THRESHOLD_PCT, alpaca_universe_snapshot,
     )
-    if should_fallback_to_alpaca(n_batches, failed_batches):
+    truly_delisted = set(yfinance_missing_symbols)  # default: assume all missing are delisted
+    degraded = should_fallback_to_alpaca(n_batches, failed_batches)
+    if degraded:
         ratio = yfinance_failure_ratio(n_batches, failed_batches)
         log.warning("=" * 60)
         log.warning("YFINANCE-DEGRADED: %.1f%% batches failed (>%.0f%% threshold)",
                     ratio, YFINANCE_FAIL_THRESHOLD_PCT)
-        log.warning("Watchlist may be incomplete. Alpaca-fallback nicht aktiv "
-                    "(TODO wire alpaca_universe_snapshot here)")
+        log.warning("→ querying Alpaca for %d missing symbols",
+                    len(yfinance_missing_symbols))
         log.warning("=" * 60)
+        try:
+            api_key = os.environ.get("APCA_API_KEY_ID", "")
+            api_secret = os.environ.get("APCA_API_SECRET_KEY", "")
+            if api_key and api_secret and yfinance_missing_symbols:
+                data_client = StockHistoricalDataClient(api_key, api_secret)
+                missing_list = sorted(yfinance_missing_symbols)
+                # Alpaca caps batch sizes too — chunk
+                alpaca_results = []
+                ALP_BATCH = 500
+                for j in range(0, len(missing_list), ALP_BATCH):
+                    chunk = missing_list[j:j + ALP_BATCH]
+                    alpaca_results.extend(alpaca_universe_snapshot(data_client, chunk))
+                log.info("  Alpaca recovered %d / %d missing symbols",
+                         len(alpaca_results), len(missing_list))
+                # Build a candidates-DataFrame from Alpaca results that pass
+                # the Cameron-Pillar 4 filter (intraday move + price range)
+                alpaca_cands = []
+                recovered = set()
+                for sym, price, pct in alpaca_results:
+                    recovered.add(sym)
+                    if not (PRICE_MIN <= price <= PRICE_MAX):
+                        continue
+                    if pct < DAILY_GAIN_MIN_PCT:
+                        continue
+                    # No RVOL from Alpaca daily-bar — fallback approximation
+                    # (this is BEST-EFFORT, not as good as yfinance RVOL).
+                    alpaca_cands.append({
+                        "ticker": sym, "close": price, "intraday_pct": pct,
+                        "rvol_proxy": RVOL_MIN_PROXY,  # neutral assumption
+                        "open": price, "high": price, "low": price,
+                        "volume": 0.0, "prev_close": price / (1 + pct/100),
+                        "avg_vol_20": 0.0,
+                    })
+                if alpaca_cands:
+                    cands.append(pd.DataFrame(alpaca_cands))
+                    log.info("  Added %d Alpaca-fallback candidates",
+                             len(alpaca_cands))
+                truly_delisted = yfinance_missing_symbols - recovered
+                log.info("  Two-source-check: %d truly missing (yfinance+Alpaca empty), "
+                         "%d transient (yfinance only)",
+                         len(truly_delisted), len(recovered))
+        except Exception as e:
+            log.error("  Alpaca-fallback failed: %s", e)
+    # Mark only TRULY-delisted symbols (verified missing in both sources OR
+    # not-degraded yfinance run = trust yfinance alone)
+    if truly_delisted:
+        try:
+            mark_batch_delisted(list(truly_delisted))
+        except Exception:
+            pass
     if not cands:
         log.warning("  NO CANDIDATES found — empty result. Possible reasons:")
         log.warning("    - market closed today (holiday/weekend)")
