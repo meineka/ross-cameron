@@ -11,6 +11,23 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 9: ReplayBot Quick-Exit (Replay/Live parity)
+- **Hypothesis:** Live-bot has QUICK_EXIT_THRESHOLD_CENTS=0.30 +
+  BARS_LIMIT=5 (Cameron's "30c quick out"). ReplayBot didn't —
+  parity gap. Implementing QE in replay should reduce the ANNA-loss.
+- **Backtest:**
+  - baseline:    11 trd / +$145.44 / 90% / MDD -$12.48 / Sharpe 11.65
+  - **30c spec: 11 trd / +$150.72 / 90% / MDD -$7.20 / Sharpe 20.93** ← SELECTED
+  - 20c-optimum: 11 trd / +$153.12 / 90% / MDD -$4.80 / Sharpe 31.90
+- **Selected 30c over 20c-optimum:** matches existing live-bot config
+  (closes parity gap; no spec-divergence).
+- **ANNA loss:** -$12.48 → -$7.20 (saved $5.28). 10 winners unaffected.
+- **Tests:** 3 new (QE-fires, QE-bars-limit, QE-skipped-after-T1) +
+  helper updated to default bars_since_entry past window.
+- **Cumulative Iter 1+2+7+9:** PnL $75→$151 (+101%), Sharpe 2.45→20.93
+  (+754%), MaxDD -59%→-77%.
+- **Commit:** `53043d5`
+
 ### Iter 7: MAX_POLE_T2_R = 3.5 (cap overextended setups)
 - **Hypothesis:** Diagnose der 13 pilot-trades zeigte alle 3 Verluste
   (FGI t2R=3.57, MSC t2R=4.14, ANNA t2R=2.39) hatten hohe Pole-zu-Risk
@@ -34,15 +51,15 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative effect Iter 1+2+7:**
+**Cumulative effect Iter 1+2+7+9:**
 
 | Metric | Original | Now | Δ |
 |---|---:|---:|---|
 | Trades | 17 | 11 | -6 |
-| PnL | $75.17 | $145.44 | +93% |
+| PnL | $75.17 | $150.72 | +101% |
 | Win-Rate | 67% | 90% | +23% |
-| MaxDD | -$30.63 | -$12.48 | -59% |
-| Sharpe-like | 2.45 | 11.65 | +376% |
+| MaxDD | -$30.63 | -$7.20 | -77% |
+| Sharpe-like | 2.45 | 20.93 | +754% |
 
 ## Tested but NOT committed (negative or inconclusive)
 
