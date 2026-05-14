@@ -113,3 +113,151 @@ def test_is_bot_running_returns_false_when_no_bot():
         running, pids = watchdog.is_bot_running()
     assert running is False
     assert pids == []
+
+
+# ─── Phase-12 (ChatGPT-19:05 P0.1): bot-Python resolution + dep-preflight ───
+
+def test_resolve_bot_python_prefers_env_var(monkeypatch, tmp_path):
+    """BOT_PYTHON env var wins over .venv / sys.executable."""
+    import watchdog
+    fake_py = tmp_path / "custom_python.exe"
+    fake_py.write_text("")
+    monkeypatch.setenv("BOT_PYTHON", str(fake_py))
+    assert watchdog.resolve_bot_python() == str(fake_py)
+
+
+def test_resolve_bot_python_ignores_env_var_when_path_missing(monkeypatch):
+    """A BOT_PYTHON pointing at a non-existent file falls through."""
+    import watchdog
+    monkeypatch.setenv("BOT_PYTHON", "C:\\does-not-exist-xyz.exe")
+    # Should fall through to .venv or sys.executable, never the bad path
+    result = watchdog.resolve_bot_python()
+    assert result != "C:\\does-not-exist-xyz.exe"
+
+
+def test_resolve_bot_python_falls_back_to_sys_executable(monkeypatch):
+    """No BOT_PYTHON, no .venv → sys.executable."""
+    import watchdog, sys as _sys
+    monkeypatch.delenv("BOT_PYTHON", raising=False)
+    # Point HERE/REPO_ROOT at empty dirs so .venv lookups miss
+    import tempfile, pathlib
+    with tempfile.TemporaryDirectory() as tmp:
+        monkeypatch.setattr(watchdog, "HERE", pathlib.Path(tmp))
+        monkeypatch.setattr(watchdog, "REPO_ROOT", pathlib.Path(tmp))
+        assert watchdog.resolve_bot_python() == _sys.executable
+
+
+def test_preflight_dependencies_ok_with_current_python():
+    """Probing the test interpreter must succeed for at least pandas/pyarrow
+    (they're test deps). Use a tighter dep set to keep the assertion stable
+    even if alpaca/yfinance aren't installed in the test env."""
+    import watchdog, sys as _sys
+    # The test runner clearly has pandas (pytest collects parquet tests)
+    ok, missing = watchdog.preflight_dependencies(_sys.executable, deps=("pandas",))
+    assert ok is True
+    assert missing == []
+
+
+def test_preflight_dependencies_missing_returns_named_module():
+    """Asking for a non-existent module returns ok=False AND names it."""
+    import watchdog, sys as _sys
+    ok, missing = watchdog.preflight_dependencies(
+        _sys.executable, deps=("definitely_not_installed_xyz_module",))
+    assert ok is False
+    assert "definitely_not_installed_xyz_module" in missing
+
+
+def test_preflight_handles_bad_interpreter_path():
+    """A non-existent interpreter returns ok=False without crashing."""
+    import watchdog
+    ok, missing = watchdog.preflight_dependencies("C:\\not-a-real-python.exe",
+                                                    deps=("alpaca",))
+    assert ok is False
+    # All deps reported missing when the probe itself failed
+    assert "alpaca" in missing
+
+
+def test_start_bot_uses_resolved_bot_python(monkeypatch, tmp_path):
+    """start_bot() must pass the resolved bot_python (not sys.executable)
+    as argv[0] of the spawned process. Critical for venv parity."""
+    import watchdog, subprocess as _sp
+    fake_py = str(tmp_path / "bot_python.exe")
+    monkeypatch.setattr(watchdog, "resolve_bot_python", lambda: fake_py)
+    # Stub secrets + position-check so start_bot reaches the Popen call
+    import sys as _sys
+    _sys.path.insert(0, str(watchdog.HERE))
+    import types
+    fake_secrets = types.SimpleNamespace(get_alpaca_keys=lambda: ("K", "S"))
+    monkeypatch.setitem(_sys.modules, "secrets_loader", fake_secrets)
+    monkeypatch.setattr(watchdog, "_position_check_via_bot_python",
+                         lambda py, k, s: (True, 0))
+    seen = {}
+    class FakeProc:
+        pid = 4321
+    def fake_popen(argv, **kw):
+        seen["argv"] = argv
+        return FakeProc()
+    monkeypatch.setattr(watchdog.subprocess, "Popen", fake_popen)
+    # Ensure daemon.log open() works in tmp dir
+    monkeypatch.setattr(watchdog, "HERE", tmp_path)
+    pid = watchdog.start_bot()
+    assert pid == 4321
+    assert seen["argv"][0] == fake_py, \
+        f"start_bot must use resolved bot-Python, got argv[0]={seen['argv'][0]}"
+    assert seen["argv"][1:] == ["bot.py", "--daemon"]
+
+
+def test_position_check_runs_in_subprocess_not_watchdog(monkeypatch, tmp_path):
+    """The position-check must call out to bot-Python, not import alpaca
+    in the watchdog's own process. This is the core P0.1 fix."""
+    import watchdog
+    seen = {}
+    def fake_run(argv, **kw):
+        seen["argv"] = argv
+        class R:
+            returncode = 0
+            stdout = '{"n": 0, "symbols": []}\n'
+            stderr = ""
+        return R()
+    monkeypatch.setattr(watchdog.subprocess, "run", fake_run)
+    fake_py = str(tmp_path / "bot_python.exe")
+    ok, n = watchdog._position_check_via_bot_python(fake_py, "K", "S")
+    assert ok is True
+    assert n == 0
+    # Confirm the subprocess was invoked with bot-Python, not sys.executable
+    assert seen["argv"][0] == fake_py
+
+
+def test_position_check_failure_returns_unknown(monkeypatch, tmp_path):
+    """Subprocess failure (e.g. missing alpaca) returns ok=False so caller
+    will NOT restart blindly. Mirrors CheckUnknown semantics."""
+    import watchdog
+    def fake_run(argv, **kw):
+        class R:
+            returncode = 1
+            stdout = ""
+            stderr = "ModuleNotFoundError: No module named 'alpaca'"
+        return R()
+    monkeypatch.setattr(watchdog.subprocess, "run", fake_run)
+    ok, n = watchdog._position_check_via_bot_python(
+        str(tmp_path / "x.exe"), "K", "S")
+    assert ok is False
+    assert n == -1
+
+
+def test_main_exits_on_dep_preflight_failure(monkeypatch):
+    """When preflight reports missing deps, main() must return cleanly
+    (no restart-spam loop). This is the operator-facing fix for
+    'No module named alpaca' every 5 minutes."""
+    import watchdog
+    monkeypatch.setattr(watchdog, "resolve_bot_python", lambda: "fake.exe")
+    monkeypatch.setattr(watchdog, "preflight_dependencies",
+                         lambda py, deps=watchdog.REQUIRED_DEPS: (False, ["alpaca"]))
+    # If main() falls through to the while-True we never return.
+    # Add a timeout via a sentinel: patch is_bot_running to raise so we'd
+    # know if we got there.
+    def must_not_be_called():
+        raise AssertionError("main() reached the restart loop despite missing deps")
+    monkeypatch.setattr(watchdog, "is_bot_running", must_not_be_called)
+    # Should return cleanly
+    watchdog.main()
