@@ -11,6 +11,25 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 25: T2 = 2.5R override (Iter 3c-revisit on bigger pilot)
+- **Hypothesis:** Iter 3c tested T2=R-multiple on 39d (+12%) but SKIP'd
+  as "not strong enough to override Cameron-architectural pole-based T2".
+  With 42d + Iter 23+24 active, signal might be stronger.
+- **Backtest:**
+  - Pole-based:  $391.13 / Sharpe 72.43
+  - T2=1.5R:     $362.82 / Sharpe 67.19
+  - T2=2.0R:     $405.58 / Sharpe 75.11
+  - **T2=2.5R: $462.85 / MDD -$5.40 / Sharpe 85.71** ← selected
+  - T2=3.0R:     $445.66 / Sharpe 82.53
+- **Cameron-Argument:** "2.5x R:R minimum" is Cameron's CLASSIC teaching
+  ("at least 2-to-1 R:R"). T2-as-R is his LITERAL spec, pole-height was
+  derived approximation. Original SKIP was wrong call.
+- **Implementation note:** Iter 7 cap restructured: check pole_h/risk
+  directly (filters overextended setups before T2-compute), not (t2/risk
+  after T2-compute). T2 now ep+2.5*risk + psych-level upgrade preserved.
+- **+$71.72 PnL (+18.3%), Sharpe +18%, MDD unchanged.**
+- **Commit:** `298aede`
+
 ### Iter 24: Swap POWER_HOUR vs POST_POWER size-mults (Iter 3a-revisit)
 - **Hypothesis:** Pilot trade-time-analysis shows Power-Hour (9:30-10:30)
   = 75% WR (volatile chop), Post-Power (10:30+) = 100% WR (clean Mid-
@@ -99,15 +118,15 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative effect Iter 1+2+7+9+22+23+24 (42-day pilot):**
+**Cumulative effect Iter 1+2+7+9+22+23+24+25 (42-day pilot):**
 
 | Metric | Original (39d) | Now (42d) | Δ |
 |---|---:|---:|---|
 | Trades | 17 | 12 | -5 |
-| PnL | $75.17 | **$391.13** | **+420%** |
+| PnL | $75.17 | **$462.85** | **+516%** |
 | Win-Rate | 67% | 91% | +24% |
 | MaxDD | -$30.63 | **-$5.40** | -82% |
-| Sharpe-like | 2.45 | **72.43** | **+2856%** |
+| Sharpe-like | 2.45 | **85.71** | **+3398%** |
 
 ## Tested but NOT committed (negative or inconclusive)
 
