@@ -11,6 +11,21 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 26: Re-validation sweep on Iter 23/24/25 base (alle SKIP)
+- **Trail-Stop post-T1 (Iter 11 re-test):** BE-only still optimal at
+  $462.85. Trail 1.5R close ($458) but never above. Same as prior result.
+- **POLE_TOPPING_TAIL_MAX (Iter 2 re-test):**
+  - 0.5 current: $462.85 / Sharpe 85.71
+  - 0.6: $528.15 / Sharpe 97.81
+  - 0.65: $593.27 / Sharpe 109.86
+  - 0.7: $618.25 / Sharpe 114.49
+  Each step looser gains +$65 PnL. BUT Cameron-Spec is 50% literal max.
+  Consistent with Iter 8/14 SKIP-policy on Cameron-spec-violations.
+- **Top-N-Rank (Iter 4 re-test):** Top-10 still wins. Top-7 only 5 trades
+  ($54). Cap reduces opportunity-pipeline without quality gain.
+- **Status:** Bot now at robust local optimum on 42d. Further commits
+  need either truly new structural changes or more data.
+
 ### Iter 25: T2 = 2.5R override (Iter 3c-revisit on bigger pilot)
 - **Hypothesis:** Iter 3c tested T2=R-multiple on 39d (+12%) but SKIP'd
   as "not strong enough to override Cameron-architectural pole-based T2".
