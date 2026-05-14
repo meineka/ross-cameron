@@ -94,8 +94,23 @@ Track each hypothesis tested via the 20-min /loop so we don't repeat work.
 - **Verdict: COMMIT 20c.** Same PnL band, MaxDD -26%, Sharpe-like +38%. Proportional QE looked promising on DD but ate winners — fixed 20c is simpler and dominant. 15c too tight (turns winners into QE).
 - **Changed:** `QUICK_EXIT_THRESHOLD_CENTS = 0.20`. Test rewritten to read the live constant instead of pinning 30c. YAML's `30c` is a verbatim Cameron quote in narrative text — left untouched.
 
+## Iter 6 — Conditional size reduction for late-window entries
+- **Date:** 2026-05-14
+- **Looked at:** Iter-1's open question: late-window (11:00-11:30) entries had asymmetric risk (BIRD-style eod_exit losses). Iter 1 ruled out outright rejection. Iter 6 tests a softer "half size after 11:00" approach.
+- **Hypothesis:** Smaller late-window size preserves edge but caps catastrophic eod_exit.
+- **Backtest (167-day pilot, post-Iter-5 baseline):**
+  | Variant | PnL | Trd | WR | DD | Sharpe-like |
+  |---|---|---|---|---|---|
+  | **No late cut (baseline)** | **$793.90** | 19 | 83% | -$37.10 | **21.40** |
+  | cut 11:00, 0.75x | $705.84 | 19 | 83% | -$37.10 | 19.03 |
+  | cut 11:00, 0.50x | $615.97 | 19 | 83% | -$37.10 | 16.60 |
+  | cut 11:00, 0.25x | $527.71 | 19 | 83% | -$37.10 | 14.22 |
+  | cut 10:30, 0.75x | $655.71 | 19 | 83% | -$37.10 | 17.67 |
+  | cut 10:30, 0.50x | $516.17 | 19 | 83% | -$37.10 | 13.91 |
+- **Verdict: SKIP.** Every cut reduces PnL monotonically with the multiplier, with **zero** improvement to MaxDD or WR. The 11:00-11:30 entries are net-positive and the catastrophic-late-entry risk that motivated Iter 1 was already neutralized upstream by Iter 5's tighter QE (DD already at -$37.10, down from -$50.25). Layering a second defense against the same risk pays for protection twice without buying anything.
+- **Meta-insight:** Each iteration's commit reshapes the baseline. The Iter-1 finding "11:00-11:30 entries are profitable but volatile" was true at the OLD baseline; after Iter 5, the volatility was clipped via QE. **Don't re-test against stale baselines** — re-evaluate queue items against current state. Closing the late-window question for now.
+
 ## Open ideas (queue for future iterations)
-- Conditional position-size reduction for entries after 11:00 (not full block).
 - Trailing-stop after T1 instead of fixed BE.
 - Adaptive QE-distance based on ATR/volatility instead of fixed 30c.
 - Float-based size tier (low-float runners get smaller size for slippage).
