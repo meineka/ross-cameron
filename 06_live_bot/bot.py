@@ -148,15 +148,15 @@ MAX_TRADES_PER_DAY = 5             # Cameron sagt 1 für Beginners, 3-5 für ihn
 # MAX_RISK_PCT=8% Filter ergibt: 9 trades (vs 17), $73 PnL (vs $75 — gleich),
 # Win-Rate 78% (vs 67%), MaxDD -$18.78 (vs -$30.63 halbiert), 0 Spirals.
 # Sharpe-like-Ratio +59%.
-MAX_RISK_PCT = 5.5  # Iter 29 (2026-05-14): pilot extended 61→81d revealed
-# 7.0% still let bad trades through. On 81d MAX_RISK sweep:
-#   5.0: 9 trd / $235 / 89% / MDD -$37 / Sharpe 6.34
-#   5.5: 11 trd / $410 / 91% / MDD -$37 / Sharpe 11.06   ← selected
-#   6.0: 14 trd / $366 / 79% / MDD -$87 / Sharpe 4.21    (marginal trades toxic)
-#   7.0: 17 trd / $410 / 75% / MDD -$87 / Sharpe 4.72    (was Iter 28)
-# 5.5% maintains same PnL as 7.0% but halves MDD and doubles Sharpe.
-# Trades with risk-pct 5.5-7% are the toxic ones (capture max-loss-cap hits).
-# Cameron-conform tighter ("tight stops only — much less than 10%").
+MAX_RISK_PCT = 5.0  # Iter 36 (2026-05-14): pilot extended to 167d revealed
+# 5.5% Sharpe collapses in bad months (Sept 2025: 3-loss cluster).
+# Sharpe-stability across pilots favors 5.0% (range 6-17 vs 5.5% 6-21).
+# 167d sweep:
+#   5.0/3.5R: 17 trd / $582 / 81% / MDD -$50 / Sharpe 11.58 ← selected
+#   5.5/3.5R: 20 trd / $669 / 79% / MDD -$100 / Sharpe 6.69 (Iter 29 selection)
+# Trade-off: -$87 PnL for halved MDD + 73% better Sharpe. Worth it for live.
+# Iter 32 originally refused this cascade — but 167d makes the 5.0% signal
+# robust (5 pilots show consistent improvement at 5.0%).
 
 # Trader-loop Iter 7 (2026-05-14): MAX_POLE_T2_R-Cap (Cameron "don't chase
 # overextended"). Pole_height-based T2 erlaubte unbegrenzt große Poles —
