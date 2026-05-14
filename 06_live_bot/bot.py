@@ -2474,13 +2474,26 @@ class Bot:
 
 # ─── Replay-Mode (stream historical 5m bars through bot logic) ─────────────
 class ReplayBot:
-    """Validate bot end-to-end ohne Alpaca-API: streamt pilot intraday_5m durch."""
+    """Validate bot end-to-end ohne Alpaca-API: streamt pilot intraday_5m durch.
 
-    def __init__(self):
+    Review-V2 Phase 8 (ChatGPT 14:36-answer): ReplayBot can optionally use
+    the SAME order-execution lifecycle as the live Bot. Pass `executor=`
+    an AlpacaExecutor or FakeBroker; entries go through submit_bracket_buy
+    and exits through submit_sell_with_confirm — same path live trades.
+
+    When executor=None (default), uses legacy inline _manage logic. This
+    preserves the 167-day backtest baseline ($581.82 / 17 trades).
+
+    The two paths produce IDENTICAL PnL on the default "filled_at_limit"
+    FakeBroker behavior — verified by tests/test_replay_executor_parity.py.
+    """
+
+    def __init__(self, executor=None):
         self.tickers: dict[str, TickerState] = {}
         self.day = DayState()
         self.logger = TradeLogger()
         self.equity = 25_000.0  # paper-default
+        self.executor = executor  # Phase 8: optional shared execution layer
 
     def submit_buy(self, sym, shares, price): log.info("[REPLAY] BUY %s %d @ %.2f", sym, shares, price)
     def submit_sell(self, sym, shares, price, reason): log.info("[REPLAY] SELL %s %d @ %.2f (%s)", sym, shares, price, reason)
@@ -2541,14 +2554,27 @@ class ReplayBot:
                 params["entry_price"], params["stop_price"], self.equity, self.day,
                 ny_time=ny_t)  # Iter 23: needed for time-based quarter-unlock
             if shares < 1: continue
-            self.submit_buy(sym, shares, params["entry_price"])
+            # Phase-8: route entry through executor if injected, else legacy
+            if self.executor is not None:
+                res = self.executor.submit_bracket_buy(
+                    sym, shares, params["entry_price"],
+                    params["stop_price"], params["target2"],
+                )
+                if res.get("status") != "filled":
+                    continue  # not filled — no position-state mutation
+                entry_price = res.get("fill_price", params["entry_price"])
+                filled_shares = res.get("shares", shares)
+            else:
+                self.submit_buy(sym, shares, params["entry_price"])
+                entry_price = params["entry_price"]
+                filled_shares = shares
             ts.in_position = True
-            ts.entry_price = params["entry_price"]; ts.stop_price = params["stop_price"]
+            ts.entry_price = entry_price; ts.stop_price = params["stop_price"]
             ts.target1_price = params["target1"]; ts.target2_price = params["target2"]
-            ts.shares = shares; ts.half_filled = False
+            ts.shares = filled_shares; ts.half_filled = False
             ts.bars_since_entry = 0  # Iter 9: reset for QE-tracking
             ts.t1_shares_sold = 0
-            self.logger.log({"event": "REPLAY_entry", "symbol": sym, "rank": ts.rank, **params, "shares": shares})
+            self.logger.log({"event": "REPLAY_entry", "symbol": sym, "rank": ts.rank, **params, "shares": filled_shares})
 
         # End-of-day report
         log.info("=" * 60)
@@ -2559,25 +2585,38 @@ class ReplayBot:
                  self.day.consecutive_losses, self.day.spiral_locked)
         log.info("=" * 60)
 
+    def _executor_sell(self, ts, qty, price, reason):
+        """Phase-8 helper: route exit through self.executor if injected,
+        else through legacy submit_sell. Returns (filled_qty, fill_price)
+        with confirm-style semantics (filled_qty may differ from qty for
+        partial-fill scenarios). Uses getattr fallback so legacy tests
+        that construct ReplayBot via __new__ (bypassing __init__) still work."""
+        executor = getattr(self, "executor", None)
+        if executor is not None:
+            res = executor.submit_sell_with_confirm(ts.symbol, qty, price, reason)
+            return res.get("filled_qty", 0), res.get("avg_fill_price", price)
+        self.submit_sell(ts.symbol, qty, price, reason)
+        return qty, price  # legacy: assume full fill at limit
+
     def _manage(self, ts, bar, ny_t):
         """Audit-Iter 19 (2026-05-12) — Replay-Live-Parität:
           REP-1: T2-Exit zählte T1-Gewinn nicht (mirrored live bot fix MP-1/PYR-1)
           REP-2: Stop-Exit zählte T1-Gewinn nicht
           REP-5: trades_completed_today wurde nicht incremented → MAX_TRADES_PER_DAY
                  greift nicht in Replay → unrealistic
+        Phase-8 (2026-05-14): exits now route through self._executor_sell so
+        when a FakeBroker is injected, ReplayBot drives the SAME order-
+        lifecycle code-path live trades use. Default-behavior parity verified.
         """
-        # Trader-Loop Iter 9: Quick-Exit (Replay/Live-Parität).
-        # Live-Bot hat QUICK_EXIT_THRESHOLD_CENTS=0.30 + BARS_LIMIT=5 — bei
-        # raschem Move gegen entry exit kleiner Verlust statt voller Stop.
-        # Pilot-Backtest: rettet ANNA-Verlust (-$12.48 → -$7.20), MaxDD
-        # -42%, Sharpe +80%. Cameron-conform (his "30c quick out" rule).
         ts.bars_since_entry += 1
         if (not ts.half_filled
                 and ts.bars_since_entry <= QUICK_EXIT_BARS_LIMIT
                 and (ts.entry_price - bar["low"]) >= QUICK_EXIT_THRESHOLD_CENTS):
             qe_px = ts.entry_price - QUICK_EXIT_THRESHOLD_CENTS
-            self.submit_sell(ts.symbol, ts.shares, qe_px, "QE")
-            pnl = (qe_px - ts.entry_price) * ts.shares
+            filled, fill_price = self._executor_sell(ts, ts.shares, qe_px, "QE")
+            if filled == 0:
+                return  # broker rejected — keep position
+            pnl = (fill_price - ts.entry_price) * filled
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
             self.day.trades_completed_today += 1
@@ -2592,19 +2631,22 @@ class ReplayBot:
             return
         if not ts.half_filled and bar["high"] >= ts.target1_price:
             half = max(1, ts.shares // 2)
-            self.submit_sell(ts.symbol, half, ts.target1_price, "T1")
+            filled, fill_price = self._executor_sell(ts, half, ts.target1_price, "T1")
+            if filled == 0:
+                return
             ts.half_filled = True
-            ts.t1_shares_sold = half  # Audit-Iter 19: t1_shares_sold tracking
-            ts.shares -= half
-            self.day.cents_per_share_cumulative += (ts.target1_price - ts.entry_price)
+            ts.t1_shares_sold = filled
+            ts.shares -= filled
+            self.day.cents_per_share_cumulative += (fill_price - ts.entry_price)
             if self.day.cents_per_share_cumulative >= QUARTER_SIZE_UNLOCK_CENTS:
                 self.day.quarter_size_unlocked = True
             return
         if ts.half_filled and bar["high"] >= ts.target2_price:
-            self.submit_sell(ts.symbol, ts.shares, ts.target2_price, "T2")
-            # Audit-Iter 19 (REP-1): T1-Gewinn jetzt mit-gezählt
+            filled, fill_price = self._executor_sell(ts, ts.shares, ts.target2_price, "T2")
+            if filled == 0:
+                return
             r1 = (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
-            r2 = (ts.target2_price - ts.entry_price) * ts.shares
+            r2 = (fill_price - ts.entry_price) * filled
             pnl = r1 + r2
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
@@ -2614,9 +2656,10 @@ class ReplayBot:
             return
         stop = ts.stop_price if not ts.half_filled else ts.entry_price
         if bar["low"] <= stop:
-            self.submit_sell(ts.symbol, ts.shares, stop, "stop")
-            pnl = (stop - ts.entry_price) * ts.shares
-            # Audit-Iter 19 (REP-2): T1-Gewinn bei half_filled-stop dazu
+            filled, fill_price = self._executor_sell(ts, ts.shares, stop, "stop")
+            if filled == 0:
+                return
+            pnl = (fill_price - ts.entry_price) * filled
             if ts.half_filled:
                 pnl += (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
             self.day.realized_pnl += pnl

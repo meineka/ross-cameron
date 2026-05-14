@@ -16,7 +16,7 @@ def main():
     p.add_argument("--fast", action="store_true", help="Skip slow regression tests")
     args = p.parse_args()
 
-    cmd = ["python", "-m", "pytest", str(ROOT / "tests"), "-v", "--tb=short"]
+    cmd = [sys.executable, "-m", "pytest", str(ROOT / "tests"), "-v", "--tb=short"]
     if args.fast:
         cmd += ["-m", "not slow"]
 
