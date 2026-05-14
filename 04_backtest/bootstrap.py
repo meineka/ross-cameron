@@ -42,6 +42,15 @@ PRICE_MIN = 2.0
 PRICE_MAX = 20.0
 DAILY_GAIN_MIN_PCT = 10.0           # Pillar 4
 RVOL_MIN_PROXY = 2.0                # yfinance Daily-Bars: real RVOL not computable, proxy 2x
+# Review-V2 P2.2 note: constraints.yaml says rvol_min=5.0 — that is the
+# LIVE intraday-RVOL threshold (current-day vs intraday-baseline at scan-time).
+# RVOL_MIN_PROXY=2.0 here is a DIFFERENT metric: daily-volume vs 20-day-
+# rolling-mean (computable from yfinance daily-bars). They measure
+# different things, so values differ. The "proxy" name is intentional —
+# this stage produces candidate-days for the universe, not the live
+# trade-trigger threshold. Live scanner uses Alpaca quote-snapshots and
+# applies constraints.yaml's rvol_min separately. Documented to clarify
+# Reviewer-V2's "config-drift" concern.
 DAYS_LOOKBACK_DAILY = 120           # 4 Monate — genug für RVOL(20) + 60d-Filter-Fenster
 DAYS_LOOKBACK_INTRADAY = 55         # yfinance 5m-cap is ~60 days, leave margin
 SEC_USER_AGENT = "ross-cameron-backtest szymon@example.com"
