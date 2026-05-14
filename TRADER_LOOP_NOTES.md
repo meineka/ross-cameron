@@ -11,6 +11,19 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 31: Pilot extended 102→122 days (Nov 2025)
+- **Data fetch:** 16 more days (2025-11-17 to 2025-12-15) via Alpaca.
+- **New trades:** 2 wins (+$24.81, +$112.32) — clean adds, no MDD change.
+- **Backtest with current config (no config change):**
+  - 102d: $632.42 / Sharpe 17.05
+  - **122d: $769.55 / Sharpe 20.74 (+22% Sharpe, +22% PnL)**
+- **MAX_RISK_PCT sweep on 122d:** 5.5 still cliff-optimal. 5.75 still toxic
+  (-$87 MDD). Cliff is STRUCTURAL, not sample-noise.
+- **Lesson:** Multiple sample-extensions add more good days than bad once
+  config is robust. The 39→81d extensions revealed bad trades; 102→122d
+  extension just adds wins. Indicates strategy is genuinely robust at this point.
+- **Commit:** `592e6e5` (script only — data files gitignored)
+
 ### Iter 30: Pilot extended 81→102 days + T2_R_MULTIPLE 2.5 → 3.5
 - **Step 1:** fetched 17 more days (2025-12-16 to 2026-01-15) via Alpaca.
   Pilot extends to 102 days. New trades both wins (+$65, +$87).
@@ -196,15 +209,15 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative on HONEST 102-day pilot (Iter 1@5.5 / 2 / 7 / 9 / 22 / 23 / 24 / 25@3.5R / 29 / 30):**
+**Cumulative on EXTENDED 122-day pilot (all Iter 1@5.5/2/7/9/22/23/24/25@3.5R/29/30/31):**
 
-| Metric | Original (39d) | Now (102d) | Δ |
+| Metric | Original (39d) | Now (122d) | Δ |
 |---|---:|---:|---|
-| Trades | 17 | 13 | -4 |
-| PnL | $75.17 | **$632.42** | **+741%** |
-| Win-Rate | 67% | **92%** | +25% |
-| MaxDD | -$30.63 | -$37.10 | +21% (see note) |
-| Sharpe-like | 2.45 | **17.05** | **+596%** |
+| Trades | 17 | 15 | -2 |
+| PnL | $75.17 | **$769.55** | **+924%** |
+| Win-Rate | 67% | **93%** | +26% |
+| MaxDD | -$30.63 | -$37.10 | +21% |
+| Sharpe-like | 2.45 | **20.74** | **+747%** |
 
 **Note on MDD:** 102-day pilot exposes worst-case DD. PnL/Sharpe still
 massively net-positive vs original.
