@@ -80,6 +80,19 @@ The committed changes need to remain robust under future-data validation.
   No multi-trade-day with loss to spare. All configs identical.
 - **Status:** SKIP — selectivity filters already produce ≤1 trade/day.
 
+### Iter 15+16+17: late-cycle threshold-tuning (alle SKIP)
+- **Iter 15 (Adaptive Quick-Exit % entry):** Tested 1/1.5/2/2.5/3% of entry.
+  30c absolute (current) is mathematically identical to max(30c, 2% entry)
+  for pilot. Cameron's 30c IS already adaptive in $2-$20 range. Tighter
+  variants (1-1.5%) triggered on noise, killed winners.
+- **Iter 16 (MAX_TRADES_PER_DAY 5→1):** Break-even — pilot max is 1
+  trade/day so cap is non-binding. No backtest signal to commit despite
+  Cameron's "3-5/day" preference. Per mandate break-even = SKIP.
+- **Iter 17 (MAX_RISK_PCT re-tune):** Sweep 10/8/7/6.5/6/5.5/5/4. Tightening
+  from 8→6 eliminates 3 trades incl. 2 winners (MNTS +$13, VIVO +$6) for
+  $12 PnL hit. 100% WR + MDD=$0 artificial cherry-picking. 8.0 (Iter 1)
+  remains optimal.
+
 ### Iter 13: FLAG_RETRACE_MAX_PCT sweep (SKIP)
 - **Hypothesis:** Cameron's "flag retraces 38-50%" — current 50% is upper
   bound. Fibonacci 38% tighter?
