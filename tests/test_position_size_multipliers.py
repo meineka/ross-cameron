@@ -57,17 +57,19 @@ def test_quarter_size_halves_quartile_shares():
     assert quarter == full // 4
 
 
-def test_power_hour_full_after_hour_reduced():
-    """Vor POWER_HOUR_END: full mult, danach: 0.75x."""
+def test_power_hour_reduced_after_hour_full():
+    """Iter 24 swap: Power-Hour now sized DOWN (0.75x, chop),
+    Post-Power full (1.0x, clean Mid-Morning). Direction is reversed
+    from original — Cameron-conform per pilot win-rate diagnosis."""
     from bot import compute_position_size, DayState, POWER_HOUR_END
     day = DayState()
     day.quarter_size_unlocked = True
-    full = compute_position_size(10.0, 9.95, 100000.0, day,
-                                   ny_time=dtime(10, 0))  # pre-end
+    ph = compute_position_size(10.0, 9.95, 100000.0, day,
+                                   ny_time=dtime(10, 0))  # power-hour
     after = compute_position_size(10.0, 9.95, 100000.0, day,
-                                    ny_time=dtime(11, 0))  # post-end
-    assert after < full
-    assert after == int(full * 0.75) or abs(after - int(full * 0.75)) <= 1
+                                    ny_time=dtime(11, 0))  # post-power
+    assert ph < after  # power-hour is the smaller one now
+    assert ph == int(after * 0.75) or abs(ph - int(after * 0.75)) <= 1
 
 
 def test_liquidity_cap_clamps_shares():

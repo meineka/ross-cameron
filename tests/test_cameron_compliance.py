@@ -162,32 +162,37 @@ def test_position_size_liquidity_cap():
     from datetime import time as dtime
     d = bot.DayState()
     d.quarter_size_unlocked = True
-    # ohne Cap: 50 / 0.5 = 100 shares
-    size_no_cap = bot.compute_position_size(10.0, 9.5, 100_000, d, ny_time=dtime(9, 35))
+    # Iter 24: swap power-hour-mult. Use post-power time (10:30+) to test
+    # the cap independently of mult (now POST_POWER_SIZE_MULT=1.0).
+    # MAX_LOSS=50 / risk=0.5 = 100 shares no cap, post-power mult 1.0
+    size_no_cap = bot.compute_position_size(10.0, 9.5, 100_000, d, ny_time=dtime(11, 0))
     assert size_no_cap == 100
     # mit avg_volume = 1000 → Cap = 1000 * 1% = 10
     size_capped = bot.compute_position_size(
-        10.0, 9.5, 100_000, d, avg_volume=1000, ny_time=dtime(9, 35),
+        10.0, 9.5, 100_000, d, avg_volume=1000, ny_time=dtime(11, 0),
     )
     assert size_capped == 10
 
 
-def test_position_size_power_hour_full():
+def test_position_size_power_hour_reduced():
+    """Iter 24: Power-Hour now sized DOWN (0.75x) — Cameron-conform after
+    pilot diagnosis showed Power-Hour 75% WR vs Post-Power 100% WR."""
     import bot
     from datetime import time as dtime
     d = bot.DayState()
     d.quarter_size_unlocked = True
     s = bot.compute_position_size(10, 9.5, 100_000, d, ny_time=dtime(9, 45))
-    assert s == 100  # 1.0× multiplier
+    assert s == 75  # 0.75× during Power-Hour (chop)
 
 
-def test_position_size_post_power_reduced():
+def test_position_size_post_power_full():
+    """Iter 24: Post-Power-Hour now full size (1.0x) — Mid-Morning is clean."""
     import bot
     from datetime import time as dtime
     d = bot.DayState()
     d.quarter_size_unlocked = True
     s = bot.compute_position_size(10, 9.5, 100_000, d, ny_time=dtime(11, 0))
-    assert s == 75  # 0.75× nach 10:30
+    assert s == 100  # 1.0× after 10:30
 
 
 # ─── Smoke: bot importiert + alle vetos wired ────────────────────────────────

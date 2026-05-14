@@ -86,8 +86,14 @@ RVOL_MIN_PROXY = 5.0  # Cameron-strict (war fälschlich 2.0)
 FLOAT_MAX_SHARES = 10_000_000  # 5. Cameron-Pillar
 CATALYST_REQUIRED = True  # 5. Cameron-Pillar
 POWER_HOUR_END = dtime(10, 30)
-POWER_HOUR_SIZE_MULT = 1.0
-POST_POWER_SIZE_MULT = 0.75
+# Trader-loop Iter 24 (2026-05-14): swap Power-Hour vs Post-Power.
+# Pilot diagnosis: 9:30-10:30 = 75% WR (volatile chop), 10:30+ = 100% WR
+# (clean mid-morning setups). Original 1.0/0.75 sized UP during chop —
+# completely backwards. Swap: smaller in volatile open, full size when
+# pattern-clean.
+# 42-day pilot: PnL $329→$391 (+19%), MDD -$7.20→-$5.40, Sharpe 45.83→72.43.
+POWER_HOUR_SIZE_MULT = 0.75
+POST_POWER_SIZE_MULT = 1.0
 TOP_N = 10
 TIMEFRAME = "5Min"
 
