@@ -23,10 +23,17 @@ REQUIRED_FIELDS = {
     "watchdog_alive", "watchdog_pids",
     "last_watchdog_error", "last_bot_start", "last_ws_subscription",
     "status_json_ts", "status_json_stale_seconds", "status_json_parse_error",
+    "heartbeat_file_age_sec", "heartbeat_content",
     "last_scan_time", "pre_rank_candidates", "watchlist",
     "reject_counts_by_reason", "pattern_reject_counts",
     "orders_submitted", "final_reason_no_trade",
 }
+
+
+@pytest.fixture(autouse=True)
+def isolate_heartbeat_file(monkeypatch, tmp_path):
+    import no_trade_postmortem as ntp
+    monkeypatch.setattr(ntp, "HEARTBEAT_FILE", tmp_path / "heartbeat.txt")
 
 
 def test_build_postmortem_returns_required_schema(monkeypatch, tmp_path):
@@ -62,6 +69,8 @@ def test_postmortem_graceful_on_missing_inputs(monkeypatch, tmp_path):
     assert doc["last_bot_start"] is None
     assert doc["status_json_ts"] is None
     assert doc["status_json_stale_seconds"] is None
+    assert doc["heartbeat_file_age_sec"] is None
+    assert doc["heartbeat_content"] is None
     assert doc["orders_submitted"] == 0
     assert doc["watchlist"] is None
 
@@ -110,6 +119,33 @@ def test_postmortem_detects_stale_status_json(monkeypatch, tmp_path):
     assert doc["status_json_stale_seconds"] is not None
     assert doc["status_json_stale_seconds"] > 1800
     assert "stale" in doc["final_reason_no_trade"]
+
+
+def test_postmortem_fresh_heartbeat_suppresses_stale_status_false_hang(monkeypatch, tmp_path):
+    import no_trade_postmortem as ntp
+    sj = tmp_path / "status.json"
+    sj.write_text(json.dumps({
+        "ts": "2026-05-13T10:00:00",
+        "trades_today": 0,
+        "watchlist": [],
+    }), encoding="utf-8")
+    hb = tmp_path / "heartbeat.txt"
+    hb.write_text("2026-05-14 16:24:27 NY", encoding="utf-8")
+    monkeypatch.setattr(ntp, "STATUS_JSON", sj)
+    monkeypatch.setattr(ntp, "HEARTBEAT_FILE", hb)
+    monkeypatch.setattr(ntp, "DAEMON_LOG", tmp_path / "x.log")
+    monkeypatch.setattr(ntp, "WATCHDOG_LOG", tmp_path / "x.log")
+    monkeypatch.setattr(ntp, "TRADES_LIVE_JSONL", tmp_path / "x.jsonl")
+    monkeypatch.setattr(ntp, "DAY_SUMMARY_DIR", tmp_path)
+    monkeypatch.setattr(ntp, "_find_bot_daemon_pids", lambda: [123])
+    monkeypatch.setattr(ntp, "_find_watchdog_pids", lambda: [])
+    monkeypatch.setattr(ntp, "_is_pid_alive", lambda pid: True)
+    doc = ntp.build_postmortem("2026-05-14")
+    assert doc["status_json_stale_seconds"] is not None
+    assert doc["heartbeat_file_age_sec"] is not None
+    assert doc["heartbeat_file_age_sec"] <= 1800
+    assert "possible hang" not in doc["final_reason_no_trade"]
+    assert "fresh heartbeat" in doc["final_reason_no_trade"]
 
 
 def test_postmortem_counts_orders_in_live_log(monkeypatch, tmp_path):

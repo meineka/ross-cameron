@@ -8,17 +8,16 @@ REM Hardcoded user path durch %~dp0 ersetzt (portable).
 
 cd /d "%~dp0"
 
-REM Bot im Hintergrund (detached process)
-start "" /B python bot.py --daemon > daemon.log 2>&1
-
-REM Watchdog im Hintergrund
-start "" /B python watchdog.py > watchdog.log 2>&1
+REM Use the launcher that resolves BOT_PYTHON/.venv and lets watchdog
+REM start exactly one bot after dependency + position preflight.
+start "" /B powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0run_watchdog.ps1" >> watchdog_launcher.log 2>&1
 
 echo.
-echo Bot + Watchdog gestartet im Hintergrund.
+echo Watchdog gestartet im Hintergrund; er startet den Bot nach Preflight.
 echo Logs:
 echo   - daemon.log    (Bot-Output)
 echo   - watchdog.log  (Watchdog-Output)
+echo   - watchdog_launcher.log  (Launcher-Output)
 echo.
 echo Verify:  tasklist ^| findstr python
 echo Stop:    nur den bot.py-Prozess killen via PID (nicht /IM python.exe — killed alle!)

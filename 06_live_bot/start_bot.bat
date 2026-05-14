@@ -8,8 +8,12 @@ REM Stelle sicher dass .env existiert mit APCA_API_KEY_ID + APCA_API_SECRET_KEY.
 
 cd /d "%~dp0"
 
+set "BOT_PYTHON=%~dp0..\.venv\Scripts\python.exe"
+if not exist "%BOT_PYTHON%" set "BOT_PYTHON=%~dp0.venv\Scripts\python.exe"
+if not exist "%BOT_PYTHON%" set "BOT_PYTHON=python"
+
 REM Bot im Hintergrund starten — keys werden aus .env geladen
-start /B python bot.py --daemon > daemon.log 2>&1
+start "" /B "%BOT_PYTHON%" bot.py --daemon > daemon.log 2>&1
 
 echo Bot gestartet im Hintergrund. Log: daemon.log
 echo Stop: tasklist und taskkill /PID xxx

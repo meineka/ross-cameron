@@ -29,6 +29,7 @@ HERE = Path(__file__).resolve().parent
 # All output paths are relative to 06_live_bot (where the bot writes its
 # artifacts). Keep these names in sync with bot.py.
 STATUS_JSON = HERE / "status.json"
+HEARTBEAT_FILE = HERE / "heartbeat.txt"
 DAEMON_LOG = HERE / "daemon.log"
 WATCHDOG_LOG = HERE / "watchdog.log"
 TRADES_LIVE_JSONL = HERE / "trades_live.jsonl"
@@ -225,6 +226,18 @@ def build_postmortem(target_date: str | None = None) -> dict:
     bot_daemon_alive = any(_is_pid_alive(p) for p in bot_pids)
     watchdog_alive = any(_is_pid_alive(p) for p in watchdog_pids)
 
+    heartbeat_file_age_sec = None
+    heartbeat_content = None
+    try:
+        if HEARTBEAT_FILE.exists():
+            heartbeat_file_age_sec = int(time.time() - HEARTBEAT_FILE.stat().st_mtime)
+            heartbeat_content = HEARTBEAT_FILE.read_text(
+                encoding="utf-8", errors="replace"
+            ).strip()[:200]
+    except OSError:
+        heartbeat_file_age_sec = None
+        heartbeat_content = None
+
     # 3) Log scrapes
     daemon_text = _tail_text(DAEMON_LOG)
     watchdog_text = _tail_text(WATCHDOG_LOG)
@@ -267,6 +280,7 @@ def build_postmortem(target_date: str | None = None) -> dict:
     final_reason = _synthesize_final_reason(
         bot_daemon_alive, watchdog_alive, last_watchdog_error,
         status_stale_seconds, orders_submitted, pre_rank_candidates,
+        heartbeat_file_age_sec,
     )
 
     return {
@@ -283,6 +297,8 @@ def build_postmortem(target_date: str | None = None) -> dict:
         "status_json_ts": status_ts,
         "status_json_stale_seconds": status_stale_seconds,
         "status_json_parse_error": status_err,
+        "heartbeat_file_age_sec": heartbeat_file_age_sec,
+        "heartbeat_content": heartbeat_content,
         "last_scan_time": last_scan_time,
         "pre_rank_candidates": pre_rank_candidates,
         "watchlist": watchlist,
@@ -294,7 +310,7 @@ def build_postmortem(target_date: str | None = None) -> dict:
 
 
 def _synthesize_final_reason(bot_alive, wd_alive, wd_err, stale_sec,
-                              orders, candidates) -> str:
+                              orders, candidates, heartbeat_age_sec=None) -> str:
     """Pick the most-actionable single line from the available signals."""
     if orders and orders > 0:
         return f"orders_submitted={orders} (NOT a no-trade day)"
@@ -304,13 +320,18 @@ def _synthesize_final_reason(bot_alive, wd_alive, wd_err, stale_sec,
         if not wd_alive:
             return "bot_daemon_dead and watchdog_dead — nothing was running"
         return "bot_daemon_dead despite watchdog running — restart blocked"
-    if stale_sec is not None and stale_sec > 1800:
+    heartbeat_fresh = (
+        heartbeat_age_sec is not None and heartbeat_age_sec <= 1800
+    )
+    if stale_sec is not None and stale_sec > 1800 and not heartbeat_fresh:
         return f"bot_daemon_alive but status.json stale {stale_sec}s — possible hang"
     if candidates is not None and candidates == 0:
         return "bot_daemon_alive, scan produced 0 pre-rank candidates"
     if isinstance(candidates, int) and candidates > 0:
         return (f"bot_daemon_alive, {candidates} pre-rank candidates, "
                 "but no pattern fired (see reject_counts_by_reason)")
+    if heartbeat_fresh:
+        return "bot_daemon_alive with fresh heartbeat; no-trade signals inconclusive"
     return "bot_daemon_alive but signals inconclusive — manual review needed"
 
 
