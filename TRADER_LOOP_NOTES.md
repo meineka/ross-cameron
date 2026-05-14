@@ -11,6 +11,22 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 23: Time-based Quarter-Size-Unlock @ 10:00 NY (HUGE WIN)
+- **Hypothesis:** Bot's Quarter-Size-Unlock fires nur nach cumul $0.50/share
+  T1-Gains. Pilot hat fast nur 1 trade/day → Bot ist PERMANENT
+  quarter-size. Cameron-spec sagt "quarter während Vol-Open, full nach".
+- **Fix:** time-based fallback unlock @ 10:00 NY. Erste-trade <10:00 bleibt
+  quarter (ANNA), alle Trades >=10:00 → full size.
+- **Backtest:**
+  - before:  12 trd / $164.81 / 91% / MDD -$7.20 / Sharpe 22.89
+  - **after: 12 trd / $329.98 / 91% / MDD -$7.20 / Sharpe 45.83**
+  - **+100% PnL / +100% Sharpe / MDD unchanged**
+- **Cameron-Argument:** Original cents-rule war für multi-trade-days.
+  Time-rule für single-trade-days. Beide protectieren first-trade Risk.
+- **Replay-baseline change:** 2026-04-15 $13.14 → $40.51 (MNTS @ 11:05
+  jetzt full-size — by design).
+- **Commit:** `c0ff7ff`
+
 ### Iter 22: SPY_TREND_VETO_PCT -1.0% → -2.0% (Cameron-Praxis-Aligning)
 - **Hypothesis:** Live-Bot SPY-Veto bei -1.0% outright-skip ist strikter
   als Cameron's tatsächliche Regel "trade with caution" (= size-reduce,
@@ -65,15 +81,15 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative effect Iter 1+2+7+9 (42-day pilot post-Iter 20):**
+**Cumulative effect Iter 1+2+7+9+22+23 (42-day pilot):**
 
 | Metric | Original (39d) | Now (42d) | Δ |
 |---|---:|---:|---|
 | Trades | 17 | 12 | -5 |
-| PnL | $75.17 | $164.81 | +119% |
+| PnL | $75.17 | **$329.98** | **+339%** |
 | Win-Rate | 67% | 91% | +24% |
 | MaxDD | -$30.63 | -$7.20 | -77% |
-| Sharpe-like | 2.45 | 22.89 | +834% |
+| Sharpe-like | 2.45 | **45.83** | **+1771%** |
 
 ## Tested but NOT committed (negative or inconclusive)
 
