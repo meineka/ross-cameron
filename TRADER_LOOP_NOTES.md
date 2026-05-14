@@ -11,6 +11,20 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 34: Cross-loss pattern analysis (SKIP — losses are random)
+- **Diag of both 145d losses:**
+  | Date | Ticker | Risk% | Entry | Time | PnL |
+  |---|---|---|---|---|---|
+  | 2025-11-07 | SSP | 5.33% | $2.72 | 11:50 | -$49.88 |
+  | 2026-01-22 | SVAC | 2.97% | $11.80 | 12:45 | -$37.10 |
+- **No common pattern:** Different prices ($2.72 vs $11.80), different
+  risk-pcts (5.33 vs 2.97), different times (11:50 vs 12:45).
+- **SSP appeared BOTH as loss (11-07) and win (11-17):** ticker-cooldown
+  would have missed the win. No actionable per-ticker filter.
+- **Conclusion:** Losses are ~12% intrinsic random failure-rate of
+  Cameron-Bull-Flag strategy. Cannot be filtered without losing equivalent
+  winners.
+
 ### Iter 33: Diagnose 2025-11-07 SSP loss + Adaptive-QE sweep (SKIP)
 - **Diag:** SSP entry $2.72, stop $2.575 (risk=14.5c, 5.33%). Exit at stop
   full 344-share loss = -$49.88. Bar's price went straight to stop without
