@@ -21,7 +21,10 @@ sys.path.insert(0, str(ROOT / "06_live_bot"))
 
 
 def _make_replay_with_position(entry=10.0, target1=10.5, target2=11.0,
-                                 stop=9.5, initial=10, half_filled=False):
+                                 stop=9.5, initial=10, half_filled=False,
+                                 bars_since_entry=10):
+    """bars_since_entry default = 10 → past Iter 9 Quick-Exit window
+    so legacy stop/T1/T2 tests aren't pre-empted by QE."""
     import bot as bot_mod
     r = bot_mod.ReplayBot.__new__(bot_mod.ReplayBot)
     r.day = bot_mod.DayState()
@@ -37,6 +40,7 @@ def _make_replay_with_position(entry=10.0, target1=10.5, target2=11.0,
     ts.initial_shares = initial
     ts.shares = initial
     ts.t1_shares_sold = 0
+    ts.bars_since_entry = bars_since_entry
     if half_filled:
         ts.half_filled = True
         ts.t1_shares_sold = initial // 2
@@ -46,6 +50,53 @@ def _make_replay_with_position(entry=10.0, target1=10.5, target2=11.0,
     ts.bars = []
     r.tickers["X"] = ts
     return r, ts
+
+
+# ─── Iter 9: Quick-Exit in ReplayBot (Replay/Live parity) ───────────────────
+def test_replay_quick_exit_fires_when_30c_below_entry_in_first_5_bars():
+    """Iter 9: bar low 30c below entry within QE window → exit at entry-0.30."""
+    r, ts = _make_replay_with_position(initial=10, bars_since_entry=0)
+    r.submit_sell = MagicMock()
+    # bar low 9.60 = 40c below entry 10.0 → QE triggers
+    bar = {"open": 9.95, "high": 9.97, "low": 9.60, "close": 9.80, "volume": 1000}
+    r._manage(ts, bar, None)
+    expected = (10.0 - 0.30 - 10.0) * 10  # QE exit at 9.70
+    assert abs(r.day.realized_pnl - expected) < 0.01
+    assert ts.in_position is False
+    assert r.day.consecutive_losses == 1
+    r.submit_sell.assert_called_once()
+    args = r.submit_sell.call_args[0]
+    assert args[3] == "QE"
+
+
+def test_replay_quick_exit_does_not_fire_after_bars_limit():
+    """Past 5-bar window → QE skipped, normal stop applies."""
+    import bot as bot_mod
+    r, ts = _make_replay_with_position(
+        initial=10, bars_since_entry=bot_mod.QUICK_EXIT_BARS_LIMIT + 1)
+    r.submit_sell = MagicMock()
+    bar = {"open": 9.5, "high": 9.55, "low": 9.40, "close": 9.5, "volume": 1000}
+    r._manage(ts, bar, None)
+    # Should hit normal stop at 9.5, NOT QE
+    expected = (9.5 - 10.0) * 10
+    assert abs(r.day.realized_pnl - expected) < 0.01
+    args = r.submit_sell.call_args[0]
+    assert args[3] == "stop"
+
+
+def test_replay_quick_exit_skipped_after_half_filled():
+    """After T1 hit (half_filled=True), QE no longer applies."""
+    r, ts = _make_replay_with_position(half_filled=True, initial=10,
+                                        bars_since_entry=0)
+    r.submit_sell = MagicMock()
+    bar = {"open": 9.95, "high": 9.97, "low": 9.60, "close": 9.80, "volume": 1000}
+    r._manage(ts, bar, None)
+    # half_filled + bar.low > BE stop (10.0)? No — 9.60 < 10.0 BE, so BE-stop hits.
+    # PnL = T1 win (0.50 * 5) + BE exit on remaining 5 = 2.50 + 0 = 2.50
+    expected = (10.5 - 10.0) * 5 + (10.0 - 10.0) * 5
+    assert abs(r.day.realized_pnl - expected) < 0.01
+    args = r.submit_sell.call_args[0]
+    assert args[3] == "stop"  # BE-stop, not QE
 
 
 # ─── REP-1: T2-Exit zählt T1-Gewinn ─────────────────────────────────────────

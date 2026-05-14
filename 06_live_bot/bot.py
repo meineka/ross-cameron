@@ -1932,6 +1932,8 @@ class ReplayBot:
             ts.entry_price = params["entry_price"]; ts.stop_price = params["stop_price"]
             ts.target1_price = params["target1"]; ts.target2_price = params["target2"]
             ts.shares = shares; ts.half_filled = False
+            ts.bars_since_entry = 0  # Iter 9: reset for QE-tracking
+            ts.t1_shares_sold = 0
             self.logger.log({"event": "REPLAY_entry", "symbol": sym, "rank": ts.rank, **params, "shares": shares})
 
         # End-of-day report
@@ -1950,6 +1952,30 @@ class ReplayBot:
           REP-5: trades_completed_today wurde nicht incremented → MAX_TRADES_PER_DAY
                  greift nicht in Replay → unrealistic
         """
+        # Trader-Loop Iter 9: Quick-Exit (Replay/Live-Parität).
+        # Live-Bot hat QUICK_EXIT_THRESHOLD_CENTS=0.30 + BARS_LIMIT=5 — bei
+        # raschem Move gegen entry exit kleiner Verlust statt voller Stop.
+        # Pilot-Backtest: rettet ANNA-Verlust (-$12.48 → -$7.20), MaxDD
+        # -42%, Sharpe +80%. Cameron-conform (his "30c quick out" rule).
+        ts.bars_since_entry += 1
+        if (not ts.half_filled
+                and ts.bars_since_entry <= QUICK_EXIT_BARS_LIMIT
+                and (ts.entry_price - bar["low"]) >= QUICK_EXIT_THRESHOLD_CENTS):
+            qe_px = ts.entry_price - QUICK_EXIT_THRESHOLD_CENTS
+            self.submit_sell(ts.symbol, ts.shares, qe_px, "QE")
+            pnl = (qe_px - ts.entry_price) * ts.shares
+            self.day.realized_pnl += pnl
+            self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
+            self.day.trades_completed_today += 1
+            if pnl <= 0:
+                self.day.consecutive_losses += 1
+                if self.day.consecutive_losses >= 2:
+                    self.day.spiral_locked = True
+                    log.warning("SPIRAL-LOCK after 2 losses (QE)")
+            else:
+                self.day.consecutive_losses = 0
+            ts.in_position = False
+            return
         if not ts.half_filled and bar["high"] >= ts.target1_price:
             half = max(1, ts.shares // 2)
             self.submit_sell(ts.symbol, half, ts.target1_price, "T1")
