@@ -171,7 +171,15 @@ MAX_POLE_T2_R = 3.5
 # 42-day pilot with Iter 23+24 active: T2=2.5R gives $461.82 vs pole-based
 # $391.13 (+18% PnL), Sharpe 72.43→85.52, MDD unchanged. Iter 3c originally
 # tested at 39-day pilot (+12%) — confirmed signal on larger sample.
-T2_R_MULTIPLE = 2.5
+T2_R_MULTIPLE = 3.5  # Iter 30 (2026-05-14): pilot extended to 102d.
+# T2 sweep on 102d clear peak at 3.5R:
+#   2.5R: $563 / 15.19 (was Iter 25 selection on 42d)
+#   3.0R: $566 / 15.26
+#   3.5R: $632 / 17.05  ← selected
+#   4.0R: $550 / 14.84 (2 trades fail to reach T2, get BE-stopped)
+# Same trades/WR/MDD at 3.5R, just bigger wins. Momentum carries past 2.5R
+# but not past 4R. Cameron "let your winners run" maxim — fits stronger
+# setups in the data.
 
 # #2 30¢-Quick-Exit: wenn 30c gegen Entry → exit (mistime-detection)
 QUICK_EXIT_THRESHOLD_CENTS = 0.30
