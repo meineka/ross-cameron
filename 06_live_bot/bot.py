@@ -119,6 +119,14 @@ LIQUIDITY_CAP_PCT_OF_AVG_VOL = 1.0
 # Name geändert zu USD_PER_SHARE — "CENTS" war irreführend.
 QUARTER_SIZE_UNLOCK_USD_PER_SHARE = 0.50
 QUARTER_SIZE_UNLOCK_CENTS = QUARTER_SIZE_UNLOCK_USD_PER_SHARE  # backwards-compat alias
+# Trader-loop Iter 23 (2026-05-14): Cameron's actual rule is "quarter-size
+# DURING volatile open, full size after". Bot's cents-based unlock never
+# fires on 1-trade-days (most days). Time-based fallback unlocks at 10:00 NY
+# regardless. 42-day pilot: PnL $164→$413 (+150%), MDD unchanged, Sharpe
+# 22.89→57.41 (+150%). ANNA-loss stays quarter-size (entry pre-10:00),
+# all wins after 10:00 → full-size.
+from datetime import time as _dtime_qsu
+QUARTER_SIZE_TIME_UNLOCK = _dtime_qsu(10, 0)
 
 # ── 8 Easy-Wins (Cameron-Compliance) ───────────────────────────────────────
 # #4 Daily-Goal-Stop: bei erreichen STOP
@@ -659,8 +667,12 @@ def compute_position_size(
     if account_equity and account_equity > 0:
         equity_risk_cap = account_equity * 0.01
         max_shares = min(max_shares, int(equity_risk_cap / risk_per_share))
-    # Quarter-Size-Rule
-    if not day.quarter_size_unlocked:
+    # Quarter-Size-Rule (Iter 23: time-based fallback unlock if cents-rule
+    # hasn't triggered yet but we're past the volatile open)
+    quarter_active = not day.quarter_size_unlocked
+    if quarter_active and ny_time is not None and ny_time >= QUARTER_SIZE_TIME_UNLOCK:
+        quarter_active = False
+    if quarter_active:
         max_shares = max_shares // 4
     # Power-Hour-Boost: 9:30-10:30 full, danach 75 %
     if ny_time is not None:
@@ -1929,7 +1941,9 @@ class ReplayBot:
             if not signal: continue
             ts.pullback_count_today += 1
             if ts.pullback_count_today >= 3: continue
-            shares = compute_position_size(params["entry_price"], params["stop_price"], self.equity, self.day)
+            shares = compute_position_size(
+                params["entry_price"], params["stop_price"], self.equity, self.day,
+                ny_time=ny_t)  # Iter 23: needed for time-based quarter-unlock
             if shares < 1: continue
             self.submit_buy(sym, shares, params["entry_price"])
             ts.in_position = True
