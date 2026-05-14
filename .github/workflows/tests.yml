@@ -11,10 +11,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install deps
+          cache: pip
+      - name: Install dependencies from requirements.txt (Review-V2 Phase 5)
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio pyyaml pandas numpy yfinance alpaca-py
-      - name: Run fast suite
+          pip install -r requirements.txt
+      - name: Compile-all (syntax check)
+        run: python -m compileall -q 06_live_bot/ tests/
+      - name: Run test suite
         run: |
-          python -m pytest --ignore=tests/test_replay_regression.py --ignore=tests/test_pilot_baseline.py -q
+          python -m pytest tests/ -q \
+            --ignore=tests/test_replay_regression.py \
+            --ignore=tests/test_pilot_baseline.py
+        # Note: replay_regression + pilot_baseline are excluded because they
+        # depend on pilot-data parquets which are gitignored. Local runs
+        # CAN include them; CI cannot reproduce without uploading data.

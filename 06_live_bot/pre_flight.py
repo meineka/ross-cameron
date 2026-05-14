@@ -75,7 +75,13 @@ def check_yfinance() -> tuple[bool, str]:
         return False, f"yfinance FAIL: {e}"
 
 
-def run_preflight(api_key: str, api_secret: str, *, skip_yfinance: bool = False) -> bool:
+def run_preflight(api_key: str, api_secret: str, *, skip_yfinance: bool = False,
+                  yfinance_required: bool = True) -> bool:
+    """Review-V2 P2.4: yfinance is the live-scanner's pillar-4 data source.
+    yfinance-fail must block (or trigger degraded-mode warning), not silently
+    pass. After two_source_scan integration (P1.2), Alpaca is the fallback;
+    we now log a clear "degraded mode" instead of silently continuing.
+    """
     log.info("=" * 60)
     log.info("PRE-FLIGHT CHECKS")
     log.info("=" * 60)
@@ -86,15 +92,28 @@ def run_preflight(api_key: str, api_secret: str, *, skip_yfinance: bool = False)
     if not skip_yfinance:
         checks.append(("yfinance", check_yfinance))
     all_ok = True
+    yfinance_status = None
     for name, fn in checks:
         ok, msg = fn()
         marker = "OK" if ok else "FAIL"
         log.info("  [%s] %s — %s", marker, name, msg)
-        if not ok and name != "yfinance":
-            # yfinance ist Daten-Source, nicht kritisch für Bot-Start (Scan
-            # skipt sich selbst wenn no-data); nur Auth + WS sind blocker
-            all_ok = False
+        if not ok:
+            if name == "yfinance":
+                yfinance_status = (ok, msg)
+                if yfinance_required:
+                    # Two-source-fallback can rescue, but we want operator
+                    # to KNOW we're degraded — not silent.
+                    log.warning("  yfinance FAILED — degraded scanner mode active")
+                    log.warning("  (two_source_scan will use Alpaca fallback for "
+                                "missing symbols; pilot-4 may be incomplete)")
+            else:
+                all_ok = False
     log.info("=" * 60)
-    log.info("PRE-FLIGHT: %s", "PASS" if all_ok else "FAIL — daemon will not start")
+    if not all_ok:
+        log.info("PRE-FLIGHT: FAIL — daemon will not start")
+    elif yfinance_status and not yfinance_status[0]:
+        log.info("PRE-FLIGHT: PASS (degraded — yfinance down, Alpaca-fallback only)")
+    else:
+        log.info("PRE-FLIGHT: PASS")
     log.info("=" * 60)
     return all_ok

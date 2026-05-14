@@ -25,10 +25,23 @@ log = logging.getLogger("watchlist_persist")
 WATCHLIST_FILE = Path(__file__).parent / "watchlist_today.json"
 
 
+def _ny_today_str() -> str:
+    """Review-V2 P2.6: trading-day decisions MUST use NY timezone, not
+    server-local. If the bot runs on a Berlin-hosted server, midnight CET
+    is 18:00 NY-yesterday — saving with local-now() would assign yesterday's
+    watchlist to today's date.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d")
+
+
 def save_watchlist(symbols: list[str], scores: dict[str, float] | None = None) -> None:
     """Atomic write via tmp + rename."""
     payload = {
-        "date": datetime.now().strftime("%Y-%m-%d"),
+        "date": _ny_today_str(),  # P2.6: NY trading-day, not local
         "saved_at": datetime.now().isoformat(),
         "symbols": symbols,
         "scores": scores or {},
@@ -54,7 +67,7 @@ def _load_payload_if_fresh() -> dict | None:
         if not isinstance(payload, dict):
             log.warning("watchlist file unexpected format (not dict)")
             return None
-        if payload.get("date") != datetime.now().strftime("%Y-%m-%d"):
+        if payload.get("date") != _ny_today_str():  # P2.6: NY trading-day
             return None
         return payload
     except json.JSONDecodeError as e:

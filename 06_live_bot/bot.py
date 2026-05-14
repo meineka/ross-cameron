@@ -1587,6 +1587,7 @@ class Bot:
         # 0. Connection Pre-Check
         try:
             equity = self.executor.get_equity()
+            self._last_equity = equity  # Review-V2 P2.5: dashboard fix
             log.info("Alpaca-Connection OK — Account-Equity: $%.2f", equity)
         except Exception as e:
             log.error("Alpaca-Connection FAIL: %s", e, exc_info=True)
@@ -1718,6 +1719,11 @@ class Bot:
                 if (ny - last_health).total_seconds() >= 900:
                     self._log_health()
                     last_health = ny
+                    # Review-V2 P2.5: refresh _last_equity for status dashboard
+                    try:
+                        self._last_equity = self.executor.get_equity()
+                    except Exception as e:
+                        log.debug("equity refresh err: %s", e)
                 # Status-Dashboard alle 30 Sek
                 try:
                     write_status(self)
@@ -2776,10 +2782,16 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
         ny_now = datetime.now(NY_TZ)
         wait_sec = (next_start - ny_now).total_seconds()
         wait_hours = wait_sec / 3600
-        log.info("Next premarket-scan: %s ET (in %.1f h = %s CET)",
+        # Review-V2 P2.6: convert NY → Berlin via ZoneInfo (DST-aware), not
+        # fixed timedelta(hours=6) which is wrong half the year.
+        try:
+            from zoneinfo import ZoneInfo
+            berlin_str = next_start.astimezone(ZoneInfo("Europe/Berlin")).strftime("%H:%M")
+        except Exception:
+            berlin_str = "?"  # fallback if zoneinfo unavailable
+        log.info("Next premarket-scan: %s ET (in %.1f h = %s Berlin)",
                  next_start.strftime("%Y-%m-%d %H:%M"),
-                 wait_hours,
-                 (next_start + timedelta(hours=6)).strftime("%H:%M"))
+                 wait_hours, berlin_str)
         log.info("Sleeping… heartbeat every 15 min, Ctrl+C to stop")
 
         # Sleep in 60-sec-chunks; heartbeat alle 15 Min
@@ -2793,9 +2805,8 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
             now = datetime.now(NY_TZ)
             if (now - last_heartbeat).total_seconds() >= 900:  # 15 Min
                 remaining_h = (next_start - now).total_seconds() / 3600
-                log.info("ALIVE — sleeping. Next scan in %.1f h at %s CET",
-                         remaining_h,
-                         (next_start + timedelta(hours=6)).strftime("%H:%M"))
+                log.info("ALIVE — sleeping. Next scan in %.1f h at %s Berlin",
+                         remaining_h, berlin_str)
                 last_heartbeat = now
             # Heartbeat-File für externe Watchdogs (jede 60s aktualisiert)
             try:
