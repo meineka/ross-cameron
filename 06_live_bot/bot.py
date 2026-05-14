@@ -288,6 +288,10 @@ class DayState:
     patterns_detected: int = 0
     patterns_rejected_macd: int = 0
     patterns_rejected_fbo: int = 0
+    patterns_rejected_vwap: int = 0          # Review-V2 P1.8
+    patterns_rejected_risk: int = 0          # Review-V2 P1.8 (MAX_RISK_PCT)
+    patterns_rejected_pole_extension: int = 0  # Review-V2 P1.8 (MAX_POLE_T2_R)
+    patterns_rejected_risk_budget: int = 0   # Review-V2 P0.5
     patterns_rejected_pullback_count: int = 0
     patterns_rejected_size_zero: int = 0
     patterns_rejected_max_trades: int = 0    # #5
@@ -593,6 +597,7 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
     if v[i] < vol_sma[i] * BREAKOUT_VOL_FACTOR:
         return False, {}
 
+    last_local_veto = None  # Review-V2 P1.7/P1.8: track candidate-local rejects
     for fl in range(FLAG_MIN_CANDLES, FLAG_MAX_CANDLES + 1):
         for pl in range(POLE_MIN_CANDLES, POLE_MAX_CANDLES + 1):
             ps = i - fl - pl; pe = i - fl
@@ -626,18 +631,18 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
             sp = fl_low - SLIPPAGE_CENTS
             if ep <= sp: continue
             # Trader-Loop Iter 1: Max-Risk-% filter (Cameron's "tight stops")
-            # Pilot-backtest: trades mit risk%>=10% verlieren 4/5x. Bei 8%
-            # threshold: Win-Rate 67%->78%, MaxDD halbiert, 0 spirals.
+            # Review-V2 P1.7: candidate-local — try other pole/flag configs.
             if ep > 0:
                 risk_pct = (ep - sp) / ep * 100
                 if risk_pct > MAX_RISK_PCT:
-                    return False, {"_veto": f"risk_{risk_pct:.1f}%_over_{MAX_RISK_PCT}%"}
+                    last_local_veto = f"risk_{risk_pct:.1f}%_over_{MAX_RISK_PCT}%"
+                    continue
             risk = ep - sp
-            # Trader-Loop Iter 7: cap pole-extension (filter overextended
-            # setups before computing T2). Stocks mit pole_height > 3.5R
-            # sind volatile/exhausted setups (Cameron: "don't chase").
+            # Trader-Loop Iter 7: cap pole-extension (filter overextended setups).
+            # Review-V2 P1.7: candidate-local — try other configs.
             if risk > 0 and p_h / risk > MAX_POLE_T2_R:
-                return False, {"_veto": f"pole_h_{p_h/risk:.2f}>{MAX_POLE_T2_R}"}
+                last_local_veto = f"pole_h_{p_h/risk:.2f}>{MAX_POLE_T2_R}"
+                continue
             # Trader-Loop Iter 25: T2 = Cameron-literal R-multiple instead
             # of pole-height. 42-day pilot: T2=2.5R gives +$70 PnL (+18%)
             # over pole-based. Sharpe 72.43→85.52. MDD unchanged.
@@ -670,7 +675,9 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
                 "pole_candles": int(pl),
                 "flag_candles": int(fl),
             }
-    return False, {}
+    # No pole/flag config matched. Report the last local-veto if any so
+    # caller can categorize the rejection (Review-V2 P1.8 telemetry).
+    return False, ({"_veto": last_local_veto} if last_local_veto else {})
 
 
 # ─── Risk-Engine ────────────────────────────────────────────────────────────
@@ -723,9 +730,49 @@ def compute_position_size(
     return max(0, max_shares)
 
 
-def can_enter_new(day: DayState, ny_time: dtime) -> tuple[bool, str]:
+def _aggregate_open_risk(tickers: dict | None) -> float:
+    """Sum of remaining risk-to-stop across all currently-open positions.
+    Used by can_enter_new() for total-risk-budget gating (Review-V2 P0.5)."""
+    if not tickers:
+        return 0.0
+    total = 0.0
+    for ts in tickers.values():
+        if not getattr(ts, "in_position", False):
+            continue
+        shares = getattr(ts, "shares", 0) or 0
+        entry = getattr(ts, "entry_price", 0.0) or 0.0
+        if getattr(ts, "half_filled", False):
+            # post-T1: remaining shares are protected by BE-stop, so worst-case
+            # they exit at break-even — zero downside on the surviving half.
+            # The realized half-gain is already in day.realized_pnl.
+            continue
+        stop = getattr(ts, "stop_price", 0.0) or 0.0
+        risk_per_share = max(entry - stop, 0.0)
+        total += risk_per_share * shares
+    return total
+
+
+def can_enter_new(day: DayState, ny_time: dtime, *, new_trade_risk_usd: float = 0.0,
+                  open_risk_usd: float = 0.0, pending_risk_usd: float = 0.0
+                  ) -> tuple[bool, str]:
+    """Review-V2 P0.5: now accepts open-/pending-risk to enforce a true
+    daily-loss budget. Caller computes the risk-USD that THIS new entry
+    would add (shares * (entry-stop)) and passes as `new_trade_risk_usd`.
+
+    Projected worst-case = realized_loss (positive number when negative) +
+    open_risk + pending_risk + new_trade_risk. If that exceeds
+    DAILY_MAX_LOSS_USD, block the entry — prevents the bot from sliding
+    over its daily-max in a sequence of stops.
+    """
     if day.spiral_locked: return False, "spiral_locked"
     if day.realized_pnl <= -DAILY_MAX_LOSS_USD: return False, "daily_max_loss"
+    # Projected-total-risk check (P0.5)
+    realized_loss = max(0.0, -day.realized_pnl)
+    projected = realized_loss + open_risk_usd + pending_risk_usd + new_trade_risk_usd
+    if projected > DAILY_MAX_LOSS_USD:
+        return False, (f"projected_risk_${projected:.2f}_exceeds_cap_${DAILY_MAX_LOSS_USD:.0f} "
+                       f"(realized=${realized_loss:.2f}+open=${open_risk_usd:.2f}+"
+                       f"pending=${pending_risk_usd:.2f}+new=${new_trade_risk_usd:.2f})")
     # #4 Daily-Goal-Stop
     if DAILY_GOAL_STOP_ENABLED and day.goal_reached: return False, "daily_goal_reached"
     if day.peak_pnl > 0 and day.realized_pnl < day.peak_pnl * (1 - INTRADAY_DRAWDOWN_PCT_OF_PROFITS/100):
@@ -733,9 +780,10 @@ def can_enter_new(day: DayState, ny_time: dtime) -> tuple[bool, str]:
     if ny_time >= TIME_NEW_ENTRIES_END: return False, "after_1130"
     if ny_time < TIME_RTH_START: return False, "before_rth"
     if ny_time < TIME_NEW_ENTRIES_START: return False, "open_range_5min"  # Fix 12.05: kein Entry in 1. 5min
-    # #5 Max trades per day
-    if day.trades_completed_today >= MAX_TRADES_PER_DAY:
-        return False, f"max_{MAX_TRADES_PER_DAY}_trades_today"
+    # #5 Max trades per day (counted incl. open positions for V2-correctness)
+    submitted_today = day.trades_completed_today + day.orders_submitted
+    if submitted_today >= MAX_TRADES_PER_DAY:
+        return False, f"max_{MAX_TRADES_PER_DAY}_trades_today_(submitted={submitted_today})"
     # #6 SPY-Trend-Filter (when reduce 0.5x is set, allow but smaller; when 0.0 skip)
     if day.spy_size_multiplier <= 0.0:
         return False, f"SPY_bear_day_{day.spy_pct_today:+.2f}%"
@@ -1834,8 +1882,12 @@ class Bot:
         log.info("  Peak PnL:           $%.2f", d.peak_pnl)
         log.info("  Bars received:      %d", d.bars_received)
         log.info("  Patterns detected:  %d", d.patterns_detected)
+        log.info("    rej VWAP:         %d", d.patterns_rejected_vwap)
         log.info("    rej MACD:         %d", d.patterns_rejected_macd)
         log.info("    rej FBO:          %d", d.patterns_rejected_fbo)
+        log.info("    rej Risk%%:        %d", d.patterns_rejected_risk)
+        log.info("    rej Pole-ext:     %d", d.patterns_rejected_pole_extension)
+        log.info("    rej Risk-Budget:  %d", d.patterns_rejected_risk_budget)
         log.info("    rej Pullback#3:   %d", d.patterns_rejected_pullback_count)
         log.info("    rej Size=0:       %d", d.patterns_rejected_size_zero)
         log.info("  Orders submitted:   %d (%d failed)", d.orders_submitted, d.orders_failed)
@@ -1887,6 +1939,21 @@ class Bot:
             # Detect bull-flag
             signal, params = detect_bull_flag(list(ts.bars))
             if not signal:
+                # Review-V2 P1.8: increment per-veto-reason counters.
+                # detect_bull_flag now returns {"_veto": "<reason>"} when a
+                # specific veto fired (instead of empty {}).
+                veto = (params or {}).get("_veto", "")
+                if veto.startswith("vwap"):
+                    self.day.patterns_rejected_vwap = getattr(self.day, "patterns_rejected_vwap", 0) + 1
+                elif veto.startswith("macd"):
+                    self.day.patterns_rejected_macd += 1
+                elif veto.startswith("fbo"):
+                    self.day.patterns_rejected_fbo += 1
+                elif veto.startswith("risk_"):
+                    self.day.patterns_rejected_risk = getattr(self.day, "patterns_rejected_risk", 0) + 1
+                elif veto.startswith("pole_h"):
+                    self.day.patterns_rejected_pole_extension = getattr(self.day, "patterns_rejected_pole_extension", 0) + 1
+                # else: no pattern detected at all (no _veto reason)
                 return
             # Guard gegen unvollständige params
             required = ("pole_candles", "flag_candles", "pole_height", "entry_price", "stop_price")
@@ -1930,6 +1997,26 @@ class Bot:
             log.info("  REJECT %s: size=0 (entry $%.2f stop $%.2f risk-per-share $%.2f → max-shares 0)",
                      sym, params["entry_price"], params["stop_price"],
                      params["entry_price"] - params["stop_price"])
+            return
+
+        # Review-V2 P0.5: total-risk-budget gate. Before submitting the
+        # entry, sum open + pending + new risk and ensure it's below the
+        # daily-loss cap. This prevents stacking multiple concurrent
+        # positions whose combined stops would exceed DAILY_MAX_LOSS_USD.
+        risk_per_share = params["entry_price"] - params["stop_price"]
+        new_trade_risk = max(0.0, risk_per_share) * shares
+        open_risk = _aggregate_open_risk(self.tickers)
+        # pending_risk: we don't currently track in-flight orders separately
+        # so pass 0 — once we have an order-state-machine this should be
+        # populated from submitted-but-not-filled entries.
+        ok2, reason2 = can_enter_new(self.day, ny_time,
+                                     new_trade_risk_usd=new_trade_risk,
+                                     open_risk_usd=open_risk,
+                                     pending_risk_usd=0.0)
+        if not ok2:
+            self.day.patterns_rejected_risk_budget = getattr(
+                self.day, "patterns_rejected_risk_budget", 0) + 1
+            log.warning("  REJECT %s: %s", sym, reason2)
             return
 
         # #6 SPY-Size-Multiplier anwenden
