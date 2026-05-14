@@ -179,11 +179,20 @@ def test_replay_qe_partial_fill_keeps_remainder_position():
 
 
 def test_replay_partial_then_full_exits_cleanly():
-    """Partial 3 + later full-fill 2 should end flat with correct PnL."""
+    """Partial 3 + later full-fill 2 should end flat with correct PnL.
+    Phase-10 (ChatGPT-18:20): PnL must equal 7.50, not 10.00 — T1-leg
+    booked ONCE across both T2-partial-fills.
+      T1:        (10.5 - 10.0) * 5 = 2.5
+      T2 part-1: (11.0 - 10.0) * 3 = 3.0
+      T2 final:  (11.0 - 10.0) * 2 = 2.0
+      Total = 7.5
+    """
     from fake_broker import FakeBroker
     fb = FakeBroker()
     fb.set_behavior("AAA", "partial", partial_qty=3)
     rb, ts = _setup_partial_ts(fb)
+    # NB: live T1 path does NOT book to realized_pnl — it's deferred to T2/Stop
+    # via _book_t1_pnl_once, so no seeding is needed.
     # First T2-bar: partial 3
     rb._manage(ts, {"open": 11.0, "high": 11.1, "low": 10.9, "close": 11.0,
                      "volume": 1000}, None)
@@ -196,3 +205,63 @@ def test_replay_partial_then_full_exits_cleanly():
     assert ts.in_position is False
     assert fb.positions["AAA"] == 0
     assert rb.day.trades_completed_today == 1
+    assert abs(rb.day.realized_pnl - 7.5) < 1e-9, \
+        f"expected $7.50 PnL (T1 once + T2 partial + T2 final), got ${rb.day.realized_pnl}"
+
+
+def test_replay_partial_t2_then_partial_t2_then_final():
+    """Phase-10: partial T2 → partial T2 → final T2 must book T1 ONCE.
+      T1:        (10.5 - 10.0) * 5 = 2.5
+      T2 part-1: (11.0 - 10.0) * 2 = 2.0
+      T2 part-2: (11.0 - 10.0) * 2 = 2.0
+      T2 final:  (11.0 - 10.0) * 1 = 1.0
+      Total = 7.5 (NOT 12.5 with naive triple-booking of r1)
+    """
+    from fake_broker import FakeBroker
+    fb = FakeBroker()
+    fb.set_behavior("AAA", "partial", partial_qty=2)
+    rb, ts = _setup_partial_ts(fb)
+    # partial 2
+    rb._manage(ts, {"open": 11.0, "high": 11.1, "low": 10.9, "close": 11.0,
+                     "volume": 1000}, None)
+    assert ts.shares == 3
+    # partial 2 again
+    rb._manage(ts, {"open": 11.0, "high": 11.1, "low": 10.9, "close": 11.0,
+                     "volume": 1000}, None)
+    assert ts.shares == 1
+    # final 1
+    fb.set_behavior("AAA", "filled_at_limit")
+    rb._manage(ts, {"open": 11.0, "high": 11.05, "low": 10.95, "close": 11.0,
+                     "volume": 1000}, None)
+    assert ts.shares == 0
+    assert ts.in_position is False
+    assert abs(rb.day.realized_pnl - 7.5) < 1e-9, \
+        f"expected $7.50 (T1 once + 3 T2 legs), got ${rb.day.realized_pnl}"
+
+
+def test_replay_t1_then_partial_stop_then_final_stop():
+    """Phase-10: T1 → partial BE-stop → final BE-stop must book T1 ONCE.
+    BE-stop = entry_price (10.0) so the T2-leg PnL on each stop fill is $0.
+    Only the T1-leg contributes, and it must contribute only once.
+      T1:        (10.5 - 10.0) * 5 = 2.5
+      Stop p-1:  (10.0 - 10.0) * 2 = 0.0
+      Stop p-2:  (10.0 - 10.0) * 3 = 0.0
+      Total = 2.5 (NOT 7.5 with naive double-booking)
+    """
+    from fake_broker import FakeBroker
+    fb = FakeBroker()
+    fb.set_behavior("AAA", "partial", partial_qty=2)
+    rb, ts = _setup_partial_ts(fb)
+    # bar with low <= BE (entry) but high < T2 → stop branch
+    rb._manage(ts, {"open": 9.95, "high": 9.99, "low": 9.5, "close": 9.7,
+                     "volume": 1000}, None)
+    assert ts.shares == 3
+    assert ts.in_position is True
+    # final stop fill
+    fb.set_behavior("AAA", "filled_at_limit")
+    rb._manage(ts, {"open": 9.95, "high": 9.99, "low": 9.5, "close": 9.7,
+                     "volume": 1000}, None)
+    assert ts.shares == 0
+    assert ts.in_position is False
+    assert abs(rb.day.realized_pnl - 2.5) < 1e-9, \
+        f"expected $2.50 (T1 once + 0 stop legs), got ${rb.day.realized_pnl}"

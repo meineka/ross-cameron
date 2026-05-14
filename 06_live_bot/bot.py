@@ -2598,6 +2598,17 @@ class ReplayBot:
         self.submit_sell(ts.symbol, qty, price, reason)
         return qty, price  # legacy: assume full fill at limit
 
+    def _book_t1_pnl_once(self, ts):
+        """Phase-10 (ChatGPT-18:20): T1-leg PnL must be booked exactly ONCE
+        across all subsequent T2-partial-fills and/or BE-stop fills.
+        Previously each T2-partial added the full T1-gain again, double-
+        counting on `partial T2 → final T2` paths. Returns the T1-leg PnL
+        on first call when half_filled, 0.0 thereafter."""
+        if not ts.half_filled or getattr(ts, "_replay_t1_pnl_booked", False):
+            return 0.0
+        setattr(ts, "_replay_t1_pnl_booked", True)
+        return (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
+
     def _manage(self, ts, bar, ny_t):
         """Audit-Iter 19 (2026-05-12) — Replay-Live-Parität:
           REP-1: T2-Exit zählte T1-Gewinn nicht (mirrored live bot fix MP-1/PYR-1)
@@ -2656,7 +2667,9 @@ class ReplayBot:
                 return
             # Phase-9: T1-gain on the sold-half always counted; T2-leg counts
             # only actually-filled shares. Trade-counted only when fully flat.
-            r1 = (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
+            # Phase-10 (ChatGPT-18:20): r1 booked ONCE via _book_t1_pnl_once
+            # so multiple T2-partials don't double-count the T1-leg.
+            r1 = self._book_t1_pnl_once(ts)
             r2 = (fill_price - ts.entry_price) * filled
             pnl = r1 + r2
             self.day.realized_pnl += pnl
@@ -2681,7 +2694,10 @@ class ReplayBot:
             # log critical to surface in tests
             pnl = (fill_price - ts.entry_price) * filled
             if ts.half_filled:
-                pnl += (ts.target1_price - ts.entry_price) * ts.t1_shares_sold
+                # Phase-10 (ChatGPT-18:20): T1-leg booked once across stop /
+                # T2-partial paths. _book_t1_pnl_once returns 0 if already
+                # booked by an earlier T2-partial.
+                pnl += self._book_t1_pnl_once(ts)
             self.day.realized_pnl += pnl
             self.day.peak_pnl = max(self.day.peak_pnl, self.day.realized_pnl)
             ts.shares -= filled
