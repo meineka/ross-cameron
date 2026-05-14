@@ -158,8 +158,12 @@ MAX_ADDS_PER_TRADE = 3
 SLIPPAGE_CENTS = 0.05              # was 0.01, jetzt realistic 5c
 
 # #6 SPY-Trend-Filter: skip Trading wenn SPY < -1% am Tag (Bear-Day)
-SPY_TREND_VETO_PCT = -1.0
-SPY_TREND_REDUCE_SIZE_PCT = -0.5   # SPY < -0.5% aber > -1%: size 50%
+# Trader-loop Iter 22 (2026-05-14): SPY-Veto -1.0% war zu strict.
+# 42-day pilot: 4 days skipped, $40 PnL verloren, Sharpe -25%.
+# Cameron-Praxis: "trade with caution on red days" = size-reduce, NICHT
+# skip. -0.5% Reduce-Logic bleibt, Outright-Skip nur bei echtem Crash.
+SPY_TREND_VETO_PCT = -2.0
+SPY_TREND_REDUCE_SIZE_PCT = -0.5   # SPY < -0.5% aber > -2%: size 50%
 
 # #3 Whole/Half-Dollar Targets
 USE_PSYCH_LEVEL_T2 = True          # T2 = max(pole_height_target, nearest psych level)
