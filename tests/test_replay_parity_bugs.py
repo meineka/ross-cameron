@@ -53,14 +53,19 @@ def _make_replay_with_position(entry=10.0, target1=10.5, target2=11.0,
 
 
 # ─── Iter 9: Quick-Exit in ReplayBot (Replay/Live parity) ───────────────────
-def test_replay_quick_exit_fires_when_30c_below_entry_in_first_5_bars():
-    """Iter 9: bar low 30c below entry within QE window → exit at entry-0.30."""
+def test_replay_quick_exit_fires_when_threshold_breached_in_first_5_bars():
+    """Iter 9 + Trader-Loop Iter 5 (2026-05-14): bar low below
+    entry - QUICK_EXIT_THRESHOLD_CENTS within QE window → exit at
+    entry-threshold. Threshold moved 0.30 -> 0.20 per pilot sweep (38%
+    Sharpe gain); test now reads the live constant instead of pinning."""
+    import bot as bot_mod
     r, ts = _make_replay_with_position(initial=10, bars_since_entry=0)
     r.submit_sell = MagicMock()
-    # bar low 9.60 = 40c below entry 10.0 → QE triggers
+    # bar low 40c below entry (well below QE threshold regardless of 20 or 30)
     bar = {"open": 9.95, "high": 9.97, "low": 9.60, "close": 9.80, "volume": 1000}
     r._manage(ts, bar, None)
-    expected = (10.0 - 0.30 - 10.0) * 10  # QE exit at 9.70
+    qe_px = 10.0 - bot_mod.QUICK_EXIT_THRESHOLD_CENTS
+    expected = (qe_px - 10.0) * 10
     assert abs(r.day.realized_pnl - expected) < 0.01
     assert ts.in_position is False
     assert r.day.consecutive_losses == 1

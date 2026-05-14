@@ -77,6 +77,23 @@ Track each hypothesis tested via the 20-min /loop so we don't repeat work.
 - **Why it fails:** On a 5-min chart, after T1 fires the next 1-3 bars are often consolidation with lows above entry. A mechanical trailing stop ratchets ABOVE entry, then a normal pullback (still healthy structure) takes it out — killing the T2 runner. Cameron's discretionary "trail to consolidation low" is NOT the same as "trail to last-N-bar low" — he picks structure, not bar-count. Mechanical 5-min trailing on this universe destroys the T2-runner edge that drives most of the bot's PnL.
 - **Insight saved:** BE-after-T1 is the right stop logic for this 5-min mechanical strategy. Future trailing experiments should be structure-based (swing-low after T1 confirmation), not bar-count-based.
 
+## Iter 5 — Quick-Exit threshold tuning
+- **Date:** 2026-05-14
+- **Looked at:** `QUICK_EXIT_THRESHOLD_CENTS` (currently 0.30 = Cameron's spoken "30c quick exit"). Trader concern: the bot's universe is $2-$20 stocks; 30c against entry on a $3 ticker is 10% — too much rope. Tested fixed alternatives and risk-proportional `factor * (entry-stop)`.
+- **Hypothesis:** Tighter QE clips small losers faster without hurting winners; proportional QE should be even better because it adapts to the trade's own stop-distance.
+- **Backtest (167-day pilot, post-Iter-2 baseline):**
+  | QE Setting | PnL | Trd | WR | DD | Sharpe-like |
+  |---|---|---|---|---|---|
+  | 30c (baseline) | $778.60 | 19 | 83% | -$50.25 | 15.49 |
+  | **20c (NEW)** | **$793.90** | 19 | 83% | **-$37.10** | **21.40** |
+  | 25c | $786.25 | 19 | 83% | -$42.60 | 18.46 |
+  | 35c+ | $774.77 | 19 | 83% | -$54.08 | 14.33 |
+  | 15c | $671.69 | 19 | 78% | -$37.10 | 18.10 |
+  | Prop 0.6×(entry-stop) | $765.47 | 20 | 74% | -$37.10 | 20.63 |
+  | Prop 0.5×(entry-stop) | $730.38 | 20 | 68% | -$48.07 | 15.19 |
+- **Verdict: COMMIT 20c.** Same PnL band, MaxDD -26%, Sharpe-like +38%. Proportional QE looked promising on DD but ate winners — fixed 20c is simpler and dominant. 15c too tight (turns winners into QE).
+- **Changed:** `QUICK_EXIT_THRESHOLD_CENTS = 0.20`. Test rewritten to read the live constant instead of pinning 30c. YAML's `30c` is a verbatim Cameron quote in narrative text — left untouched.
+
 ## Open ideas (queue for future iterations)
 - Conditional position-size reduction for entries after 11:00 (not full block).
 - Trailing-stop after T1 instead of fixed BE.

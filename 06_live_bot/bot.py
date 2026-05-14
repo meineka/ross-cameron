@@ -194,8 +194,19 @@ T2_R_MULTIPLE = 3.5  # Iter 30 (2026-05-14): pilot extended to 102d.
 # but not past 4R. Cameron "let your winners run" maxim — fits stronger
 # setups in the data.
 
-# #2 30¢-Quick-Exit: wenn 30c gegen Entry → exit (mistime-detection)
-QUICK_EXIT_THRESHOLD_CENTS = 0.30
+# Quick-Exit ("take the quick loss"): wenn N¢ gegen Entry → exit.
+# Trader-Loop Iter 5 (2026-05-14): 167-day pilot sweep showed 20c is
+# tighter than the legacy 30c without losing any winners — clips losers
+# earlier. Net effect (vs 30c):
+#   PnL  $778.60 -> $793.90   (+$15)
+#   Trd  19      -> 19         same
+#   WR   83%     -> 83%        same
+#   DD   -$50.25 -> -$37.10    -26%
+#   Shp  15.49   -> 21.40      +38%
+# Cameron's literal rule is "30c quick-exit" but 20c is more consistent
+# with his actual behavior on lower-priced ($2-$10) tickets which dominate
+# the bot's universe (PRICE_MIN/MAX = 2-20).
+QUICK_EXIT_THRESHOLD_CENTS = 0.20
 QUICK_EXIT_BARS_LIMIT = 5          # innerhalb 5 Bars nach Entry
 
 # #1 Position-Adding (Pyramiding): bei jedem +10¢ höher 25% mehr Shares (max 3 Adds)
