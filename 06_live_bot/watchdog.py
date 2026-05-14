@@ -293,5 +293,24 @@ def main():
         time.sleep(CHECK_INTERVAL_SEC)
 
 
+def preflight_only() -> int:
+    """Phase-13 (ChatGPT-20:11): run resolve + dep-preflight, print result,
+    exit. No restart, no monitoring loop. Operator-CLI for verifying the
+    Python/dep setup before kicking off a real watchdog."""
+    bot_python = resolve_bot_python()
+    print(f"Bot-Python resolved -> {bot_python}")
+    ok, missing = preflight_dependencies(bot_python)
+    if ok:
+        print(f"Preflight OK -> deps importable: {REQUIRED_DEPS}")
+        return 0
+    print("DEPENDENCY PREFLIGHT FAILED")
+    print(f"Missing modules in {bot_python}: {missing}")
+    print("Operator action: set BOT_PYTHON, or pip install missing deps, or "
+          "create .venv at repo-root.")
+    return 1
+
+
 if __name__ == "__main__":
+    if "--preflight-only" in sys.argv:
+        sys.exit(preflight_only())
     main()
