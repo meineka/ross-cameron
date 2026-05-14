@@ -80,6 +80,28 @@ The committed changes need to remain robust under future-data validation.
   No multi-trade-day with loss to spare. All configs identical.
 - **Status:** SKIP — selectivity filters already produce ≤1 trade/day.
 
+### Iter 13: FLAG_RETRACE_MAX_PCT sweep (SKIP)
+- **Hypothesis:** Cameron's "flag retraces 38-50%" — current 50% is upper
+  bound. Fibonacci 38% tighter?
+- **Backtest:** 50% current optimum.
+  - 25% tight: 8 trd / $134 / 100% / MDD=0 (artificial Sharpe-spike, fragile)
+  - 38% Fib:   10 trd / $137 / 90% / Sharpe 19.09  (worse)
+  - 45%:       11 trd / $144 / 90% / Sharpe 19.95  (worse)
+  - **50% cur: 11 trd / $151 / 90% / Sharpe 20.93** ← optimal
+  - 60%/70%:   11 trd / $150 (no extra trades pass)
+- **Status:** SKIP — Cameron-Spec 50% ist optimal.
+
+### Iter 14: POLE_MIN_MOVE_PCT sweep (SKIP)
+- **Hypothesis:** Cameron's "5% min, 10%+ preferred" — bot at 5% spec-min.
+  Either tighter (stricter selection) or looser (more trades)?
+- **Backtest:**
+  - 3%/4% looser: 12 trd / $162-164 / 100% / Sharpe 162+ (artificial)
+  - **5% cur:    11 trd / $151 / 90% / Sharpe 20.93** ← spec
+  - 6% stricter: 10 trd / $132 / 90% / Sharpe 18.28
+  - 10% Cam-pref: 5 trd / $48  / 80% / Sharpe 6.62
+- **Status:** SKIP. Looser=Cameron-Spec-Verletzung (5% is his MIN).
+  Stricter loses meaningful trades. Konsistent mit Iter 8 (vol-factor).
+
 ### Iter 10+11+12: Position-Management variants (alle SKIP)
 - **Iter 10 (Stop-Lock-in nach T1):** 0.25R/0.50R/0.75R/1R lock-in statt
   BE. Alle SCHLECHTER ($133-146 vs $150.72 baseline). Stocks retracen
