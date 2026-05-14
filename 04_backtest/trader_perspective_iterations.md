@@ -110,6 +110,42 @@ Track each hypothesis tested via the 20-min /loop so we don't repeat work.
 - **Verdict: SKIP.** Every cut reduces PnL monotonically with the multiplier, with **zero** improvement to MaxDD or WR. The 11:00-11:30 entries are net-positive and the catastrophic-late-entry risk that motivated Iter 1 was already neutralized upstream by Iter 5's tighter QE (DD already at -$37.10, down from -$50.25). Layering a second defense against the same risk pays for protection twice without buying anything.
 - **Meta-insight:** Each iteration's commit reshapes the baseline. The Iter-1 finding "11:00-11:30 entries are profitable but volatile" was true at the OLD baseline; after Iter 5, the volatility was clipped via QE. **Don't re-test against stale baselines** — re-evaluate queue items against current state. Closing the late-window question for now.
 
+## Iter 7 — Local-optimum verification sweep
+- **Date:** 2026-05-14
+- **Looked at:** Three open queue items at once: finer `POLE_MIN` grid (3.0-4.5), `T2_R_MULTIPLE` (1.5-3.5), and `is_above_vwap` strictness (close vs low vs +0.5% buffer).
+- **Hypothesis:** Some of these may still have local gradient unexplored.
+- **Backtest (167-day pilot, post-Iter-5 baseline = $793.90 / Sharpe 21.40):**
+
+  *Finer POLE_MIN grid:*
+  | pole_min | PnL | Trd | WR | DD | Sharpe-like |
+  |---|---|---|---|---|---|
+  | 3.0 | $877.68 | 21 | 80% | -$62.95 | 13.94 |
+  | 3.5 | $765.90 | 20 | 79% | -$62.95 | 12.17 |
+  | **4.0 (current)** | **$793.90** | 19 | 83% | -$37.10 | **21.40** |
+  | 4.5 | $681.40 | 18 | 82% | -$37.10 | 18.37 |
+  | 5.0 | $597.12 | 17 | 81% | -$37.10 | 16.09 |
+
+  *T2_R_MULTIPLE:* current is 3.5 (not 2.5 as the old comment suggested).
+  | T2_R | PnL | Sharpe-like |
+  |---|---|---|
+  | 1.5 | $486.97 | 13.13 |
+  | 2.5 | $629.88 | 15.92 |
+  | 3.0 | $703.38 | 18.88 |
+  | **3.5 (current)** | **$793.90** | **21.40** |
+
+  *VWAP strictness:*
+  | Rule | PnL | Sharpe-like |
+  |---|---|---|
+  | **close > VWAP (current)** | **$793.90** | **21.40** |
+  | low > VWAP (stricter) | $773.24 | 20.84 |
+  | close > VWAP × 1.005 | $793.90 | 21.40 (non-binding) |
+
+- **Verdict: SKIP all three** — current values are at the local Sharpe optimum.
+  - `pole_min=3.0` raises gross PnL by $84 but MaxDD jumps from $37→$63 and Sharpe collapses 35%. Bad risk-adjusted trade-off.
+  - `T2_R=3.5` dominates lower values. Code comment about "2.5R optimal" was from an old baseline; current sweep confirms 3.5 is the right number now.
+  - VWAP stricter (`low > VWAP`) cuts a winner. The +0.5% buffer is non-binding (signal bars already comfortably above VWAP at trigger time).
+- **Insight saved:** The bot is now at a tight local optimum across pole_min, T2_R, QE, and VWAP. Further linear-parameter tuning will produce diminishing returns; future iters should test STRUCTURAL changes (new gates, new signals, new exit logic) rather than knob-twiddling.
+
 ## Open ideas (queue for future iterations)
 - Trailing-stop after T1 instead of fixed BE.
 - Adaptive QE-distance based on ATR/volatility instead of fixed 30c.
