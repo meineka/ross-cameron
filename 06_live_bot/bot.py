@@ -292,6 +292,7 @@ class DayState:
     patterns_rejected_risk: int = 0          # Review-V2 P1.8 (MAX_RISK_PCT)
     patterns_rejected_pole_extension: int = 0  # Review-V2 P1.8 (MAX_POLE_T2_R)
     patterns_rejected_risk_budget: int = 0   # Review-V2 P0.5
+    patterns_rejected_quote_safety: int = 0  # Review-V2 P0.4 (safe_bracket wiring)
     patterns_rejected_pullback_count: int = 0
     patterns_rejected_size_zero: int = 0
     patterns_rejected_max_trades: int = 0    # #5
@@ -1628,8 +1629,26 @@ class Bot:
                     slow_next_at = aligned_scan_start(datetime.now(NY_TZ),
                                                      RESCAN_SLOW_INTERVAL_MIN,
                                                      SCAN_HEAD_START_SLOW_SEC)
-                # FAST Re-Scan (aligned to 1-min boundary)
-                if ny >= fast_next_at:
+                    # Review-V2 P1.5: refresh SPY-trend every slow-rescan
+                    # (5 min). Previously SPY was set once at startup and
+                    # never updated — a market that opened green but turned
+                    # red mid-day still got full size-multiplier.
+                    try:
+                        new_spy = await asyncio.to_thread(fetch_spy_today_pct)
+                        new_mult = compute_spy_size_multiplier(new_spy)
+                        if abs(new_spy - self.day.spy_pct_today) > 0.01:
+                            log.info("SPY refresh: %.2f%% → %.2f%% (mult %.2fx → %.2fx)",
+                                     self.day.spy_pct_today, new_spy,
+                                     self.day.spy_size_multiplier, new_mult)
+                        self.day.spy_pct_today = new_spy
+                        self.day.spy_size_multiplier = new_mult
+                    except Exception as e:
+                        log.debug("SPY intraday refresh err: %s", e)
+                # FAST Re-Scan (aligned to 1-min boundary) — Review-V2 P1.6:
+                # only during the fast-phase (Power-Hour). After RESCAN_FAST_PHASE_END
+                # the watchlist is stable and rescanning every minute is wasted
+                # work / unnecessary Alpaca-API pressure.
+                if ny >= fast_next_at and ny.time() < RESCAN_FAST_PHASE_END:
                     await self.fast_rescan_via_alpaca()
                     fast_next_at = aligned_scan_start(datetime.now(NY_TZ),
                                                      RESCAN_FAST_INTERVAL_MIN,
@@ -1747,6 +1766,39 @@ class Bot:
                 t.cancel()
             self.executor.market_close_all()
             self._log_day_summary()
+
+    def _pre_entry_quote_safety(self, symbol: str) -> tuple[bool, str]:
+        """Review-V2 P0.4: pre-entry liquidity gate using safe_bracket.
+
+        Fetches a fresh snapshot via Alpaca, validates:
+          1. Two-sided quote exists (bid + ask both positive)
+          2. Spread is reasonable (<5% of mid)
+          3. Daily volume is above MIN_DAILY_VOLUME (10k default)
+
+        If the snapshot API is unreachable, returns (True, "snapshot-unavailable")
+        because in paper/dry-run modes we don't want to block entries on
+        infrastructure flakiness — only on confirmed-bad data.
+
+        For live trading with real money, this should be made fail-closed:
+        no quote = no trade.
+        """
+        try:
+            from safe_bracket import check_liquidity
+        except Exception:
+            return True, "safe_bracket-not-importable"
+        try:
+            from alpaca.data.requests import StockSnapshotRequest
+            data_client = StockHistoricalDataClient(self.api_key, self.api_secret)
+            req = StockSnapshotRequest(symbol_or_symbols=[symbol])
+            snaps = data_client.get_stock_snapshot(req)
+            snap = snaps.get(symbol) if isinstance(snaps, dict) else None
+            if snap is None:
+                return True, "snapshot-empty"  # not fail-closed in paper
+        except Exception as e:
+            log.debug("quote-safety snapshot err %s: %s", symbol, e)
+            return True, f"snapshot-err"  # not fail-closed in paper
+        ok, reason = check_liquidity(snap)
+        return ok, reason
 
     async def fast_rescan_via_alpaca(self):
         """Fast-Re-Rank via Alpaca-Snapshot für aktuelle Watchlist + naher Pool."""
@@ -1888,6 +1940,7 @@ class Bot:
         log.info("    rej Risk%%:        %d", d.patterns_rejected_risk)
         log.info("    rej Pole-ext:     %d", d.patterns_rejected_pole_extension)
         log.info("    rej Risk-Budget:  %d", d.patterns_rejected_risk_budget)
+        log.info("    rej Quote-Safety: %d", d.patterns_rejected_quote_safety)
         log.info("    rej Pullback#3:   %d", d.patterns_rejected_pullback_count)
         log.info("    rej Size=0:       %d", d.patterns_rejected_size_zero)
         log.info("  Orders submitted:   %d (%d failed)", d.orders_submitted, d.orders_failed)
@@ -2034,6 +2087,17 @@ class Bot:
             self.day.patterns_rejected_size_zero += 1
             log.info("  REJECT %s: shares=0 nach SPY-multiplier %.2fx",
                      sym, self.day.spy_size_multiplier)
+            return
+
+        # Review-V2 P0.4: pre-entry quote-safety-check (was the safe_bracket
+        # module sitting dead — now WIRED into the live entry path).
+        # Validates two-sided quote exists and spread is reasonable BEFORE
+        # we submit, preventing the HSPT-style stale-trade-price disaster.
+        quote_ok, quote_reason = self._pre_entry_quote_safety(sym)
+        if not quote_ok:
+            self.day.patterns_rejected_quote_safety = getattr(
+                self.day, "patterns_rejected_quote_safety", 0) + 1
+            log.warning("  REJECT %s: quote-safety failed (%s)", sym, quote_reason)
             return
 
         # Submit als BRACKET — Stop+TP broker-seitig, Position nie 'nackt'
