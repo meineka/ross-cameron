@@ -11,6 +11,17 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 27: Further re-validation w/ Iter 25 base (alle SKIP)
+- **USE_PSYCH_LEVEL_T2 on/off:** $462.85 vs $461.58 — identical. With
+  T2=2.5R override, the psych-level rarely fires (T2 usually above next
+  0.50 boundary anyway). Keep ON for Cameron-spec.
+- **MAX_POLE_T2_R re-tune:** 3.5 confirmed optimal. Tighter (2.0/2.5)
+  loses trades AND increases MDD (-$24.90). Looser (4.5+) loses Sharpe.
+- **POLE_MIN_MOVE_PCT re-tune:** Same as Iter 14/21 — 4% gives +$65/100%
+  WR/MDD=0 but Cameron-spec violation. 5% optimal under spec.
+- **Conclusion:** Bot at robust local optimum. Pure parameter-tuning truly
+  exhausted on 42-day pilot. Live-deploy ready as-is.
+
 ### Iter 26: Re-validation sweep on Iter 23/24/25 base (alle SKIP)
 - **Trail-Stop post-T1 (Iter 11 re-test):** BE-only still optimal at
   $462.85. Trail 1.5R close ($458) but never above. Same as prior result.
