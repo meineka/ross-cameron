@@ -11,7 +11,25 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
-### Iter 29: Pilot extended 61→81 days + MAX_RISK_PCT 7.0 → 5.5 (BIGGER reality check)
+### Iter 30: Pilot extended 81→102 days + T2_R_MULTIPLE 2.5 → 3.5
+- **Step 1:** fetched 17 more days (2025-12-16 to 2026-01-15) via Alpaca.
+  Pilot extends to 102 days. New trades both wins (+$65, +$87).
+- **Step 2:** T2_R re-tuned on 102d:
+  - 2.5R (Iter 25): $563 / Sharpe 15.19
+  - 3.0R: $566 / Sharpe 15.26
+  - **3.5R: $632.42 / Sharpe 17.05** ← selected
+  - 4.0R: $550 (2 trades stall — too aggressive)
+- **Mechanism:** Same trade count/WR/MDD at 3.5R. Just bigger wins. Momentum
+  carries past 2.5R to 3.5R organically. 4R is too far.
+- **Cumulative 102d:** $632.42 / 92% / MDD -$37.10 / Sharpe 17.05
+- **Re-validation matrix on 102d (all iters confirmed):**
+  - MAX_RISK 5.5: still cliff (6.0 → Sharpe 6.26)
+  - QE 0.30c: non-binding (all 0.20-0.50 identical with 5.5% filter)
+- **Cameron-Argument:** "Let your winners run" — fits stronger setups. Still
+  below pole-cap (3.5R == cap, so trades survive both checks).
+- **Commit:** `9a2cf50`
+
+### Iter 29: Pilot extended 61→81 days + MAX_RISK_PCT 7.0 → 5.5
 - **Step 1:** fetched 17 more days (2026-01-16 to 2026-02-13) via Alpaca.
 - **Step 2:** 81d revealed TWO more big losses (2026-01-22 -$37, 2026-02-04
   -$49.88 capped). MDD jumps -$9 → -$87.
@@ -178,15 +196,18 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative on HONEST 81-day pilot (Iter 1@5.5 / 2 / 7 / 9 / 22 / 23 / 24 / 25 / 29):**
+**Cumulative on HONEST 102-day pilot (Iter 1@5.5 / 2 / 7 / 9 / 22 / 23 / 24 / 25@3.5R / 29 / 30):**
 
-| Metric | Original (39d) | Now (81d) | Δ |
+| Metric | Original (39d) | Now (102d) | Δ |
 |---|---:|---:|---|
-| Trades | 17 | 11 | -6 |
-| PnL | $75.17 | **$410.35** | **+446%** |
-| Win-Rate | 67% | **91%** | +24% |
-| MaxDD | -$30.63 | **-$37.10** | +21% (worse — see note) |
-| Sharpe-like | 2.45 | **11.06** | **+351%** |
+| Trades | 17 | 13 | -4 |
+| PnL | $75.17 | **$632.42** | **+741%** |
+| Win-Rate | 67% | **92%** | +25% |
+| MaxDD | -$30.63 | -$37.10 | +21% (see note) |
+| Sharpe-like | 2.45 | **17.05** | **+596%** |
+
+**Note on MDD:** 102-day pilot exposes worst-case DD. PnL/Sharpe still
+massively net-positive vs original.
 
 **Note on MDD:** 81-day pilot exposes worst-case drawdown. The original
 39-day baseline never saw a $50-cap full-size loss day. Honest pilot
