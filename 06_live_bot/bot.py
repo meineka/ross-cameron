@@ -148,7 +148,11 @@ MAX_TRADES_PER_DAY = 5             # Cameron sagt 1 für Beginners, 3-5 für ihn
 # MAX_RISK_PCT=8% Filter ergibt: 9 trades (vs 17), $73 PnL (vs $75 — gleich),
 # Win-Rate 78% (vs 67%), MaxDD -$18.78 (vs -$30.63 halbiert), 0 Spirals.
 # Sharpe-like-Ratio +59%.
-MAX_RISK_PCT = 8.0
+MAX_RISK_PCT = 7.0  # Iter 28 (2026-05-14): Iter 20+28 extended pilot to
+# 61d revealed 8.0 lets ONE bad full-size trade slip in (risk%~7.5%, lost
+# $50). Tightening to 7.0%: 16→13 trades but $453.38/MDD -$59.06/Sharpe 7.68
+# → $453.78/MDD -$9.07/Sharpe 50.03. Same PnL, 6.5x better MDD, 6.5x Sharpe.
+# Still well within Cameron's literal "<10% stop" rule.
 
 # Trader-loop Iter 7 (2026-05-14): MAX_POLE_T2_R-Cap (Cameron "don't chase
 # overextended"). Pole_height-based T2 erlaubte unbegrenzt große Poles —
