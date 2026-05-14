@@ -11,6 +11,20 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 22: SPY_TREND_VETO_PCT -1.0% → -2.0% (Cameron-Praxis-Aligning)
+- **Hypothesis:** Live-Bot SPY-Veto bei -1.0% outright-skip ist strikter
+  als Cameron's tatsächliche Regel "trade with caution" (= size-reduce,
+  not skip).
+- **Backtest:** -1.0% (current) verliert $40.79 PnL + 2 trades (Skipped
+  4 of 42 pilot days, alle waren in real positive PnL-days).
+  - No veto:    12 trd / $164.81 / 91% / Sharpe 22.89
+  - **-2.0% NEW: 12 trd / $164.81 / 91% / Sharpe 22.89** ← selected
+  - -1.5%:      11 trd / $148.16 / 90% / Sharpe 20.58
+  - -1.0% old:  10 trd / $124.02 / 89% / Sharpe 17.23
+- **Decision:** -2.0% maintains crash-protection (echte crash-days),
+  keeps -0.5% SPY_REDUCE_SIZE intact for "yellow flag" days.
+- **Commit:** `831e760`
+
 ### Iter 9: ReplayBot Quick-Exit (Replay/Live parity)
 - **Hypothesis:** Live-bot has QUICK_EXIT_THRESHOLD_CENTS=0.30 +
   BARS_LIMIT=5 (Cameron's "30c quick out"). ReplayBot didn't —
