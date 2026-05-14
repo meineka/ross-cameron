@@ -51,15 +51,15 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative effect Iter 1+2+7+9:**
+**Cumulative effect Iter 1+2+7+9 (42-day pilot post-Iter 20):**
 
-| Metric | Original | Now | Δ |
+| Metric | Original (39d) | Now (42d) | Δ |
 |---|---:|---:|---|
-| Trades | 17 | 11 | -6 |
-| PnL | $75.17 | $150.72 | +101% |
-| Win-Rate | 67% | 90% | +23% |
+| Trades | 17 | 12 | -5 |
+| PnL | $75.17 | $164.81 | +119% |
+| Win-Rate | 67% | 91% | +24% |
 | MaxDD | -$30.63 | -$7.20 | -77% |
-| Sharpe-like | 2.45 | 20.93 | +754% |
+| Sharpe-like | 2.45 | 22.89 | +834% |
 
 ## Tested but NOT committed (negative or inconclusive)
 
@@ -79,6 +79,29 @@ The committed changes need to remain robust under future-data validation.
 - **Backtest:** Only 1 multi-trade-day in pilot (2026-03-25 had 2 wins).
   No multi-trade-day with loss to spare. All configs identical.
 - **Status:** SKIP — selectivity filters already produce ≤1 trade/day.
+
+### Iter 18+19: more filter-tuning (alle SKIP)
+- **Iter 18 POLE_VOLUME_RISING-Toleranz (0.7..1.5x):** Alle identisch
+  ($150/11trd). Constraint non-binding für pole-length<4.
+- **Iter 19 Absolute Volume Floor:** 25k→$88, 100k→$41. Penny-stocks
+  haben natural lower bar-volume. Cameron's 100k-rule für mid-caps.
+
+### Iter 20: Pilot-Data Erweiterung 39→42 Tage (DATA-FETCH)
+- **Approach:** Incremental Alpaca-historical-bars für 572 recurring
+  tickers + 14 manually-tracked tickers (HSPT etc.). Daily-candidates
+  via Cameron-rules, then 5-min bars for top candidates.
+- **New dates:** 2026-05-11/12/13.
+- **Backtest:** 11 trd $150/Sharpe 20.93 → 12 trd $164.81/Sharpe 22.89
+  (+9% PnL, +9% Sharpe).
+- **Insights:**
+  - 5-11: 13 cands, 0 trades. Selectivity works.
+  - 5-12 (HSPT-day): 5 cands, 0 trades. **Bestätigt: Bot's filter hätten
+    HSPT auch ohne stale-price-bug rejected.**
+  - 5-13: 1 trade +$14.09. **Replay-Live DISCREPANCY** confirms
+    1-min/5-min-mismatch-bug — live missed this valid setup.
+
+**Cumulative Iter 1+2+7+9 (42-day):** PnL $164.81 vs baseline-pilot
+$75.17 = +119%, Sharpe 22.89 vs 2.45 = +834%.
 
 ### Iter 15+16+17: late-cycle threshold-tuning (alle SKIP)
 - **Iter 15 (Adaptive Quick-Exit % entry):** Tested 1/1.5/2/2.5/3% of entry.
