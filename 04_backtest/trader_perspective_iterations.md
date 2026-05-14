@@ -40,9 +40,28 @@ Track each hypothesis tested via the 20-min /loop so we don't repeat work.
 - **Verdict: COMMIT.** +$196.78 (+34%), +34% Sharpe, same MaxDD, no added losses. Small-sample caveat (only +2 trades) — if live tape disagrees over weeks, revert.
 - **Changed:** `POLE_MIN_MOVE_PCT = 4.0` in `06_live_bot/bot.py`; matching update in `03_rules_engine/constraints.yaml`.
 
+## Iter 3 — RSI extension/momentum veto (Cameron "don't chase extended")
+- **Date:** 2026-05-14
+- **Looked at:** Pre-entry RSI(14) gate on signal-bar close. Cameron-classic: avoid RSI > 80 (extended) and arguably also require RSI > 55 (momentum).
+- **Hypothesis:** Adding an RSI window filter should improve risk-adjusted return by avoiding parabolic chases (high-RSI) and weak setups (low-RSI).
+- **Backtest (167-day pilot, baseline = post-Iter-2):**
+  | Filter | PnL | Trd | WR | DD | Sharpe-like |
+  |---|---|---|---|---|---|
+  | **None (baseline)** | **$778.60** | 19 | 83% | -$50.25 | **15.49** |
+  | RSI > 85 veto | $758.14 | 18 | 83% | -$70.71 | 10.72 |
+  | RSI > 80 veto | $645.75 | 17 | 82% | -$70.71 | 9.13 |
+  | RSI > 75 veto | $391.78 | 10 | 80% | -$49.80 | 7.87 |
+  | RSI > 70 veto | $167.42 | 8 | 75% | -$49.80 | 3.36 |
+  | RSI ≥ 50 | $757.84 | 18 | 82% | -$50.25 | 15.08 |
+  | RSI ≥ 55 | $667.05 | 14 | 85% | -$75.24 | 8.87 |
+  | RSI ≥ 60 | $667.05 | 14 | 85% | -$75.24 | 8.87 |
+  | RSI 50..80 | $624.99 | 16 | 81% | -$70.71 | 8.84 |
+  | RSI 55..85 | $646.59 | 13 | 85% | -$95.70 | 6.76 |
+- **Verdict: SKIP.** Every RSI window underperforms baseline on both PnL and Sharpe. The pattern detector already filters for momentum (green-pole, volume-rising, topping-tail veto) and extension (topping-tail, retrace). RSI on top is redundant — it cuts winners. MaxDD actually WORSENS with the veto because removing a winning trade lowers the peak before subsequent losses.
+- **Insight saved:** Don't add another momentum/extension filter on top of the bull-flag pattern. Cameron's "RSI" rule is implicitly already encoded.
+
 ## Open ideas (queue for future iterations)
 - Conditional position-size reduction for entries after 11:00 (not full block).
-- RSI-extension veto (>80 = no entry) — Cameron-classic "don't chase extended".
 - Trailing-stop after T1 instead of fixed BE.
 - Adaptive QE-distance based on ATR/volatility instead of fixed 30c.
 - Float-based size tier (low-float runners get smaller size for slippage).
