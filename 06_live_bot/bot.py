@@ -884,9 +884,16 @@ class TradeLogger:
       LOG-3: try/except — disk-full / permission-error darf nicht den
              ganzen Bot crashen mid-trade.
     """
-    def __init__(self):
+    def __init__(self, path=None, filename: str = "trades_live.jsonl"):
+        """Phase-11 (ChatGPT-18:40 P0.2): path parameterizable so Bot writes
+        to trades_live.jsonl and ReplayBot writes to trades_replay.jsonl.
+        Mixing replay-events into the live ledger was contaminating audit
+        and post-mortem analysis. `path` (full Path) wins over `filename`."""
         import threading
-        self.path = DATA_DIR / "trades_live.jsonl"
+        if path is not None:
+            self.path = path
+        else:
+            self.path = DATA_DIR / filename
         self._lock = threading.Lock()
 
     def log(self, event: dict):
@@ -908,6 +915,13 @@ class TradeLogger:
                         pass  # fsync nicht auf allen FS verfügbar
         except (OSError, IOError) as e:
             log.warning("TradeLogger: write failed: %s", e)
+
+
+class _NullTradeLogger:
+    """Phase-11 (ChatGPT-18:40 P0.2): silent no-op logger for tests /
+    sweeps that should not touch disk. Same .log(event) interface."""
+    def log(self, event: dict):  # noqa: D401  (mirror real signature)
+        pass
 
 
 # ─── Alpaca-Executor ────────────────────────────────────────────────────────
@@ -2488,10 +2502,20 @@ class ReplayBot:
     FakeBroker behavior — verified by tests/test_replay_executor_parity.py.
     """
 
-    def __init__(self, executor=None):
+    def __init__(self, executor=None, log_path=None):
+        """Phase-11 (ChatGPT-18:40 P0.2): ReplayBot writes to
+        trades_replay.jsonl (NOT trades_live.jsonl) so the live ledger is
+        not contaminated by REPLAY_entry events. Pass log_path=None to use
+        the default trades_replay.jsonl, or an explicit Path to override,
+        or False to disable persistence entirely (handy for unit tests)."""
         self.tickers: dict[str, TickerState] = {}
         self.day = DayState()
-        self.logger = TradeLogger()
+        if log_path is False:
+            self.logger = _NullTradeLogger()
+        elif log_path is None:
+            self.logger = TradeLogger(filename="trades_replay.jsonl")
+        else:
+            self.logger = TradeLogger(path=log_path)
         self.equity = 25_000.0  # paper-default
         self.executor = executor  # Phase 8: optional shared execution layer
 
