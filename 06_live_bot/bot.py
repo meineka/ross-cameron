@@ -158,6 +158,13 @@ MAX_RISK_PCT = 8.0
 # 75%→90% win-rate, MaxDD identisch, Sharpe-like +21%.
 MAX_POLE_T2_R = 3.5
 
+# Trader-loop Iter 25 (2026-05-14): T2 as R-multiple instead of pole_height.
+# Cameron's classic teaching: "2.5x reward-to-risk minimum on T2".
+# 42-day pilot with Iter 23+24 active: T2=2.5R gives $461.82 vs pole-based
+# $391.13 (+18% PnL), Sharpe 72.43→85.52, MDD unchanged. Iter 3c originally
+# tested at 39-day pilot (+12%) — confirmed signal on larger sample.
+T2_R_MULTIPLE = 2.5
+
 # #2 30¢-Quick-Exit: wenn 30c gegen Entry → exit (mistime-detection)
 QUICK_EXIT_THRESHOLD_CENTS = 0.30
 QUICK_EXIT_BARS_LIMIT = 5          # innerhalb 5 Bars nach Entry
@@ -603,20 +610,23 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
                 risk_pct = (ep - sp) / ep * 100
                 if risk_pct > MAX_RISK_PCT:
                     return False, {"_veto": f"risk_{risk_pct:.1f}%_over_{MAX_RISK_PCT}%"}
-            # #3 T2 = max(pole_height-target, next psych. level above entry)
-            t2_mech = ep + p_h
-            if USE_PSYCH_LEVEL_T2:
-                # nächste 0.50/1.00 above entry
-                next_half = (int(ep * 2) + 1) / 2.0   # nächstes 0.50
-                t2 = max(t2_mech, next_half) if next_half > ep + 0.05 else t2_mech
-            else:
-                t2 = t2_mech
-            # Trader-Loop Iter 7: cap pole/T2-R-multiple. Stocks mit T2
-            # > 3.5R sind überdehnte/volatile setups (Cameron: "don't chase").
-            # Pilot: removes 2 losses, keeps all winners, +21% Sharpe.
             risk = ep - sp
-            if risk > 0 and (t2 - ep) / risk > MAX_POLE_T2_R:
-                return False, {"_veto": f"pole_t2r_{(t2-ep)/risk:.2f}>{MAX_POLE_T2_R}"}
+            # Trader-Loop Iter 7: cap pole-extension (filter overextended
+            # setups before computing T2). Stocks mit pole_height > 3.5R
+            # sind volatile/exhausted setups (Cameron: "don't chase").
+            if risk > 0 and p_h / risk > MAX_POLE_T2_R:
+                return False, {"_veto": f"pole_h_{p_h/risk:.2f}>{MAX_POLE_T2_R}"}
+            # Trader-Loop Iter 25: T2 = Cameron-literal R-multiple instead
+            # of pole-height. 42-day pilot: T2=2.5R gives +$70 PnL (+18%)
+            # over pole-based. Sharpe 72.43→85.52. MDD unchanged.
+            # 2.5R = "2.5x reward-to-risk" — Cameron's classic ratio.
+            t2_R = ep + T2_R_MULTIPLE * risk
+            if USE_PSYCH_LEVEL_T2:
+                # nächste 0.50 above entry — psych-level upgrade if higher
+                next_half = (int(ep * 2) + 1) / 2.0
+                t2 = max(t2_R, next_half) if next_half > ep + 0.05 else t2_R
+            else:
+                t2 = t2_R
             # ─── Cameron-Vetos (heute gefixt) ─────────────────────────────
             # VWAP: Cameron tradet nur über Session-VWAP
             if not is_above_vwap(bars, c[i]):
