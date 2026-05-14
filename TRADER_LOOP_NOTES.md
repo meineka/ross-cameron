@@ -11,6 +11,23 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 33: Diagnose 2025-11-07 SSP loss + Adaptive-QE sweep (SKIP)
+- **Diag:** SSP entry $2.72, stop $2.575 (risk=14.5c, 5.33%). Exit at stop
+  full 344-share loss = -$49.88. Bar's price went straight to stop without
+  intermediate bounce.
+- **Why QE didn't help:** Bot's QE threshold 30c > stop-distance 14.5c.
+  QE can NEVER fire for tight-stop trades — stop fires first.
+- **Adaptive QE sweep:**
+  - 30c fixed (current): $719.67 / 88% / Sharpe 14.43
+  - 0.5R relative: $600 / 65% (premature exits of winners!)
+  - 0.75R relative: $691 / 81% (still worse)
+  - Fixed 15c: $586 / 76% — worse, QE-exit price < stop-price for SSP
+- **Insight:** When stop-distance < QE-threshold, stop fires FIRST and
+  gives BETTER exit price than QE would (since QE-price = entry - threshold,
+  which would be lower than stop-price for tight setups).
+- **Verdict:** SKIP. QE optimally configured at 30c fixed. SSP-style losses
+  are structural-unavoidable with 5-min bars + tight Cameron stops.
+
 ### Iter 32: Pilot extended 122→145 days (Oct 2025) + STOP-Tightening-Cascade
 - **Data fetch:** 17 more days (2025-10-15 to 2025-11-14) via Alpaca.
 - **New trade:** 2025-11-07 -$49.88 LOSS (another max-cap hit).
