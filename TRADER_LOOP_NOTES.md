@@ -11,6 +11,23 @@ The committed changes need to remain robust under future-data validation.
   MaxDD halved ($30→$18), Sharpe +59%
 - **Commit:** `cc371fa`
 
+### Iter 32: Pilot extended 122→145 days (Oct 2025) + STOP-Tightening-Cascade
+- **Data fetch:** 17 more days (2025-10-15 to 2025-11-14) via Alpaca.
+- **New trade:** 2025-11-07 -$49.88 LOSS (another max-cap hit).
+- **Backtest 145d:** 16 trd / $719.67 / 88% / MDD -$49.88 / Sharpe 14.43
+- **MAX_RISK_PCT sweep on 145d:** 5.0% would filter this loss (Sharpe 17.04
+  vs 14.43) but lose $87 PnL.
+- **CONSCIOUS DECISION TO SKIP further tightening:**
+  - I've already tightened 10→8→7→5.5 chasing each pilot's bad-day
+  - Continued tightening = overfit cascade (each new sample reveals new
+    "ideal" threshold)
+  - 5.5% has stable cliff vs 6.0% across pilots — that's structural
+  - 5.0% filters 1 specific trade — fragile, sample-specific
+  - Strategy still has positive EV at 5.5% even including this loss
+- **Lesson:** Stop the optimization-cascade. Accept some tail-risk.
+  5.5% Cameron-conform sweet-spot is robust enough.
+- **Commit:** `fc8ef1e` (script only, no config change)
+
 ### Iter 31: Pilot extended 102→122 days (Nov 2025)
 - **Data fetch:** 16 more days (2025-11-17 to 2025-12-15) via Alpaca.
 - **New trades:** 2 wins (+$24.81, +$112.32) — clean adds, no MDD change.
@@ -209,15 +226,18 @@ The committed changes need to remain robust under future-data validation.
   win-rate 75%→75%, MaxDD -$18→-$12, Sharpe 3.89→9.64 (+147%)
 - **Commit:** `d7d7cbf`
 
-**Cumulative on EXTENDED 122-day pilot (all Iter 1@5.5/2/7/9/22/23/24/25@3.5R/29/30/31):**
+**Cumulative on EXTENDED 145-day pilot (all Iter 1@5.5/2/7/9/22/23/24/25@3.5R/29/30/31/32):**
 
-| Metric | Original (39d) | Now (122d) | Δ |
+| Metric | Original (39d) | Now (145d) | Δ |
 |---|---:|---:|---|
-| Trades | 17 | 15 | -2 |
-| PnL | $75.17 | **$769.55** | **+924%** |
-| Win-Rate | 67% | **93%** | +26% |
-| MaxDD | -$30.63 | -$37.10 | +21% |
-| Sharpe-like | 2.45 | **20.74** | **+747%** |
+| Trades | 17 | 16 | -1 |
+| PnL | $75.17 | **$719.67** | **+857%** |
+| Win-Rate | 67% | **88%** | +21% |
+| MaxDD | -$30.63 | -$49.88 | +63% |
+| Sharpe-like | 2.45 | **14.43** | **+489%** |
+
+Note: 122d Sharpe was 20.74 — one new bad day on 2025-11-07 pulled Sharpe
+down to 14.43. Decision to NOT tighten MAX_RISK further (would be overfit).
 
 **Note on MDD:** 102-day pilot exposes worst-case DD. PnL/Sharpe still
 massively net-positive vs original.
