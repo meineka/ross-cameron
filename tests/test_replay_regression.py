@@ -14,7 +14,7 @@ PILOT_DATA = ROOT / "04_backtest" / "data_pilot" / "intraday_5m.parquet"
 def test_replay_2026_04_15_baseline():
     """Replay-Output muss Baseline-Stats reproduzieren."""
     out = subprocess.run(
-        ["python", "bot.py", "--replay", "2026-04-15"],
+        [sys.executable, "bot.py", "--replay", "2026-04-15"],
         cwd=ROOT / "06_live_bot",
         capture_output=True, text=True, timeout=60,
     )
@@ -46,7 +46,7 @@ def test_replay_2026_04_15_baseline():
 def test_replay_filters_low_price_stocks():
     """HUBC ($0.17) darf NICHT mehr getradet werden (Regression-Test für Bug-Fix)."""
     out = subprocess.run(
-        ["python", "bot.py", "--replay", "2026-04-15"],
+        [sys.executable, "bot.py", "--replay", "2026-04-15"],
         cwd=ROOT / "06_live_bot",
         capture_output=True, text=True, timeout=60,
     )
@@ -61,7 +61,7 @@ def test_scan_only_produces_top10():
     return fewer in restricted environments. Asserts the SCAN COMPLETED
     successfully and produced at least 1 candidate (sanity)."""
     out = subprocess.run(
-        ["python", "bot.py", "--scan-only"],
+        [sys.executable, "bot.py", "--scan-only"],
         cwd=ROOT / "06_live_bot",
         capture_output=True, text=True, timeout=600,
     )
