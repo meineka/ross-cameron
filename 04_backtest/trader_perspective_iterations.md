@@ -60,6 +60,23 @@ Track each hypothesis tested via the 20-min /loop so we don't repeat work.
 - **Verdict: SKIP.** Every RSI window underperforms baseline on both PnL and Sharpe. The pattern detector already filters for momentum (green-pole, volume-rising, topping-tail veto) and extension (topping-tail, retrace). RSI on top is redundant — it cuts winners. MaxDD actually WORSENS with the veto because removing a winning trade lowers the peak before subsequent losses.
 - **Insight saved:** Don't add another momentum/extension filter on top of the bull-flag pattern. Cameron's "RSI" rule is implicitly already encoded.
 
+## Iter 4 — Trailing stop after T1 (instead of break-even)
+- **Date:** 2026-05-14
+- **Looked at:** Post-T1 stop logic. Currently `stop = entry_price` (pure BE). Cameron in his videos trails the stop to the recent swing-low after a partial — never lets profit turn negative. Test: stop = max(entry, lowest-low of last N bars), N ∈ {1..5}.
+- **Hypothesis:** Trailing should reduce drawdowns on failed-T2 attempts and lock in some profit on choppy continuation. Net positive on Sharpe.
+- **Backtest (167-day pilot, baseline = post-Iter-2):**
+  | Trail-N | PnL | Trd | W/L | WR | DD | Sharpe-like |
+  |---|---|---|---|---|---|---|
+  | **0 (baseline BE)** | **$778.60** | 19 | 15/3 | **83%** | -$50.25 | **15.49** |
+  | 1-bar | $220.51 | 21 | 10/10 | 50% | -$75.00 | 2.94 |
+  | 2-bar | $372.38 | 21 | 11/9 | 55% | -$71.09 | 5.24 |
+  | 3-bar | $391.34 | 21 | 13/7 | 65% | -$68.15 | 5.74 |
+  | 4-bar | $392.09 | 21 | 12/8 | 60% | -$67.85 | 5.78 |
+  | 5-bar | $399.33 | 21 | 12/8 | 60% | -$66.15 | 6.04 |
+- **Verdict: SKIP.** Catastrophic. WR collapses from 83 → 50-65%. PnL drops 50-70%. Trade-count rises (19→21) because trail-stops fire on normal post-T1 chop.
+- **Why it fails:** On a 5-min chart, after T1 fires the next 1-3 bars are often consolidation with lows above entry. A mechanical trailing stop ratchets ABOVE entry, then a normal pullback (still healthy structure) takes it out — killing the T2 runner. Cameron's discretionary "trail to consolidation low" is NOT the same as "trail to last-N-bar low" — he picks structure, not bar-count. Mechanical 5-min trailing on this universe destroys the T2-runner edge that drives most of the bot's PnL.
+- **Insight saved:** BE-after-T1 is the right stop logic for this 5-min mechanical strategy. Future trailing experiments should be structure-based (swing-low after T1 confirmation), not bar-count-based.
+
 ## Open ideas (queue for future iterations)
 - Conditional position-size reduction for entries after 11:00 (not full block).
 - Trailing-stop after T1 instead of fixed BE.
