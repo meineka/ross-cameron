@@ -148,11 +148,15 @@ MAX_TRADES_PER_DAY = 5             # Cameron sagt 1 für Beginners, 3-5 für ihn
 # MAX_RISK_PCT=8% Filter ergibt: 9 trades (vs 17), $73 PnL (vs $75 — gleich),
 # Win-Rate 78% (vs 67%), MaxDD -$18.78 (vs -$30.63 halbiert), 0 Spirals.
 # Sharpe-like-Ratio +59%.
-MAX_RISK_PCT = 7.0  # Iter 28 (2026-05-14): Iter 20+28 extended pilot to
-# 61d revealed 8.0 lets ONE bad full-size trade slip in (risk%~7.5%, lost
-# $50). Tightening to 7.0%: 16→13 trades but $453.38/MDD -$59.06/Sharpe 7.68
-# → $453.78/MDD -$9.07/Sharpe 50.03. Same PnL, 6.5x better MDD, 6.5x Sharpe.
-# Still well within Cameron's literal "<10% stop" rule.
+MAX_RISK_PCT = 5.5  # Iter 29 (2026-05-14): pilot extended 61→81d revealed
+# 7.0% still let bad trades through. On 81d MAX_RISK sweep:
+#   5.0: 9 trd / $235 / 89% / MDD -$37 / Sharpe 6.34
+#   5.5: 11 trd / $410 / 91% / MDD -$37 / Sharpe 11.06   ← selected
+#   6.0: 14 trd / $366 / 79% / MDD -$87 / Sharpe 4.21    (marginal trades toxic)
+#   7.0: 17 trd / $410 / 75% / MDD -$87 / Sharpe 4.72    (was Iter 28)
+# 5.5% maintains same PnL as 7.0% but halves MDD and doubles Sharpe.
+# Trades with risk-pct 5.5-7% are the toxic ones (capture max-loss-cap hits).
+# Cameron-conform tighter ("tight stops only — much less than 10%").
 
 # Trader-loop Iter 7 (2026-05-14): MAX_POLE_T2_R-Cap (Cameron "don't chase
 # overextended"). Pole_height-based T2 erlaubte unbegrenzt große Poles —
