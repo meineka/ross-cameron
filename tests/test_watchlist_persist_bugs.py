@@ -82,7 +82,12 @@ def test_load_with_scores_returns_both(temp_wlf):
 def test_load_with_scores_handles_missing_scores(temp_wlf):
     """Wenn scores fehlen → leeres dict, kein crash."""
     import watchlist_persist as wp
-    today = datetime.now().strftime("%Y-%m-%d")
+    # P2.6 fix (Phase-63): the bot's "today" is NY trading-day, not
+    # local-time. After Berlin midnight but before NY midnight (the
+    # 6-hour window 00:00-06:00 CET), datetime.now().strftime would
+    # produce tomorrow-NY which the loader rejects as stale. Use the
+    # same helper the bot uses.
+    today = wp._ny_today_str()
     temp_wlf.write_text(json.dumps({
         "date": today, "symbols": ["X"],
         # no 'scores' field
@@ -95,9 +100,11 @@ def test_load_with_scores_handles_missing_scores(temp_wlf):
 
 
 def test_load_with_scores_returns_none_when_stale(temp_wlf):
-    """Yesterday's watchlist → None."""
+    """Yesterday's watchlist → None. Phase-63 fix: use NY trading-day
+    helper, not local time (see sibling test for rationale)."""
     import watchlist_persist as wp
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    today_ny = datetime.strptime(wp._ny_today_str(), "%Y-%m-%d")
+    yesterday = (today_ny - timedelta(days=1)).strftime("%Y-%m-%d")
     temp_wlf.write_text(json.dumps({
         "date": yesterday, "symbols": ["OLD"],
     }), encoding="utf-8")
@@ -141,8 +148,10 @@ def test_legacy_load_if_fresh_returns_symbols(temp_wlf):
 
 
 def test_legacy_load_if_fresh_returns_none_stale(temp_wlf):
+    """Phase-63 fix: same NY-trading-day fix as the sibling tests."""
     import watchlist_persist as wp
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    today_ny = datetime.strptime(wp._ny_today_str(), "%Y-%m-%d")
+    yesterday = (today_ny - timedelta(days=1)).strftime("%Y-%m-%d")
     temp_wlf.write_text(json.dumps({
         "date": yesterday, "symbols": ["OLD"], "scores": {},
     }), encoding="utf-8")
