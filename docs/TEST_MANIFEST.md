@@ -82,7 +82,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_bracket_protection.py` | 9 | unit | yes | not_reviewed | Tests: jede Position MUSS broker-seitig Stop + Take-Profit haben. |
 | `test_cameron_compliance.py` | 18 | integration | yes | partially_reviewed | Tests für die 9 Strategie-Verbesserungen aus AUDIT_CAMERON_COMPLIANCE. |
 | `test_cancel_race_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 8 (2026-05-12): cancel_open_orders_for race-condition bugs. |
-| `test_constraints_in_code.py` | 5 | critical | yes | reviewed | Cross-Reference: Code-Konstanten müssen mit constraints.yaml übereinstimmen. |
+| `test_constraints_in_code.py` | 5 | critical | yes | reviewed | Cross-Reference: Code-Konstanten müssen mit constraints.yaml konsistent sein. |
 | `test_constraints_yaml.py` | 7 | unit | yes | not_reviewed | Constraints-YAML Struktur-Tests. |
 | `test_day_summary_bugs.py` | 9 | unit | yes | not_reviewed | Audit-Iter 28 (2026-05-13): day_summary_persist correctness + durability. |
 | `test_delisted_cache_bugs.py` | 13 | unit | yes | not_reviewed | Audit-Iter 23 (2026-05-12): delisted_cache.py durability bugs. |

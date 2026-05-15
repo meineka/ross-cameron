@@ -70,13 +70,18 @@ def test_low_volume_breakout_rejected():
 
 
 def test_topping_tail_on_pole_rejected():
-    """Pole-Kerze hat Topping-Tail > 40% Range → skip."""
+    """ALL pole bars have heavy topping-tails (>>0.7 ratio) → skip.
+
+    Phase-33 (2026-05-15) loosened POLE_TOPPING_TAIL_MAX to 0.7 and
+    POLE_MIN_CANDLES to 2, so the test must ensure every candidate
+    pole-window of length 2-7 contains a topping bar."""
     bars = warmup()
     p = 5.0
-    bars.append(make_bar(p, p+0.20, p-0.01, p+0.05, 30000)); p = 5.05  # big upper wick
-    bars.append(make_bar(p, p+0.10, p-0.01, p+0.10, 30000)); p = 5.15
-    bars.append(make_bar(p, p+0.10, p-0.01, p+0.10, 30000)); p = 5.25
-    bars.append(make_bar(p, p+0.01, p-0.05, p-0.04, 8000)); p = 5.21
+    # Make EVERY pole bar a topping-tail bar so the detector can't
+    # pick a clean sub-window. Each bar has wick ratio > 0.9.
+    for _ in range(5):
+        bars.append(make_bar(p, p+0.30, p-0.01, p+0.05, 30000)); p += 0.05
+    bars.append(make_bar(p, p+0.01, p-0.05, p-0.04, 8000)); p -= 0.04
     bars.append(make_bar(p, p+0.10, p, p+0.06, 30000))
     sig, _ = detect_bull_flag(bars)
     assert sig is False, "Topping-Tail-Pole soll skip"
@@ -108,15 +113,17 @@ def test_price_below_min_rejected():
 
 
 def test_price_above_max_rejected():
-    """Breakout-Bar Close > $20 → skip."""
-    bars = warmup(base_price=25.0, vol=10000)
-    p = 25.0
+    """Breakout-Bar Close > PRICE_MAX → skip.
+
+    Phase-33 widened PRICE_MAX from $20 to $30, so use $35 base."""
+    bars = warmup(base_price=35.0, vol=10000)
+    p = 35.0
     for _ in range(3):
         bars.append(make_bar(p, p+0.50, p-0.01, p+0.50, 30000)); p += 0.50
     bars.append(make_bar(p, p+0.01, p-0.30, p-0.25, 8000)); p -= 0.25
     bars.append(make_bar(p, p+0.50, p, p+0.30, 30000))
     sig, _ = detect_bull_flag(bars)
-    assert sig is False, "Preis ueber $20 muss skip"
+    assert sig is False, "Preis ueber PRICE_MAX muss skip"
 
 
 def test_too_few_bars_rejected():

@@ -14,11 +14,11 @@ sys.path.insert(0, str(ROOT / "06_live_bot"))
 
 # ─── #1 RVOL not too lax ────────────────────────────────────────────────────
 def test_rvol_min_is_strict_enough():
-    """Cameron-strict baseline was 5.0; user-overrides between 3.0 and 5.0
-    are acceptable (still well above the 'no filter' state of 1.0)."""
+    """Cameron-strict baseline was 5.0; user-overrides down to 2.0 are
+    acceptable in see-some-trades mode but never below 2.0 ('no filter')."""
     import bot
-    assert bot.RVOL_MIN_PROXY >= 3.0, \
-        f"RVOL_MIN_PROXY={bot.RVOL_MIN_PROXY} is too lax (< 3x destroys edge)"
+    assert bot.RVOL_MIN_PROXY >= 2.0, \
+        f"RVOL_MIN_PROXY={bot.RVOL_MIN_PROXY} is too lax (< 2x destroys edge)"
     assert bot.RVOL_MIN_PROXY <= 10.0, \
         f"RVOL_MIN_PROXY={bot.RVOL_MIN_PROXY} is unrealistically strict (> 10x = no candidates)"
 

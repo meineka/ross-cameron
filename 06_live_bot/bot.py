@@ -89,10 +89,10 @@ log = logging.getLogger("bot")
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 # ─── Cameron-Constants (mirror constraints.yaml) ────────────────────────────
-PRICE_MIN, PRICE_MAX = 2.0, 20.0
-DAILY_GAIN_MIN_PCT = 5.0  # 2026-05-15 user-override: 10 → 5 to widen pool
-RVOL_MIN_PROXY = 3.0  # 2026-05-15 user-override: 5 → 3 (let mid-cap runners in)
-FLOAT_MAX_SHARES = 50_000_000  # 2026-05-15 user-override: 10M → 50M (more small-cap runners)
+PRICE_MIN, PRICE_MAX = 1.5, 30.0  # Phase-33: was 2.0/20.0 — widen for more candidates
+DAILY_GAIN_MIN_PCT = 3.0  # Phase-33 user-override: 5 → 3 (see-some-trades)
+RVOL_MIN_PROXY = 2.0  # Phase-33 user-override: 3 → 2 (let mid-cap runners in)
+FLOAT_MAX_SHARES = 100_000_000  # Phase-33 user-override: 50M → 100M
 CATALYST_REQUIRED = True  # 5. Cameron-Pillar
 # Review-V2 P1.3: catalyst-filter mode. "soft" (default) passes on
 # data-source issues (empty news, yfinance error) — preserves V1 behavior
@@ -116,24 +116,22 @@ TIMEFRAME = "5Min"
 # Pattern + Pole/Flag-Thresholds sind für 5-Min kalibriert.
 BAR_AGGREGATION_MINUTES = 5
 
-POLE_MIN_CANDLES, POLE_MAX_CANDLES = 3, 7
-# Trader-Loop Iter 2 (2026-05-14): Cameron-fidelity backtest. Cameron's
-# spoken threshold is "5%+ daily-gainers" but his actual entries include
-# 3-4% pole-moves when the bull-flag is clean. Loosening 5.0 -> 4.0 on
-# the 167-day pilot adds 2 entries (both winners, same DD envelope):
-#   pole_min=5.0 (was):  PnL $581.82  17 trd  WR 81%  Sharpe 11.58
-#   pole_min=4.0 (NEW):  PnL $778.60  19 trd  WR 83%  Sharpe 15.49 (+34%)
-# Risk note: small-sample +2 trades; if live-tape disagrees, revert.
-POLE_MIN_MOVE_PCT = 4.0
-# Cameron-spec: topping-tail > 50% des range = veto. Vorher 0.4 war
-# unnötig konservativ. Trader-Loop Iter 2 (2026-05-13) backtest:
-# 0.4 + MAX_RISK=8: $73 pnl / sharpe 3.89
-# 0.5 + MAX_RISK=8: $120 pnl / sharpe 9.64 (+147%, MaxDD -$12.50 vs -$18.78)
-# 0.5 = Cameron's literal threshold "topping > 50%".
-POLE_TOPPING_TAIL_MAX = 0.5
-FLAG_MIN_CANDLES, FLAG_MAX_CANDLES = 1, 3
-FLAG_RETRACE_MAX_PCT = 50.0
-BREAKOUT_VOL_FACTOR = 1.5
+# Phase-33 (2026-05-15) USER OVERRIDE: "thresholds runter — ich will ein
+# paar trades sehen". Loosened pattern selection from Cameron-strict to
+# "see-some-trades mode". Will produce more entries but lower win-rate
+# than the backtested-optimal config. Original Cameron-strict values
+# preserved in comments. Revert to backtest-optimum once data flows
+# resume and the user wants quality > quantity again.
+POLE_MIN_CANDLES, POLE_MAX_CANDLES = 2, 7  # was 3,7 — allow 2-bar poles
+# Cameron-strict POLE_MIN_MOVE_PCT = 4.0 (backtest-optimum on 167d pilot).
+# User-override 2026-05-15: lowered to 2.5 to widen the candidate pool —
+# many premarket movers consolidate after only 2-3% poles before continuing.
+POLE_MIN_MOVE_PCT = 2.5  # was 4.0
+# Cameron-spec 0.5; user-override 0.7 admits poles with up to 70% topping-tail.
+POLE_TOPPING_TAIL_MAX = 0.7  # was 0.5
+FLAG_MIN_CANDLES, FLAG_MAX_CANDLES = 1, 4  # was 1,3 — allow 4-bar flags
+FLAG_RETRACE_MAX_PCT = 70.0  # was 50.0 — allow deeper consolidation
+BREAKOUT_VOL_FACTOR = 1.2  # was 1.5 — lower volume confirmation bar
 SLIPPAGE_CENTS = 0.01
 
 MAX_LOSS_PER_TRADE_USD = 50.0      # Paper-Modus konservativ
@@ -170,7 +168,10 @@ MAX_TRADES_PER_DAY = 5             # Cameron sagt 1 für Beginners, 3-5 für ihn
 # MAX_RISK_PCT=8% Filter ergibt: 9 trades (vs 17), $73 PnL (vs $75 — gleich),
 # Win-Rate 78% (vs 67%), MaxDD -$18.78 (vs -$30.63 halbiert), 0 Spirals.
 # Sharpe-like-Ratio +59%.
-MAX_RISK_PCT = 5.0  # Iter 36 (2026-05-14): pilot extended to 167d revealed
+MAX_RISK_PCT = 7.0  # Phase-33 user-override 2026-05-15: 5.0 -> 7.0 to admit
+# wider-stop setups. Backtest-optimum was 5.0; this trades some win-rate
+# for more entries. Revert to 5.0 once "see-some-trades" requirement done.
+# Iter 36 (2026-05-14): pilot extended to 167d revealed
 # 5.5% Sharpe collapses in bad months (Sept 2025: 3-loss cluster).
 # Sharpe-stability across pilots favors 5.0% (range 6-17 vs 5.5% 6-21).
 # 167d sweep:
