@@ -81,7 +81,7 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
 # ─── Cameron-Constants (mirror constraints.yaml) ────────────────────────────
 PRICE_MIN, PRICE_MAX = 2.0, 20.0
-DAILY_GAIN_MIN_PCT = 10.0
+DAILY_GAIN_MIN_PCT = 5.0  # 2026-05-15 user-override: 10 → 5 to widen pool
 RVOL_MIN_PROXY = 5.0  # Cameron-strict (war fälschlich 2.0)
 FLOAT_MAX_SHARES = 10_000_000  # 5. Cameron-Pillar
 CATALYST_REQUIRED = True  # 5. Cameron-Pillar
@@ -243,7 +243,7 @@ TIME_NEW_ENTRIES_START = dtime(9, 35)
 # FAST: Alpaca Snapshot, <1 Sek → 5 Sek Head-Start
 SCAN_HEAD_START_SLOW_SEC = 180  # yfinance scan dauer
 SCAN_HEAD_START_FAST_SEC = 5    # Alpaca snapshot dauer
-RESCAN_SLOW_INTERVAL_MIN = 5    # alle 5 Min finish bei :00, :05, :10, :15, :20...
+RESCAN_SLOW_INTERVAL_MIN = 2    # 2026-05-15 user-override: 5 → 2 (TV-scan every 2 min)
 RESCAN_FAST_INTERVAL_MIN = 1    # alle 1 Min Alpaca-Re-Rank
 RESCAN_FAST_PHASE_END = dtime(10, 30)  # Power-Hour Ende
 
