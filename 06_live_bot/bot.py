@@ -53,11 +53,17 @@ from alpaca.data.timeframe import TimeFrame
 # Phase-31: patch alpaca-py DataStream._run_forever so connection-limit-
 # exceeded errors hit a real backoff instead of hammering Alpaca at 1.6Hz.
 # Idempotent — safe to call on every import (e.g. test collection).
+# Phase-43: also enable the StockDataStream singleton at LIVE bot startup
+# only (NOT auto on import). Tests that just import bot.py get the
+# backoff patch but NOT the singleton, so per-test SDK behavior is
+# preserved. _enable_ws_singleton is called from Bot.run() — see below.
 try:
     from alpaca_ws_patch import install_patch as _install_alpaca_ws_patch
+    from alpaca_ws_patch import enable_ws_singleton as _enable_ws_singleton
     _install_alpaca_ws_patch()
 except Exception as _e:
     logging.getLogger(__name__).warning("alpaca_ws_patch install failed: %s", _e)
+    _enable_ws_singleton = None
 
 # Lokale Module für Verbesserungen
 sys.path.insert(0, str(Path(__file__).parent))
@@ -1905,6 +1911,15 @@ class Bot:
         log.info("=" * 60)
         log.info("CAMERON-BOT START — paper trading")
         log.info("=" * 60)
+        # Phase-43: enable singleton enforcement at LIVE bot startup.
+        # Not auto-installed at import time because tests would inherit
+        # the global behavior and lose ability to construct multiple
+        # StockDataStream instances or test for __init__ errors.
+        if _enable_ws_singleton is not None:
+            try:
+                _enable_ws_singleton()
+            except Exception as _e:
+                log.warning("enable_ws_singleton failed: %s", _e)
 
         # 0. Connection Pre-Check
         try:

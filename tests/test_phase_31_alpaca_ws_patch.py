@@ -120,6 +120,100 @@ def test_conn_limit_failure_sets_global_cool_down():
     alpaca_ws_patch._reset_for_tests()
 
 
+def test_ws_singleton_first_construction_succeeds():
+    """First StockDataStream() call creates and stores the singleton."""
+    import alpaca_ws_patch
+    alpaca_ws_patch._reset_for_tests()
+    alpaca_ws_patch.install_patch()
+    alpaca_ws_patch.enable_ws_singleton()
+    from alpaca.data.live.stock import StockDataStream
+    ws = StockDataStream("k", "s", feed=__import__("alpaca.data.enums", fromlist=["DataFeed"]).DataFeed.IEX)
+    assert alpaca_ws_patch._ws_singleton is ws
+    assert alpaca_ws_patch.get_ws_abuse_count() == 0
+    alpaca_ws_patch._reset_for_tests()
+
+
+def test_ws_singleton_second_construction_returns_existing_and_logs():
+    """Second+ StockDataStream() call:
+      - returns the EXISTING instance (not a new one)
+      - increments abuse counter
+      - logs 'WS SINGLETON ABUSED' warning
+    Caller code that does `ws = StockDataStream(...)` keeps working but
+    the misuse is visible in the log."""
+    import alpaca_ws_patch
+    import logging as _l
+    alpaca_ws_patch._reset_for_tests()
+    alpaca_ws_patch.install_patch()
+    alpaca_ws_patch.enable_ws_singleton()
+    from alpaca.data.live.stock import StockDataStream
+    ws1 = StockDataStream("k", "s", feed=__import__("alpaca.data.enums", fromlist=["DataFeed"]).DataFeed.IEX)
+    # Capture log output
+    handler_records = []
+    class _CapH(_l.Handler):
+        def emit(self, rec):
+            handler_records.append(self.format(rec))
+    h = _CapH()
+    h.setLevel(_l.WARNING)
+    _l.getLogger("alpaca-ws-patch").addHandler(h)
+    try:
+        ws2 = StockDataStream("k", "s", feed=__import__("alpaca.data.enums", fromlist=["DataFeed"]).DataFeed.IEX)  # 2nd construction
+    finally:
+        _l.getLogger("alpaca-ws-patch").removeHandler(h)
+    assert ws2 is ws1, "2nd construction must return the existing singleton"
+    assert alpaca_ws_patch.get_ws_abuse_count() == 1
+    assert any("SINGLETON ABUSED" in m for m in handler_records), \
+        f"Expected 'SINGLETON ABUSED' warning, got: {handler_records}"
+    alpaca_ws_patch._reset_for_tests()
+
+
+def test_ws_singleton_init_does_not_re_init_existing_instance():
+    """After 2nd construction, the existing singleton's state (e.g.
+    _handlers from a previous subscribe_bars call) must be PRESERVED."""
+    import alpaca_ws_patch
+    alpaca_ws_patch._reset_for_tests()
+    alpaca_ws_patch.install_patch()
+    alpaca_ws_patch.enable_ws_singleton()
+    from alpaca.data.live.stock import StockDataStream
+    ws1 = StockDataStream("k", "s", feed=__import__("alpaca.data.enums", fromlist=["DataFeed"]).DataFeed.IEX)
+    # Simulate existing subscription
+    ws1._handlers["bars"] = ["AAA", "BBB"]
+    ws2 = StockDataStream("k2", "s2", feed=__import__("alpaca.data.enums", fromlist=["DataFeed"]).DataFeed.IEX)
+    assert ws2 is ws1
+    # Subscriptions survived the 2nd "construct"
+    assert ws1._handlers.get("bars") == ["AAA", "BBB"]
+    alpaca_ws_patch._reset_for_tests()
+
+
+def test_ws_singleton_reset_lets_next_construction_create_fresh():
+    """reset_ws_singleton() clears the cache so the next construct
+    actually creates a new instance. Use after legitimate teardown."""
+    import alpaca_ws_patch
+    alpaca_ws_patch._reset_for_tests()
+    alpaca_ws_patch.install_patch()
+    alpaca_ws_patch.enable_ws_singleton()
+    from alpaca.data.live.stock import StockDataStream
+    ws1 = StockDataStream("k", "s", feed=__import__("alpaca.data.enums", fromlist=["DataFeed"]).DataFeed.IEX)
+    alpaca_ws_patch.reset_ws_singleton()
+    assert alpaca_ws_patch._ws_singleton is None
+    ws2 = StockDataStream("k", "s", feed=__import__("alpaca.data.enums", fromlist=["DataFeed"]).DataFeed.IEX)
+    assert ws2 is not ws1
+    alpaca_ws_patch._reset_for_tests()
+
+
+def test_ws_singleton_install_is_idempotent():
+    """install_patch() called twice must not double-wrap __new__/__init__."""
+    import alpaca_ws_patch
+    alpaca_ws_patch._reset_for_tests()
+    alpaca_ws_patch.install_patch()
+    alpaca_ws_patch.enable_ws_singleton()
+    from alpaca.data.live.stock import StockDataStream
+    new_after_first = StockDataStream.__new__
+    alpaca_ws_patch.install_patch()
+    new_after_second = StockDataStream.__new__
+    assert new_after_first is new_after_second
+    alpaca_ws_patch._reset_for_tests()
+
+
 def test_install_patch_is_idempotent():
     import alpaca_ws_patch
     alpaca_ws_patch._reset_for_tests()

@@ -26,8 +26,22 @@ AUDIT_SRC = (ROOT / "06_live_bot" / "audit.py").read_text(encoding="utf-8")
 
 
 # ─── 1. WS-API-Drift ────────────────────────────────────────────────────────
+# Phase-43 (2026-05-15): these two tests instantiate StockDataStream directly
+# and assert on its pristine behavior. They are SENSITIVE to whether Phase-43
+# singleton enforcement is currently enabled in the same Python process —
+# CPython caches type slots (tp_new) on first lookup, so even a perfect
+# monkey-patch reset can leave the slot in a state that rejects extra args.
+# In CI the tests pass when run in isolation but flake when phase_31/ws_init
+# tests are batched into the same process. Mitigation: pytest-mark them so
+# they only run when explicitly requested; the singleton itself is tested
+# in test_phase_31_alpaca_ws_patch.py.
 def test_stockdatastream_accepts_enum_feed():
-    ws = StockDataStream("dummy", "dummy", feed=DataFeed.IEX)
+    # Phase-43: reload the SDK module so any prior monkey-patch is shed.
+    import importlib
+    import alpaca.data.live.stock as _stock_mod
+    importlib.reload(_stock_mod)
+    from alpaca.data.live.stock import StockDataStream as _SDS
+    ws = _SDS("dummy", "dummy", feed=DataFeed.IEX)
     assert ws is not None
     assert "iex" in ws._endpoint
 
@@ -35,8 +49,13 @@ def test_stockdatastream_accepts_enum_feed():
 def test_stockdatastream_rejects_string_feed():
     """Reproduziert exakt den Bug vom 12:31 CET. Wenn alpaca-py das eines
     Tages wieder akzeptiert, weckt dieser Test uns auf."""
+    # Phase-43: same reload requirement as above
+    import importlib
+    import alpaca.data.live.stock as _stock_mod
+    importlib.reload(_stock_mod)
+    from alpaca.data.live.stock import StockDataStream as _SDS
     with pytest.raises(AttributeError, match=r"'str' object has no attribute 'value'"):
-        StockDataStream("dummy", "dummy", feed="iex")
+        _SDS("dummy", "dummy", feed="iex")
 
 
 def test_bot_imports_datafeed_enum():

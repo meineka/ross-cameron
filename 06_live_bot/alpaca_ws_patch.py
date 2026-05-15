@@ -27,6 +27,7 @@ Idempotent — calling `install_patch()` twice has no effect.
 from __future__ import annotations
 import asyncio
 import logging
+import threading
 import time
 
 log = logging.getLogger("alpaca-ws-patch")
@@ -55,6 +56,33 @@ CONN_LIMIT_SLEEP_SCHEDULE = [5, 60, 120, 180, 300]  # seconds per consec idx
 # is 60+s per-instance.
 COOL_DOWN_AFTER_CONN_LIMIT_SEC = 90  # > observed Alpaca session-linger (60s)
 _global_cool_down_until: float = 0.0  # time.monotonic() value
+
+# Phase-43 (user request 2026-05-15): "soll der bot nur eine instanz
+# global singleton machen für WS access und der soll auch meckern
+# wenn er missbraucht wird".
+#
+# Why this is the real architectural fix (not another "patch"):
+# bot.py outer ws_loop does:
+#   ws = StockDataStream(...)                # NEW instance every iter
+#   ws.subscribe_bars(on_bar, *symbols)
+#   ws_task = asyncio.to_thread(ws.run)
+#   while ...: if resubscribe_needed: ws.stop_ws(); break
+#   (loop back to top, create ANOTHER new instance)
+#
+# Alpaca's paper account has 1 WS slot per API key. Two simultaneous
+# StockDataStream instances both try to auth → "connection limit
+# exceeded". The previous patches (Phase-31..42) tried to MITIGATE
+# this with backoff + cool-down, but the architectural problem is
+# bot.py spawning multiple instances. Phase-43 enforces the invariant
+# directly: only ONE StockDataStream per process. Misuse is logged
+# loudly so the bot author can see + fix the caller pattern.
+_ws_singleton = None                # the one and only StockDataStream
+_ws_singleton_lock = threading.Lock()
+_ws_abuse_count = 0                  # total duplicate-construct calls caught
+# Originals captured at first enable_ws_singleton() so _reset_for_tests
+# can robustly restore them even if multiple install/reset cycles happen.
+_original_sds_new = None
+_original_sds_init = None
 
 # Phase-35 (user request 2026-05-15): retry cadence on "connection
 # limit exceeded" comes from alpaca_rate_guard.
@@ -199,8 +227,92 @@ def install_patch() -> bool:
     # Save original for potential rollback during tests
     patched_run_forever._unpatched = original  # type: ignore[attr-defined]
     ws_module.DataStream._run_forever = patched_run_forever
+
     _PATCHED = True
     log.info("alpaca-py DataStream._run_forever patched with backoff")
+    return True
+
+
+def enable_ws_singleton() -> bool:
+    """Phase-43: singleton-enforce StockDataStream construction.
+
+    SEPARATE from install_patch() so that test code which imports bot
+    (and thus triggers install_patch()) doesn't also enforce the
+    singleton — many tests legitimately create multiple StockDataStream
+    instances or expect __init__ errors that the singleton would swallow.
+
+    Production: call this once at bot startup, AFTER install_patch().
+    Tests: do NOT call this except in dedicated Phase-43 tests.
+
+    Wraps __new__ + __init__ at class level. Idempotent.
+    """
+    try:
+        from alpaca.data.live.stock import StockDataStream as _SDS
+    except Exception:
+        log.warning("alpaca-py StockDataStream not importable; singleton skipped")
+        return False
+
+    if getattr(_SDS, "_phase43_singleton_installed", False):
+        return True
+
+    global _original_sds_new, _original_sds_init
+    # Capture originals only the FIRST time enable runs in this process.
+    # On re-enable after a _reset_for_tests, we want to wrap the TRUE
+    # originals, not whatever the prior reset left.
+    if _original_sds_new is None:
+        _original_sds_new = _SDS.__dict__.get("__new__", None)
+    if _original_sds_init is None:
+        _original_sds_init = _SDS.__dict__.get("__init__", None)
+    original_new = _SDS.__new__
+    original_init = _SDS.__init__
+
+    def singleton_new(cls, *a, **kw):
+        global _ws_abuse_count
+        with _ws_singleton_lock:
+            if _ws_singleton is not None:
+                _ws_abuse_count += 1
+                # Mark instance so __init__ skips re-init
+                _ws_singleton._phase43_skip_init = True
+                # Caller stack so the abuse is debuggable
+                import traceback as _tb
+                caller = "".join(_tb.format_stack(limit=4)[:-1])
+                log.warning(
+                    "WS SINGLETON ABUSED — duplicate StockDataStream() "
+                    "construction (#%d). Returning existing instance. "
+                    "Caller:\n%s",
+                    _ws_abuse_count, caller,
+                )
+                return _ws_singleton
+            # First construction — let __new__ run. NOTE: we do NOT
+            # cache the singleton here. __init__ might raise (e.g.
+            # invalid feed kwarg), in which case the half-baked
+            # instance would poison the cache. Caching is moved to
+            # singleton_init AFTER original_init() returns cleanly.
+            if original_new is object.__new__:
+                return original_new(cls)
+            return original_new(cls, *a, **kw)
+
+    def singleton_init(self, *a, **kw):
+        global _ws_singleton
+        if getattr(self, "_phase43_skip_init", False):
+            # Clear the flag and short-circuit so we don't
+            # re-init the cached singleton (would reset _handlers
+            # and lose existing subscriptions).
+            self._phase43_skip_init = False
+            return
+        original_init(self, *a, **kw)
+        # Cache ONLY after successful init. If original_init raised,
+        # this line never executes -> no caching of broken instance.
+        with _ws_singleton_lock:
+            if _ws_singleton is None:
+                _ws_singleton = self
+
+    singleton_new._phase43_original = original_new        # type: ignore[attr-defined]
+    singleton_init._phase43_original = original_init      # type: ignore[attr-defined]
+    _SDS.__new__ = singleton_new
+    _SDS.__init__ = singleton_init
+    _SDS._phase43_singleton_installed = True
+    log.info("StockDataStream singleton enforcement installed (Phase-43)")
     return True
 
 
@@ -208,18 +320,58 @@ def is_patched() -> bool:
     return _PATCHED
 
 
+def is_singleton_enabled() -> bool:
+    try:
+        from alpaca.data.live.stock import StockDataStream as _SDS
+        return bool(getattr(_SDS, "_phase43_singleton_installed", False))
+    except Exception:
+        return False
+
+
+def reset_ws_singleton() -> None:
+    """Clear the singleton so the next StockDataStream() construction
+    creates a fresh instance. Call this AFTER intentionally tearing down
+    the live WS (e.g. on HARD_FLAT, bot shutdown). Do NOT call on a
+    transient watchlist resubscribe — that's what Phase-43 protects against."""
+    global _ws_singleton
+    with _ws_singleton_lock:
+        _ws_singleton = None
+
+
+def get_ws_abuse_count() -> int:
+    """How many duplicate-construct calls have been intercepted since
+    process start. Useful for tests + dashboards."""
+    return _ws_abuse_count
+
+
 def _reset_for_tests() -> None:
-    """ONLY for unit tests — restore original."""
-    global _PATCHED, _global_cool_down_until
-    _global_cool_down_until = 0.0  # Phase-42: clear leaked state between tests
-    if not _PATCHED:
-        return
+    """ONLY for unit tests — restore originals."""
+    global _PATCHED, _global_cool_down_until, _ws_singleton, _ws_abuse_count
+    _global_cool_down_until = 0.0
+    _ws_singleton = None
+    _ws_abuse_count = 0
+    # Undo _run_forever patch (Phase-31)
     try:
         from alpaca.data.live import websocket as ws_module
         cur = ws_module.DataStream._run_forever
         original = getattr(cur, "_unpatched", None)
         if original is not None:
             ws_module.DataStream._run_forever = original
+    except Exception:
+        pass
+    # Undo singleton wrapping (Phase-43). CPython caches type slots
+    # (tp_new in particular) and once StockDataStream.__new__ is
+    # monkey-patched, deletion / reassignment can leave the slot in
+    # a state where object.__new__ rejects extra args. The reliable
+    # workaround is to RELOAD the module so the class is freshly
+    # constructed from source — this fully clears the slot cache.
+    try:
+        from alpaca.data.live.stock import StockDataStream as _SDS
+        if getattr(_SDS, "_phase43_singleton_installed", False):
+            _SDS._phase43_singleton_installed = False
+            import importlib
+            import alpaca.data.live.stock as _stock_mod
+            importlib.reload(_stock_mod)
     except Exception:
         pass
     _PATCHED = False
