@@ -1,20 +1,37 @@
 # Cameron-Bot — AI Handoff Package
 
-**Datum:** 2026-05-14 (post-Phase-7)  
-**Status:** Paper-trading prototype with broker-state-machine fixes  
-**Quality:** 554 tests passing (3 skipped, 1 warning) — local-verified
+**Datum:** 2026-05-15 (post-Phase-20)
+**Status:** Paper-trading prototype with broker-state-machine + multi-bot
+guard + tiered test gates
+**Quality:** **630 tests collected** / **629 passed, 1 skipped**
+(local-verified, full suite). Per-file inventory + review-status see
+`docs/TEST_MANIFEST.md`.
 
 ⚠️ **NOT cleared for live trading with real money.**
-P2.x is **PARTIAL / IN PROGRESS:**
+
+P2.x is **SUBSTANTIALLY COMPLETE** as of Phase 17:
 - ✅ FakeBroker module + 7 golden-scenario parity tests on Bot.manage_position
-- ⏳ ReplayBot still drives its own _manage simulation rather than the
-  FakeBroker order-lifecycle. Per ChatGPT-Review 14:36-answer: P2.x is
-  not "done" until ReplayBot ALSO uses the same broker-execution layer
-  as live (currently they diverge on partial-fill / rejected-exit /
-  protection-repair semantics).
-- Phases 1-7 of Review-V2 are committed (all P0 + 7/8 P1 + initial P2.x).
-- Remaining: shared BrokerExecutorProtocol that BOTH Bot AND ReplayBot
-  drive through.
+- ✅ Phase 8-11: ReplayBot routes entries + exits through the SAME
+  FakeBroker / AlpacaExecutor order-lifecycle as live Bot.
+- ✅ Phase 17: dropped-stop repair, exit-rejected fallback,
+  stale-quote rejection, BE-stop after T1 — all 7 Golden Scenarios
+  (from ChatGPT-12:52) now covered.
+
+P0 + P1 gates after Phase 18-20:
+- ✅ Phase 18 (P0): single-bot-process classifier blocks restarts on
+  `multiple_independent_bots`. Watchdog refuses spawn.
+- ✅ Phase 19 (P1): pytest markers `smoke`/`critical`/`integration`/
+  `slow`/`full`. `run_quality_gates.py --fast` runs critical only
+  (~35 tests, ~3 s) — Claude-loop friendly.
+- ✅ Phase 20 (P1): machine-readable test manifest at
+  `docs/TEST_MANIFEST.md` with per-file count / category / review-
+  status / source-grep detection.
+
+Open work (P1, no P0 blockers):
+- #3 from ChatGPT-08:49: structured per-call logging for yfinance /
+  Alpaca / preflight (status, error-class, latency).
+- #4 from ChatGPT-08:49: dedicated `order_lifecycle.jsonl` with
+  intent → submitted → accepted/rejected → filled/partial → protection.
 
 ## Was ist das?
 
