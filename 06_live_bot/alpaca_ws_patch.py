@@ -38,6 +38,14 @@ BASE_SLEEP_SEC = 2.0
 CAP_SLEEP_SEC = 60.0
 RESET_SLOT_SEC = 30.0  # minimum sleep on "connection limit exceeded"
 
+# Phase-41 (2026-05-15): empirical Alpaca-paper-account session-linger
+# is > 60s — exponential ramp 5/10/20/40s kept the slot locked because
+# each retry reset Alpaca's server-side timer BEFORE it expired.
+# Explicit schedule guarantees gaps wider than the linger window
+# starting on the second attempt. Cost: ~1.5 attempts/min during a
+# stall, well under the 200/min rate cap.
+CONN_LIMIT_SLEEP_SCHEDULE = [5, 60, 120, 180, 300]  # seconds per consec idx
+
 # Phase-35 (user request 2026-05-15): retry cadence on "connection
 # limit exceeded" comes from alpaca_rate_guard.
 #
@@ -127,22 +135,18 @@ def install_patch() -> bool:
                     pass
                 self._running = False
                 # Pick sleep duration / retry strategy.
-                # Phase-38 removed the self-locking probe but kept a
-                # hardcoded 5s retry on connection-limit-exceeded. Phase-39
-                # (2026-05-15) recognises that ANY connect attempt also
-                # holds Alpaca's slot for ~30s server-side, so retrying
-                # every 5s is itself a slot-lock loop. Exponential backoff
-                # honours the user's "5s as first retry" spec but lets the
-                # server actually release on persistent failure.
+                # Phase-41 (2026-05-15): use the explicit schedule
+                # CONN_LIMIT_SLEEP_SCHEDULE. Empirical observation:
+                # Alpaca-paper session-linger is > 60s, so the previous
+                # exponential ramp 5/10/20/40s kept resetting the
+                # server-side timer. New schedule: 5s first (per user
+                # spec "alle 5 Sekunden" for first stall-detection
+                # attempt), then jumps to 60/120/180/300s to guarantee
+                # gap > linger.
                 msg = str(e)
                 if "connection limit" in msg.lower():
-                    base = float(ALPACA_STALL_PROBE_INTERVAL_SEC) \
-                        if _STALL_PROBE_AVAILABLE else 5.0
-                    # First retry: 5s (= ALPACA_STALL_PROBE_INTERVAL_SEC).
-                    # Then 10, 20, 40, 60 (capped) — gives Alpaca time
-                    # to fully clear the session-linger before next attempt.
-                    sleep_for = min(CAP_SLEEP_SEC,
-                                     base * (2 ** consec_value_errors))
+                    idx = min(consec_value_errors, len(CONN_LIMIT_SLEEP_SCHEDULE) - 1)
+                    sleep_for = float(CONN_LIMIT_SLEEP_SCHEDULE[idx])
                 elif is_value:
                     sleep_for = min(CAP_SLEEP_SEC,
                                      BASE_SLEEP_SEC * (2 ** consec_value_errors))
