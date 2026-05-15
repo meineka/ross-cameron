@@ -4,14 +4,14 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 72
-- **Total `def test_*` functions**: 761
+- **Total files**: 73
+- **Total `def test_*` functions**: 771
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 279 |
+| critical | 289 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 576 |
+| not_reviewed | 586 |
 | partially_reviewed | 85 |
 | reviewed | 100 |
 
@@ -56,6 +56,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 - `test_phase_34_ws_health_probe.py`
 - `test_phase_35_alpaca_rate_guard.py`
 - `test_phase_36_provider_alerts.py`
+- `test_phase_53_guarded_alpaca.py`
 - `test_postmortem_20260512.py`
 - `test_pump_dump_filter_bugs.py`
 - `test_review_fixes_p0.py`
@@ -112,6 +113,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_phase_34_ws_health_probe.py` | 8 | critical | yes | not_reviewed | Phase-34: bot_ws health probe scans bot.log for WS reconnect storms. |
 | `test_phase_35_alpaca_rate_guard.py` | 12 | critical | yes | not_reviewed | Phase-35: Alpaca rate-guard + 5-sec stall-probe. |
 | `test_phase_36_provider_alerts.py` | 9 | critical | yes | not_reviewed | Phase-36: 1m bars + provider-explicit STALL/OK alert titles. |
+| `test_phase_53_guarded_alpaca.py` | 10 | critical | yes | not_reviewed | Phase-53: GuardedTradingClient + GuardedStockHistoricalDataClient. |
 | `test_pilot_baseline.py` | 3 | replay | no | partially_reviewed | Pilot-Stats Regression: Backtest-Output darf nicht von Baseline abweichen. |
 | `test_position_recovery_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 6 (2026-05-12): position_recovery.recover_or_flatten robustness. |
 | `test_position_size_multipliers.py` | 12 | unit | no | not_reviewed | Audit-Iter 15 (2026-05-12): compute_position_size multiplier stacking. |

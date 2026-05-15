@@ -60,12 +60,21 @@ def load_top_symbols(n: int = 3) -> list[str]:
 
 
 def get_clients():
+    """Phase-53: guarded clients (RateGuard + alpaca_api_calls.jsonl)
+    instead of raw SDK clients. Falls back to raw if guarded module
+    not available."""
     from secrets_loader import get_alpaca_keys
-    from alpaca.trading.client import TradingClient
-    from alpaca.data.historical import StockHistoricalDataClient
     k, s = get_alpaca_keys()
-    return (TradingClient(k, s, paper=True),
-            StockHistoricalDataClient(k, s))
+    try:
+        from guarded_alpaca import (
+            GuardedTradingClient, GuardedStockHistoricalDataClient)
+        return (GuardedTradingClient(k, s, paper=True),
+                GuardedStockHistoricalDataClient(k, s))
+    except Exception:
+        from alpaca.trading.client import TradingClient
+        from alpaca.data.historical import StockHistoricalDataClient
+        return (TradingClient(k, s, paper=True),
+                StockHistoricalDataClient(k, s))
 
 
 def get_snapshot_price(data_client, symbol: str) -> float | None:

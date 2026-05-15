@@ -65,6 +65,20 @@ except Exception as _e:
     logging.getLogger(__name__).warning("alpaca_ws_patch install failed: %s", _e)
     _enable_ws_singleton = None
 
+# Phase-53 (2026-05-15, ChatGPT-review P0): every TradingClient and
+# StockHistoricalDataClient instantiation now routes through the
+# guarded wrappers (process-global RateGuard + alpaca_api_calls.jsonl).
+# Drop-in replacement — same constructor signature.
+try:
+    from guarded_alpaca import (
+        GuardedTradingClient as _GuardedTC,
+        GuardedStockHistoricalDataClient as _GuardedDC,
+    )
+except Exception as _e:
+    logging.getLogger(__name__).warning("guarded_alpaca import failed: %s", _e)
+    _GuardedTC = TradingClient   # fallback to raw client
+    _GuardedDC = StockHistoricalDataClient
+
 # Lokale Module für Verbesserungen
 sys.path.insert(0, str(Path(__file__).parent))
 from pre_flight import run_preflight
@@ -638,7 +652,7 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
             api_key = os.environ.get("APCA_API_KEY_ID", "")
             api_secret = os.environ.get("APCA_API_SECRET_KEY", "")
             if api_key and api_secret and yfinance_missing_symbols:
-                data_client = StockHistoricalDataClient(api_key, api_secret)
+                data_client = _GuardedDC(api_key, api_secret)
                 missing_list = sorted(yfinance_missing_symbols)
                 # Alpaca caps batch sizes too — chunk
                 alpaca_results = []
@@ -778,7 +792,7 @@ def _run_premarket_v2_shadow(all_cands, top_n: int) -> None:
             merge_premarket_rvol_into_rows,
         )
         k, s = get_alpaca_keys()
-        dc = StockHistoricalDataClient(k, s)
+        dc = _GuardedDC(k, s)
     except Exception as e:
         log.info("premarket-v2 shadow: deps unavailable (%s) — skipped", e)
         return
@@ -1118,7 +1132,7 @@ class _NullTradeLogger:
 class AlpacaExecutor:
     def __init__(self, api_key: str, api_secret: str, paper: bool = True, dry_run: bool = False):
         self.dry_run = dry_run
-        self.client = TradingClient(api_key, api_secret, paper=paper)
+        self.client = _GuardedTC(api_key, api_secret, paper=paper)
         if dry_run:
             log.info("DRY-RUN mode: no orders submitted")
         # Phase-26: default to null loggers; Bot.__init__ injects real ones.
@@ -2188,7 +2202,7 @@ class Bot:
             return True, "safe_bracket-not-importable"
         try:
             from alpaca.data.requests import StockSnapshotRequest
-            data_client = StockHistoricalDataClient(self.api_key, self.api_secret)
+            data_client = _GuardedDC(self.api_key, self.api_secret)
             req = StockSnapshotRequest(symbol_or_symbols=[symbol])
             snaps = data_client.get_stock_snapshot(req)
             snap = snaps.get(symbol) if isinstance(snaps, dict) else None
@@ -2208,7 +2222,7 @@ class Bot:
             symbols = list(self.tickers.keys())
             if not symbols:
                 return
-            data_client = StockHistoricalDataClient(self.api_key, self.api_secret)
+            data_client = _GuardedDC(self.api_key, self.api_secret)
             req = StockSnapshotRequest(symbol_or_symbols=symbols)
             snaps = data_client.get_stock_snapshot(req)
             log.info("FAST RESCAN @ %s — Alpaca-snapshot for %d symbols",
@@ -3133,7 +3147,7 @@ def check_connection():
         return False
     try:
         from alpaca.trading.client import TradingClient
-        client = TradingClient(api_key, api_secret, paper=True)
+        client = _GuardedTC(api_key, api_secret, paper=True)
         acc = client.get_account()
         print(f"  Status:        {acc.status}")
         print(f"  Equity:        ${float(acc.equity):,.2f}")
@@ -3160,7 +3174,7 @@ def status_check():
         print("FAIL: APCA_API_KEY_ID + APCA_API_SECRET_KEY nicht gesetzt")
         return
     from alpaca.trading.client import TradingClient
-    client = TradingClient(api_key, api_secret, paper=True)
+    client = _GuardedTC(api_key, api_secret, paper=True)
     acc = client.get_account()
     print(f"=== ACCOUNT ===")
     print(f"  Equity: ${float(acc.equity):,.2f}")
@@ -3242,14 +3256,14 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
     # Audit-Iter 6: return-value checken, bei FAILED nicht weiterstarten.
     try:
         from alpaca.trading.client import TradingClient
-        _rc = recover_or_flatten(TradingClient(api_key, api_secret, paper=True))
+        _rc = recover_or_flatten(_GuardedTC(api_key, api_secret, paper=True))
         if _rc == -1:
             log.error("=" * 60)
             log.error("POSITION-RECOVERY FAILED — bot wartet 5min und versucht erneut")
             log.error("=" * 60)
             await asyncio.sleep(300)
             # Zweiter Versuch
-            _rc = recover_or_flatten(TradingClient(api_key, api_secret, paper=True))
+            _rc = recover_or_flatten(_GuardedTC(api_key, api_secret, paper=True))
             if _rc == -1:
                 log.error("RECOVERY-RETRY auch failed — daemon aborts (manuell prüfen!)")
                 return
@@ -3269,7 +3283,7 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
         _alerter = make_alerter()
         if _alerter is not None:
             try:
-                _eq = float(TradingClient(api_key, api_secret, paper=True).get_account().equity)
+                _eq = float(_GuardedTC(api_key, api_secret, paper=True).get_account().equity)
             except Exception:
                 _eq = 0.0
             _alerter.send(
