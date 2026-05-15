@@ -100,13 +100,17 @@ def test_patched_loop_handles_connection_limit_exceeded():
 
     asyncio.run(run_test())
 
-    # Phase-38 assertion: backoff sleep on connection-limit is 5s
-    # (= ALPACA_STALL_PROBE_INTERVAL_SEC), not 30+ seconds. NO
-    # separate probe ws is spawned.
+    # Phase-39 assertion: first backoff = 5s (= ALPACA_STALL_PROBE_INTERVAL_SEC,
+    # honours user-spec "alle 5 Sekunden"). Second backoff doubles
+    # (10s, 20s, 40s, 60s capped) so Alpaca's server-side session
+    # linger (~30s) gets time to expire on persistent failure.
     backoff_sleeps = [s for s in sleeps if s >= 1.0]
-    assert backoff_sleeps, "no backoff sleep emitted"
+    assert len(backoff_sleeps) >= 2, f"expected >=2 backoff sleeps, got {backoff_sleeps}"
     assert backoff_sleeps[0] == 5.0, \
-        f"expected 5s retry on conn-limit, got {backoff_sleeps[0]}s"
+        f"expected 5s on FIRST conn-limit retry, got {backoff_sleeps[0]}s"
+    assert backoff_sleeps[1] >= backoff_sleeps[0], (
+        f"expected monotonic backoff increase, got {backoff_sleeps[:2]}"
+    )
     alpaca_ws_patch._reset_for_tests()
 
 

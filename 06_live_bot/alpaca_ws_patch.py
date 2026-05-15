@@ -127,22 +127,22 @@ def install_patch() -> bool:
                     pass
                 self._running = False
                 # Pick sleep duration / retry strategy.
-                # Phase-38 (2026-05-15): the Phase-35 probe-every-5s
-                # logic was REMOVED — it was self-defeating. Each probe
-                # opened its OWN _connect+_auth, briefly held the slot,
-                # then closed. Alpaca holds the slot ~30s server-side
-                # post-close, so the next probe always saw it locked
-                # again. We were locking the slot we were trying to
-                # check. Direct retries on the existing ws instance
-                # (next while-true iteration) re-use any handshake state
-                # without spawning extra WS clients.
+                # Phase-38 removed the self-locking probe but kept a
+                # hardcoded 5s retry on connection-limit-exceeded. Phase-39
+                # (2026-05-15) recognises that ANY connect attempt also
+                # holds Alpaca's slot for ~30s server-side, so retrying
+                # every 5s is itself a slot-lock loop. Exponential backoff
+                # honours the user's "5s as first retry" spec but lets the
+                # server actually release on persistent failure.
                 msg = str(e)
                 if "connection limit" in msg.lower():
-                    # User-spec: 5s retry cadence, but DIRECTLY on this
-                    # ws instance — no separate probe. RESET_SLOT_SEC
-                    # (was 30s) is too long if we're polite about it.
-                    sleep_for = float(ALPACA_STALL_PROBE_INTERVAL_SEC) \
-                        if _STALL_PROBE_AVAILABLE else 30.0
+                    base = float(ALPACA_STALL_PROBE_INTERVAL_SEC) \
+                        if _STALL_PROBE_AVAILABLE else 5.0
+                    # First retry: 5s (= ALPACA_STALL_PROBE_INTERVAL_SEC).
+                    # Then 10, 20, 40, 60 (capped) — gives Alpaca time
+                    # to fully clear the session-linger before next attempt.
+                    sleep_for = min(CAP_SLEEP_SEC,
+                                     base * (2 ** consec_value_errors))
                 elif is_value:
                     sleep_for = min(CAP_SLEEP_SEC,
                                      BASE_SLEEP_SEC * (2 ** consec_value_errors))
