@@ -1919,11 +1919,14 @@ class Bot:
         # on the phone that the bot is live + connected + ready to trade.
         # Sent AFTER Alpaca-Connection OK so an offline broker doesn't
         # produce a false-positive "bot started" push.
+        # Phase-40 fix (user-spotted 2026-05-15): NtfyAlerter prepends
+        # "[LEVEL] " to titles already, so a manual "[INFO]" produced
+        # "[INFO] [INFO] Bot started" — duplicate prefix on the phone.
         if getattr(self, "alerter", None) is not None:
             try:
                 self.alerter.send(
                     "info",
-                    "[INFO] Bot started",
+                    "Bot started",   # alerter adds "[INFO] " prefix
                     body=f"Cameron-Bot live — equity ${equity:,.2f}",
                     force=True,
                 )
