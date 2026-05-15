@@ -53,6 +53,12 @@ PROBE_THRESHOLDS = {
     "catalyst_news": 1,  # immediate alert on news API broken
 }
 
+# Phase-25d (user request): re-fire alert every RE_FIRE_AFTER_SEC if the
+# probe is STILL failing. Without this, a long outage produces 1 push and
+# then radio silence. With this, you get a "still failing 1h later" push,
+# then 2h, etc. — so you can't accidentally miss that the bot's deaf.
+RE_FIRE_AFTER_SEC = 3600  # 1 h
+
 
 class ProbeResult:
     __slots__ = ("name", "ok", "detail", "value")
@@ -66,14 +72,19 @@ class ProbeResult:
 
 class HealthMonitor:
     def __init__(self, *, alerter, interval_sec: int = CHECK_INTERVAL_SEC,
-                  n_consecutive: int = N_CONSECUTIVE_FAILURES):
+                  n_consecutive: int = N_CONSECUTIVE_FAILURES,
+                  re_fire_after_sec: int = RE_FIRE_AFTER_SEC):
         self.alerter = alerter
         self.interval_sec = interval_sec
         self.n_consecutive = n_consecutive
+        self.re_fire_after_sec = re_fire_after_sec
         # Per-probe failure streak counter
         self._streak: dict[str, int] = {}
         # Per-probe last-alerted flag (so we can fire a "recovered" alert)
         self._alerted: dict[str, bool] = {}
+        # Phase-25d: per-probe timestamp of last failure-alert so we can
+        # re-fire every re_fire_after_sec while the probe keeps failing.
+        self._last_alert_ts: dict[str, float] = {}
 
     # ─── Individual probes ─────────────────────────────────────────────────
     def probe_heartbeat(self) -> ProbeResult:
@@ -197,12 +208,22 @@ class HealthMonitor:
 
     def _handle_result(self, r: ProbeResult) -> None:
         name = r.name
+        now = time.time()
         if r.ok:
             # If we'd alerted on this probe and it's now back, fire a recovered note
             if self._alerted.get(name):
+                # Phase-25d: include how long the outage lasted in the recovery push
+                outage_min = None
+                first_alert = self._last_alert_ts.get(name)
+                if first_alert:
+                    outage_min = int((now - first_alert) / 60)
+                body = f"Probe {name} is healthy again: {r.detail}"
+                if outage_min is not None:
+                    body += f"\n\nOutage lasted ~{outage_min} min."
                 self.alerter.send("info", f"recovered: {name}",
-                                   body=f"Probe {name} is healthy again: {r.detail}")
+                                   body=body, force=True)
                 self._alerted[name] = False
+                self._last_alert_ts.pop(name, None)
             self._streak[name] = 0
             return
         # Failure
@@ -211,13 +232,35 @@ class HealthMonitor:
         # Phase-25c: per-probe threshold. Yahoo/Alpaca/news fire on first
         # failure (n=1); heartbeat/audit on second (n=2) to suppress blips.
         threshold = PROBE_THRESHOLDS.get(name, self.n_consecutive)
-        if streak >= threshold and not self._alerted.get(name):
+        if streak < threshold:
+            return
+        # Phase-25d: decide whether to push. Two cases trigger:
+        #   (a) First time we hit threshold and haven't alerted yet.
+        #   (b) Probe still failing and last alert was > re_fire_after_sec ago.
+        last_alert = self._last_alert_ts.get(name)
+        should_fire = False
+        if not self._alerted.get(name):
+            should_fire = True  # first push for this outage
+            title_prefix = ""
+        elif last_alert and (now - last_alert) >= self.re_fire_after_sec:
+            should_fire = True  # re-fire after re_fire_after_sec
+            title_prefix = "still "
+        else:
+            title_prefix = ""
+
+        if should_fire:
             level = "critical" if name in ("alpaca", "audit") else "error"
+            duration_min = int((now - last_alert) / 60) if last_alert else 0
+            extra = (f"\n\n(continuously failing for ~{duration_min} min — "
+                     f"re-fire every {self.re_fire_after_sec // 60} min)"
+                     if last_alert else "")
             self.alerter.send(
-                level, f"{name} unhealthy",
-                body=f"Probe {name} failed {streak}x in a row (threshold={threshold}): {r.detail}",
+                level, f"{title_prefix}{name} unhealthy",
+                body=f"Probe {name} failed {streak}x in a row (threshold={threshold}): {r.detail}{extra}",
+                force=True,  # bypass alerter-level debounce; this monitor IS the gate
             )
             self._alerted[name] = True
+            self._last_alert_ts[name] = now
 
     def run(self) -> None:
         log.info("HEALTH-MONITOR START — interval=%ds, alert-after-%d-consecutive",

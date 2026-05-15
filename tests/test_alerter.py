@@ -15,6 +15,7 @@ Tests cover:
 from __future__ import annotations
 import json
 import sys
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -354,13 +355,15 @@ def test_health_monitor_heartbeat_still_needs_two_failures(tmp_path):
 
 
 def test_health_monitor_alert_does_not_repeat_while_failing(tmp_path):
-    """Once we've alerted, we don't re-alert every tick — only on
-    a recovered-then-fail transition. Prevents spam."""
+    """Phase-25d: WITHIN re_fire_after_sec window, no re-alert. After
+    re_fire_after_sec elapsed → push again ("still X unhealthy")."""
     from health_monitor import HealthMonitor, ProbeResult
     from alerter import LogAlerter
     alerts_log = tmp_path / "alerts.log"
     a = LogAlerter(path=alerts_log, suppress_seconds=0)
-    mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=1)
+    # Huge re_fire window so the 5-tick burst stays within it
+    mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=1,
+                         re_fire_after_sec=3600)
     mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
     mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
     mon.probe_yfinance = lambda: ProbeResult("yfinance", False, "still bad")
@@ -371,3 +374,87 @@ def test_health_monitor_alert_does_not_repeat_while_failing(tmp_path):
     rows = _lines(alerts_log)
     # Only ONE yfinance-unhealthy alert despite 5 consecutive failures
     assert sum(1 for r in rows if "yfinance unhealthy" in r["title"]) == 1
+
+
+def test_health_monitor_re_fires_after_re_fire_window(tmp_path):
+    """Phase-25d: if probe keeps failing for >re_fire_after_sec, a second
+    push fires with title 'still X unhealthy'. This is the user's
+    'alle 1h neue failure' requirement."""
+    from health_monitor import HealthMonitor, ProbeResult
+    from alerter import LogAlerter
+    alerts_log = tmp_path / "alerts.log"
+    a = LogAlerter(path=alerts_log, suppress_seconds=0)
+    # Tiny re_fire window (0.1 sec) so the test runs fast
+    mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=1,
+                         re_fire_after_sec=1)  # 1 second
+    mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
+    mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
+    mon.probe_yfinance = lambda: ProbeResult("yfinance", False, "still bad")
+    mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
+    mon.run_once()  # first failure → first push
+    time.sleep(1.2)  # wait past re_fire window
+    mon.run_once()  # second failure → re-fire
+    rows = _lines(alerts_log)
+    titles = [r["title"] for r in rows if "yfinance" in r["title"]]
+    assert any(t == "yfinance unhealthy" for t in titles)
+    assert any(t == "still yfinance unhealthy" for t in titles)
+
+
+def test_health_monitor_recovery_resets_re_fire(tmp_path):
+    """Phase-25d: recovery clears _last_alert_ts so the next failure
+    cycle starts fresh ('recovered' info push + next failure pushes
+    immediately, not subject to old re_fire window)."""
+    from health_monitor import HealthMonitor, ProbeResult
+    from alerter import LogAlerter
+    alerts_log = tmp_path / "alerts.log"
+    a = LogAlerter(path=alerts_log, suppress_seconds=0)
+    mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=1,
+                         re_fire_after_sec=3600)
+    # Probe toggles: bad, bad, good, bad
+    states = iter([False, False, True, False])
+    def yf():
+        return ProbeResult("yfinance",
+                            next(states),
+                            "v1" if True else "")
+    mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
+    mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
+    mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
+    mon.probe_yfinance = yf
+    mon.run_once()  # fail 1 → push "yfinance unhealthy"
+    mon.run_once()  # fail 2 → no push (within re_fire window)
+    mon.run_once()  # good → "recovered: yfinance" info
+    mon.run_once()  # fail 3 → fresh push "yfinance unhealthy" (not "still")
+    rows = _lines(alerts_log)
+    titles = [r["title"] for r in rows]
+    assert titles.count("yfinance unhealthy") == 2  # two fresh failure cycles
+    assert any("recovered: yfinance" in t for t in titles)
+    assert not any("still yfinance" in t for t in titles)  # recovery reset the timer
+
+
+def test_health_monitor_recovery_push_includes_outage_duration(tmp_path):
+    """Phase-25d: 'recovered' push body mentions how long the outage lasted."""
+    from health_monitor import HealthMonitor, ProbeResult
+    from alerter import LogAlerter
+    alerts_log = tmp_path / "alerts.log"
+    a = LogAlerter(path=alerts_log, suppress_seconds=0)
+    mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=1,
+                         re_fire_after_sec=3600)
+    state = {"ok": False}
+    def yf():
+        return ProbeResult("yfinance", state["ok"],
+                            "ok" if state["ok"] else "down")
+    mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
+    mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
+    mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
+    mon.probe_yfinance = yf
+    mon.run_once()  # fail → push
+    time.sleep(0.05)
+    state["ok"] = True
+    mon.run_once()  # recover → push with duration
+    rows = _lines(alerts_log)
+    recovered = next(r for r in rows if "recovered: yfinance" in r["title"])
+    # Body should mention "Outage lasted"
+    assert "Outage lasted" in recovered["body"]
