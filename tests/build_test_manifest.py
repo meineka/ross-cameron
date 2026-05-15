@@ -55,6 +55,15 @@ REVIEW_STATUS_OVERRIDES = {
     # Phase-19 test-gate infrastructure
     "test_pilot_baseline.py": "partially_reviewed",
     "test_replay_regression.py": "partially_reviewed",
+    # Phase-21 smoke gate + manifest freshness
+    "test_smoke_imports.py": "reviewed",
+    "test_manifest_freshness.py": "reviewed",
+    # Phase-21 critical promotions
+    "test_safe_bracket_fix.py": "partially_reviewed",
+    "test_safe_bracket_status_bugs.py": "partially_reviewed",
+    "test_manage_position_pnl_bugs.py": "partially_reviewed",
+    # Phase-22 structured logging
+    "test_structured_logger.py": "reviewed",
 }
 
 
