@@ -1915,6 +1915,21 @@ class Bot:
             log.error("Alpaca-Connection FAIL: %s", e, exc_info=True)
             return
 
+        # Phase-37 (user request 2026-05-15): startup push so user knows
+        # on the phone that the bot is live + connected + ready to trade.
+        # Sent AFTER Alpaca-Connection OK so an offline broker doesn't
+        # produce a false-positive "bot started" push.
+        if getattr(self, "alerter", None) is not None:
+            try:
+                self.alerter.send(
+                    "info",
+                    "[INFO] Bot started",
+                    body=f"Cameron-Bot live — equity ${equity:,.2f}",
+                    force=True,
+                )
+            except Exception as _e:
+                log.debug("startup push failed: %s", _e)
+
         # 0a. #6 SPY-Trend-Filter
         spy_pct = await asyncio.to_thread(fetch_spy_today_pct)
         self.day.spy_pct_today = spy_pct
