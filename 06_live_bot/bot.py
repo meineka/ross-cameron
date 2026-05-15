@@ -123,9 +123,14 @@ POST_POWER_SIZE_MULT = 1.0
 TOP_N = 10
 TIMEFRAME = "5Min"
 
-# Bar-Aggregation: WS gibt 1-Min, Cameron tradet 5-Min-Charts.
-# Pattern + Pole/Flag-Thresholds sind für 5-Min kalibriert.
-BAR_AGGREGATION_MINUTES = 5
+# Bar-Aggregation: Alpaca-WS liefert 1-Min Bars.
+# Phase-36 (2026-05-15, user-override): 5 → 1.
+# User-Rationale: "mit tradingview daten sollte das ganze auch in 1m
+# bereich funktionieren" — see-some-trades-mode lebt von Velocity,
+# 5-Min ist zu langsam für die heutigen kleineren Setups. Pattern-
+# Thresholds in Phase-33 schon gelockert; 1-Min ist die natürliche
+# Fortsetzung. Backtest-Optimum (5-Min) ist in Code-Kommentar dokumentiert.
+BAR_AGGREGATION_MINUTES = 1
 
 # Phase-33 (2026-05-15) USER OVERRIDE: "thresholds runter — ich will ein
 # paar trades sehen". Loosened pattern selection from Cameron-strict to

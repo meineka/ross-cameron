@@ -262,7 +262,8 @@ def test_health_monitor_fires_after_n_consecutive_failures(tmp_path):
     mon.run_once()
     rows = _lines(alerts_log)
     assert len(rows) == 1
-    assert "heartbeat" in rows[0]["title"]
+    # Phase-36: heartbeat → "BOT FROZEN"
+    assert "BOT FROZEN" in rows[0]["title"] or "heartbeat" in rows[0]["title"].lower()
     assert rows[0]["level"] in ("error", "critical")
 
 
@@ -288,8 +289,9 @@ def test_health_monitor_sends_recovered_on_back_to_ok(tmp_path):
     state["fail"] = False
     mon.run_once()  # recovers, info-alert
     rows = _lines(alerts_log)
-    assert any("yfinance unhealthy" in r["title"] for r in rows)
-    assert any("recovered" in r["title"] for r in rows)
+    # Phase-36 provider-explicit titles: "YAHOO DOWN" / "YAHOO OK again"
+    assert any("YAHOO DOWN" in r["title"] for r in rows)
+    assert any("YAHOO OK again" in r["title"] for r in rows)
 
 
 def test_health_monitor_yfinance_fires_on_first_failure(tmp_path):
@@ -310,12 +312,13 @@ def test_health_monitor_yfinance_fires_on_first_failure(tmp_path):
     mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
     mon.probe_yfinance = lambda: ProbeResult("yfinance", False, "rate-limited")
     mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_bot_ws = lambda: ProbeResult("bot_ws", True, "stub-ok")
     mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
     # ONE tick should fire because yfinance threshold = 1
     mon.run_once()
     rows = _lines(alerts_log)
-    assert any("yfinance unhealthy" in r["title"] for r in rows), \
-        "yfinance must alert on FIRST failure, not wait for 2"
+    assert any("YAHOO DOWN" in r["title"] for r in rows), \
+        "yfinance must alert on FIRST failure with provider-explicit title"
 
 
 def test_health_monitor_alpaca_fires_on_first_failure(tmp_path):
@@ -329,10 +332,11 @@ def test_health_monitor_alpaca_fires_on_first_failure(tmp_path):
     mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
     mon.probe_yfinance = lambda: ProbeResult("yfinance", True, "fresh")
     mon.probe_alpaca = lambda: ProbeResult("alpaca", False, "account inactive")
+    mon.probe_bot_ws = lambda: ProbeResult("bot_ws", True, "stub-ok")
     mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
     mon.run_once()
     rows = _lines(alerts_log)
-    assert any("alpaca unhealthy" in r["title"] for r in rows)
+    assert any("ALPACA STALLED" in r["title"] for r in rows)
 
 
 def test_health_monitor_heartbeat_still_needs_two_failures(tmp_path):
@@ -346,13 +350,14 @@ def test_health_monitor_heartbeat_still_needs_two_failures(tmp_path):
     mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
     mon.probe_yfinance = lambda: ProbeResult("yfinance", True, "fresh")
     mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_bot_ws = lambda: ProbeResult("bot_ws", True, "stub-ok")
     mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
     mon.run_once()  # streak=1, no alert
     rows1 = _lines(alerts_log) if alerts_log.exists() else []
-    assert not any("heartbeat unhealthy" in r["title"] for r in rows1)
+    assert not any("BOT FROZEN" in r["title"] for r in rows1)
     mon.run_once()  # streak=2, alert
     rows2 = _lines(alerts_log)
-    assert any("heartbeat unhealthy" in r["title"] for r in rows2)
+    assert any("BOT FROZEN" in r["title"] for r in rows2)
 
 
 def test_health_monitor_alert_does_not_repeat_while_failing(tmp_path):
@@ -369,12 +374,13 @@ def test_health_monitor_alert_does_not_repeat_while_failing(tmp_path):
     mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
     mon.probe_yfinance = lambda: ProbeResult("yfinance", False, "still bad")
     mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_bot_ws = lambda: ProbeResult("bot_ws", True, "stub-ok")
     mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
     for _ in range(5):
         mon.run_once()
     rows = _lines(alerts_log)
-    # Only ONE yfinance-unhealthy alert despite 5 consecutive failures
-    assert sum(1 for r in rows if "yfinance unhealthy" in r["title"]) == 1
+    # Only ONE YAHOO DOWN alert despite 5 consecutive failures
+    assert sum(1 for r in rows if "YAHOO DOWN" in r["title"]) == 1
 
 
 def test_health_monitor_re_fires_after_re_fire_window(tmp_path):
@@ -392,14 +398,15 @@ def test_health_monitor_re_fires_after_re_fire_window(tmp_path):
     mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
     mon.probe_yfinance = lambda: ProbeResult("yfinance", False, "still bad")
     mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_bot_ws = lambda: ProbeResult("bot_ws", True, "stub-ok")
     mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
     mon.run_once()  # first failure → first push
     time.sleep(1.2)  # wait past re_fire window
     mon.run_once()  # second failure → re-fire
     rows = _lines(alerts_log)
-    titles = [r["title"] for r in rows if "yfinance" in r["title"]]
-    assert any(t == "yfinance unhealthy" for t in titles)
-    assert any(t == "still yfinance unhealthy" for t in titles)
+    titles = [r["title"] for r in rows if "YAHOO" in r["title"]]
+    assert any(t == "YAHOO DOWN" for t in titles)
+    assert any(t == "YAHOO STILL DOWN" for t in titles)
 
 
 def test_health_monitor_recovery_resets_re_fire(tmp_path):
@@ -421,17 +428,18 @@ def test_health_monitor_recovery_resets_re_fire(tmp_path):
     mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
     mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
     mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_bot_ws = lambda: ProbeResult("bot_ws", True, "stub-ok")
     mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
     mon.probe_yfinance = yf
-    mon.run_once()  # fail 1 → push "yfinance unhealthy"
+    mon.run_once()  # fail 1 → push "YAHOO DOWN"
     mon.run_once()  # fail 2 → no push (within re_fire window)
-    mon.run_once()  # good → "recovered: yfinance" info
-    mon.run_once()  # fail 3 → fresh push "yfinance unhealthy" (not "still")
+    mon.run_once()  # good → "YAHOO OK again" info
+    mon.run_once()  # fail 3 → fresh push "YAHOO DOWN" (not "STILL")
     rows = _lines(alerts_log)
     titles = [r["title"] for r in rows]
-    assert titles.count("yfinance unhealthy") == 2  # two fresh failure cycles
-    assert any("recovered: yfinance" in t for t in titles)
-    assert not any("still yfinance" in t for t in titles)  # recovery reset the timer
+    assert titles.count("YAHOO DOWN") == 2  # two fresh failure cycles
+    assert any("YAHOO OK again" in t for t in titles)
+    assert not any("STILL" in t for t in titles)  # recovery reset the timer
 
 
 def test_health_monitor_recovery_push_includes_outage_duration(tmp_path):
@@ -449,6 +457,7 @@ def test_health_monitor_recovery_push_includes_outage_duration(tmp_path):
     mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
     mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
     mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_bot_ws = lambda: ProbeResult("bot_ws", True, "stub-ok")
     mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
     mon.probe_yfinance = yf
     mon.run_once()  # fail → push
@@ -456,6 +465,6 @@ def test_health_monitor_recovery_push_includes_outage_duration(tmp_path):
     state["ok"] = True
     mon.run_once()  # recover → push with duration
     rows = _lines(alerts_log)
-    recovered = next(r for r in rows if "recovered: yfinance" in r["title"])
+    recovered = next(r for r in rows if "YAHOO OK again" in r["title"])
     # Body should mention "Outage lasted"
     assert "Outage lasted" in recovered["body"]

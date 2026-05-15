@@ -67,6 +67,20 @@ WS_NO_BAR_MAX_AGE_SEC = 600      # last "bar" log line >10 min old = stall
 # then 2h, etc. — so you can't accidentally miss that the bot's deaf.
 RE_FIRE_AFTER_SEC = 3600  # 1 h
 
+# Phase-36 (user request 2026-05-15): provider-explicit alert titles.
+# "alpaca unhealthy" -> "ALPACA STALLED". "recovered: alpaca" -> "ALPACA OK".
+# Maps probe-name to a (provider_label, stall_verb) pair so push titles
+# read like SMS alerts ("ALPACA STALLED", "YAHOO OK") rather than
+# debugging-level strings.
+PROVIDER_LABELS = {
+    "alpaca":         ("ALPACA",      "stalled"),
+    "bot_ws":         ("ALPACA-WS",   "stalled"),
+    "yfinance":       ("YAHOO",       "down"),
+    "catalyst_news":  ("YAHOO-NEWS",  "down"),
+    "heartbeat":      ("BOT",         "frozen"),
+    "audit":          ("BOT-AUDIT",   "unhealthy"),
+}
+
 
 class ProbeResult:
     __slots__ = ("name", "ok", "detail", "value")
@@ -329,11 +343,14 @@ class HealthMonitor:
                 first_alert = self._last_alert_ts.get(name)
                 if first_alert:
                     outage_min = int((now - first_alert) / 60)
-                body = f"Probe {name} is healthy again: {r.detail}"
+                # Phase-36: provider-explicit title — "ALPACA OK again",
+                # "YAHOO OK again", etc. — instead of generic "recovered: X"
+                provider, _verb = PROVIDER_LABELS.get(name, (name.upper(), "down"))
+                title = f"{provider} OK again"
+                body = f"{provider} is healthy again: {r.detail}"
                 if outage_min is not None:
                     body += f"\n\nOutage lasted ~{outage_min} min."
-                self.alerter.send("info", f"recovered: {name}",
-                                   body=body, force=True)
+                self.alerter.send("info", title, body=body, force=True)
                 self._alerted[name] = False
                 self._last_alert_ts.pop(name, None)
             self._streak[name] = 0
@@ -361,13 +378,21 @@ class HealthMonitor:
             title_prefix = ""
 
         if should_fire:
-            level = "critical" if name in ("alpaca", "audit") else "error"
+            level = "critical" if name in ("alpaca", "bot_ws", "audit") else "error"
             duration_min = int((now - last_alert) / 60) if last_alert else 0
             extra = (f"\n\n(continuously failing for ~{duration_min} min — "
                      f"re-fire every {self.re_fire_after_sec // 60} min)"
                      if last_alert else "")
+            # Phase-36: provider-explicit title.
+            # title_prefix=="" → "ALPACA STALLED"
+            # title_prefix=="still " → "ALPACA STILL STALLED"
+            provider, verb = PROVIDER_LABELS.get(name, (name.upper(), "down"))
+            if title_prefix:
+                title = f"{provider} STILL {verb.upper()}"
+            else:
+                title = f"{provider} {verb.upper()}"
             self.alerter.send(
-                level, f"{title_prefix}{name} unhealthy",
+                level, title,
                 body=f"Probe {name} failed {streak}x in a row (threshold={threshold}): {r.detail}{extra}",
                 force=True,  # bypass alerter-level debounce; this monitor IS the gate
             )
