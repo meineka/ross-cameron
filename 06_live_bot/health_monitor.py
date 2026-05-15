@@ -36,10 +36,22 @@ sys.path.insert(0, str(HERE))
 log = logging.getLogger("health-monitor")
 
 CHECK_INTERVAL_SEC = 300  # 5 min
-N_CONSECUTIVE_FAILURES = 2  # alert after 2 consecutive bad probes (10 min total)
+N_CONSECUTIVE_FAILURES = 2  # legacy default — most probes use per-probe override below
 HEARTBEAT_MAX_AGE_SEC = 1800  # 30 min (bot sleeps between scans, that's OK)
 YF_QUOTE_MAX_AGE_SEC = 7200   # 2 h (covers extended-hours, overnight, etc.)
 ALPACA_QUOTE_MAX_AGE_SEC = 7200
+
+# Phase-25c (user request): yahoo + alpaca + catalyst-news fire IMMEDIATELY
+# on first failure (n=1) so we don't waste 5 minutes when the data feed is
+# blocked / rate-limited / down. heartbeat + audit stay at 2 because a
+# one-off blip in process-detection or heartbeat timing is noise, not signal.
+PROBE_THRESHOLDS = {
+    "heartbeat": 2,
+    "audit": 2,
+    "yfinance": 1,       # immediate alert on yahoo blocked / no-data
+    "alpaca": 1,         # immediate alert on alpaca account / data outage
+    "catalyst_news": 1,  # immediate alert on news API broken
+}
 
 
 class ProbeResult:
@@ -196,11 +208,14 @@ class HealthMonitor:
         # Failure
         self._streak[name] = self._streak.get(name, 0) + 1
         streak = self._streak[name]
-        if streak >= self.n_consecutive and not self._alerted.get(name):
+        # Phase-25c: per-probe threshold. Yahoo/Alpaca/news fire on first
+        # failure (n=1); heartbeat/audit on second (n=2) to suppress blips.
+        threshold = PROBE_THRESHOLDS.get(name, self.n_consecutive)
+        if streak >= threshold and not self._alerted.get(name):
             level = "critical" if name in ("alpaca", "audit") else "error"
             self.alerter.send(
                 level, f"{name} unhealthy",
-                body=f"Probe {name} failed {streak}x in a row: {r.detail}",
+                body=f"Probe {name} failed {streak}x in a row (threshold={threshold}): {r.detail}",
             )
             self._alerted[name] = True
 

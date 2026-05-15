@@ -238,18 +238,19 @@ def test_make_alerter_includes_smtp_when_env_set(tmp_path):
 # ─── HealthMonitor ─────────────────────────────────────────────────────────
 
 def test_health_monitor_fires_after_n_consecutive_failures(tmp_path):
-    from health_monitor import HealthMonitor
+    """Heartbeat probe has threshold=2 → only fires after 2 consecutive
+    fails. (Yahoo/Alpaca/news have threshold=1 per Phase-25c — covered
+    by test_health_monitor_yfinance_fires_on_first_failure.)"""
+    from health_monitor import HealthMonitor, ProbeResult
     from alerter import LogAlerter
     alerts_log = tmp_path / "alerts.log"
     a = LogAlerter(path=alerts_log, suppress_seconds=0)
     mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=2)
-    # Replace all probes with a single always-failing one
-    from health_monitor import ProbeResult
-    def bad():
-        return ProbeResult("yfinance", False, "stub-fail")
-    mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
+    def bad_heartbeat():
+        return ProbeResult("heartbeat", False, "stub-fail")
+    mon.probe_heartbeat = bad_heartbeat
     mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
-    mon.probe_yfinance = bad
+    mon.probe_yfinance = lambda: ProbeResult("yfinance", True, "fresh")
     mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
     mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
     # First tick: 1 failure, streak=1, no alert
@@ -259,7 +260,7 @@ def test_health_monitor_fires_after_n_consecutive_failures(tmp_path):
     mon.run_once()
     rows = _lines(alerts_log)
     assert len(rows) == 1
-    assert "yfinance" in rows[0]["title"]
+    assert "heartbeat" in rows[0]["title"]
     assert rows[0]["level"] in ("error", "critical")
 
 
@@ -287,6 +288,69 @@ def test_health_monitor_sends_recovered_on_back_to_ok(tmp_path):
     rows = _lines(alerts_log)
     assert any("yfinance unhealthy" in r["title"] for r in rows)
     assert any("recovered" in r["title"] for r in rows)
+
+
+def test_health_monitor_yfinance_fires_on_first_failure(tmp_path):
+    """Phase-25c (user request): yfinance + alpaca + catalyst_news fire
+    IMMEDIATELY on first failure (per-probe threshold = 1)."""
+    from health_monitor import HealthMonitor, ProbeResult, PROBE_THRESHOLDS
+    from alerter import LogAlerter
+    assert PROBE_THRESHOLDS["yfinance"] == 1
+    assert PROBE_THRESHOLDS["alpaca"] == 1
+    assert PROBE_THRESHOLDS["catalyst_news"] == 1
+    assert PROBE_THRESHOLDS["heartbeat"] == 2
+    assert PROBE_THRESHOLDS["audit"] == 2
+
+    alerts_log = tmp_path / "alerts.log"
+    a = LogAlerter(path=alerts_log, suppress_seconds=0)
+    mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=2)
+    mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
+    mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
+    mon.probe_yfinance = lambda: ProbeResult("yfinance", False, "rate-limited")
+    mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
+    # ONE tick should fire because yfinance threshold = 1
+    mon.run_once()
+    rows = _lines(alerts_log)
+    assert any("yfinance unhealthy" in r["title"] for r in rows), \
+        "yfinance must alert on FIRST failure, not wait for 2"
+
+
+def test_health_monitor_alpaca_fires_on_first_failure(tmp_path):
+    """alpaca probe with threshold=1 → 1 fail = 1 push."""
+    from health_monitor import HealthMonitor, ProbeResult
+    from alerter import LogAlerter
+    alerts_log = tmp_path / "alerts.log"
+    a = LogAlerter(path=alerts_log, suppress_seconds=0)
+    mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=2)
+    mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
+    mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
+    mon.probe_yfinance = lambda: ProbeResult("yfinance", True, "fresh")
+    mon.probe_alpaca = lambda: ProbeResult("alpaca", False, "account inactive")
+    mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
+    mon.run_once()
+    rows = _lines(alerts_log)
+    assert any("alpaca unhealthy" in r["title"] for r in rows)
+
+
+def test_health_monitor_heartbeat_still_needs_two_failures(tmp_path):
+    """heartbeat threshold = 2 → 1 fail = no push, 2 fails = push."""
+    from health_monitor import HealthMonitor, ProbeResult
+    from alerter import LogAlerter
+    alerts_log = tmp_path / "alerts.log"
+    a = LogAlerter(path=alerts_log, suppress_seconds=0)
+    mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=2)
+    mon.probe_heartbeat = lambda: ProbeResult("heartbeat", False, "missing")
+    mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
+    mon.probe_yfinance = lambda: ProbeResult("yfinance", True, "fresh")
+    mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
+    mon.run_once()  # streak=1, no alert
+    rows1 = _lines(alerts_log) if alerts_log.exists() else []
+    assert not any("heartbeat unhealthy" in r["title"] for r in rows1)
+    mon.run_once()  # streak=2, alert
+    rows2 = _lines(alerts_log)
+    assert any("heartbeat unhealthy" in r["title"] for r in rows2)
 
 
 def test_health_monitor_alert_does_not_repeat_while_failing(tmp_path):
