@@ -59,10 +59,16 @@ FETCHER_SCRIPT = HERE / "fetch_historical_range.py"
 LOG_DIR = HERE  # fetch_loop.log lives next to the script
 
 DEFAULT_INTERVAL_MIN = 20
-DEFAULT_BATCH_SIZE = 25
+# Phase-64.1 (post-mortem): batch_size=25 × ~360 days × ~0.3s/call =
+# ~50 min at full Alpaca rate, ~100 min when sharing rate with parallel
+# fetches. Reduce to 15 so even worst-case stays well under 1h timeout.
+DEFAULT_BATCH_SIZE = 15
 DEFAULT_START_DATE = "2025-01-02"
 DEFAULT_TIMEFRAME = "1m"
 CYCLE_REFRESH_DAYS = 7
+# Phase-64.1: 1h was too aggressive — saw real 9000-call batches take
+# ~100 min during contention. 2h gives margin without being silly.
+SUBPROCESS_TIMEOUT_SEC = 7200
 
 logging.basicConfig(
     level=logging.INFO,
@@ -173,7 +179,8 @@ def run_one_batch(symbols: list[str], *, start_date: str,
     ]
     try:
         # Stream child output into our log
-        proc = subprocess.run(cmd, cwd=ROOT, timeout=3600,
+        proc = subprocess.run(cmd, cwd=ROOT,
+                                timeout=SUBPROCESS_TIMEOUT_SEC,
                                 capture_output=True, text=True,
                                 encoding="utf-8", errors="replace")
         for line in (proc.stdout or "").splitlines()[-20:]:
@@ -182,7 +189,8 @@ def run_one_batch(symbols: list[str], *, start_date: str,
             log.warning("[fetcher-err] %s", line)
         return proc.returncode
     except subprocess.TimeoutExpired:
-        log.error("fetcher hit 1h timeout — aborting batch")
+        log.error("fetcher hit %ds (%.1fh) timeout — aborting batch",
+                   SUBPROCESS_TIMEOUT_SEC, SUBPROCESS_TIMEOUT_SEC / 3600)
         return 124
     except Exception as e:
         log.error("fetcher subprocess raised: %s", e)
