@@ -51,7 +51,15 @@ PROBE_THRESHOLDS = {
     "yfinance": 1,       # immediate alert on yahoo blocked / no-data
     "alpaca": 1,         # immediate alert on alpaca account / data outage
     "catalyst_news": 1,  # immediate alert on news API broken
+    "bot_ws": 1,         # immediate alert on WS reconnect storm / stall
 }
+
+# Phase-34 (2026-05-15): bot.log scanning thresholds for the new ws-health
+# probe. The probe is independent of the REST-based probe_alpaca which
+# stayed green during today's stale-slot lockout (REST OK, WS broken).
+WS_LOG_TAIL_LINES = 500          # last N lines to scan
+WS_ERROR_COUNT_THRESHOLD = 10    # > N errors in tail = unhealthy
+WS_NO_BAR_MAX_AGE_SEC = 600      # last "bar" log line >10 min old = stall
 
 # Phase-25d (user request): re-fire alert every RE_FIRE_AFTER_SEC if the
 # probe is STILL failing. Without this, a long outage produces 1 push and
@@ -167,6 +175,109 @@ class HealthMonitor:
             return ProbeResult("alpaca", False,
                                 f"{type(e).__name__}: {str(e)[:120]}")
 
+    def probe_bot_ws(self) -> ProbeResult:
+        """Phase-34: scan bot.log for WebSocket reconnect storms and
+        bar-feed stalls. The REST-based probe_alpaca stays GREEN during
+        a stale-slot lockout because REST endpoints work fine — but the
+        WS auth fails repeatedly and the bot stops receiving 5-min bars.
+        That was the bug on 2026-05-15 that produced no trades for hours
+        with zero notifications. This probe closes the gap.
+
+        Logic:
+          - Read last WS_LOG_TAIL_LINES of bot.log
+          - Count lines matching WS-error signatures
+          - If count > WS_ERROR_COUNT_THRESHOLD → unhealthy
+          - Additionally during RTH: if last "WS subscribed" + bar receipt
+            is > WS_NO_BAR_MAX_AGE_SEC old → unhealthy
+
+        Returns ok=True with the latest bar age otherwise.
+        """
+        try:
+            log_path = HERE / "bot.log"
+            if not log_path.exists():
+                return ProbeResult("bot_ws", True, "bot.log missing (bot not started yet)")
+            # Read last N lines without loading the whole file.
+            # On Windows bot.log can be 1+ GB; only the tail matters.
+            with open(log_path, "rb") as f:
+                try:
+                    f.seek(0, 2)
+                    size = f.tell()
+                    # Estimate: avg log line ~100 bytes, fetch 100 * N_LINES
+                    seek_back = min(size, WS_LOG_TAIL_LINES * 200)
+                    f.seek(max(0, size - seek_back))
+                    chunk = f.read().decode("utf-8", errors="replace")
+                except Exception:
+                    chunk = ""
+            lines = chunk.splitlines()[-WS_LOG_TAIL_LINES:]
+            err_signatures = (
+                "connection limit exceeded",
+                "auth failed",
+                "data websocket error",
+                "HTTP 429",
+                "rejected WebSocket connection",
+            )
+            err_count = sum(
+                1 for line in lines
+                if any(sig in line for sig in err_signatures)
+            )
+            # Determine market-hours-aware threshold
+            try:
+                from secrets_loader import get_alpaca_keys
+                from alpaca.trading.client import TradingClient
+                k, s = get_alpaca_keys()
+                tc = TradingClient(k, s, paper=True)
+                is_open = bool(getattr(tc.get_clock(), "is_open", False))
+            except Exception:
+                is_open = False
+            if err_count > WS_ERROR_COUNT_THRESHOLD:
+                return ProbeResult(
+                    "bot_ws", False,
+                    f"{err_count} WS-errors in last {len(lines)} log lines "
+                    f"(threshold={WS_ERROR_COUNT_THRESHOLD}, market_open={is_open})",
+                    value=err_count,
+                )
+            # Look for "bar" receipt or "WS subscribed" in the tail. If
+            # neither in last X minutes during RTH → stall.
+            if is_open:
+                # Most recent "subscribed" or "on_bar" line — parse timestamp
+                latest_bar_ts = None
+                for line in reversed(lines):
+                    if "WS subscribed to" in line or "on_bar" in line:
+                        # Line format: "2026-05-15 16:10:09,895 INFO ..."
+                        try:
+                            ts_str = line[:19]  # "YYYY-MM-DD HH:MM:SS"
+                            from datetime import datetime as _dt
+                            latest_bar_ts = _dt.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                            break
+                        except Exception:
+                            continue
+                if latest_bar_ts is None:
+                    return ProbeResult(
+                        "bot_ws", False,
+                        f"no WS-subscribed/bar line in last {len(lines)} log lines (market_open=True)"
+                    )
+                age = (datetime.now() - latest_bar_ts).total_seconds()
+                if age > WS_NO_BAR_MAX_AGE_SEC:
+                    return ProbeResult(
+                        "bot_ws", False,
+                        f"WS stale: last subscribe/bar {age:.0f}s ago "
+                        f"(threshold={WS_NO_BAR_MAX_AGE_SEC}s, market_open=True)",
+                        value=age,
+                    )
+                return ProbeResult(
+                    "bot_ws", True,
+                    f"WS OK: {err_count} recent errors, last bar/sub {age:.0f}s ago",
+                )
+            return ProbeResult(
+                "bot_ws", True,
+                f"WS OK (market closed): {err_count} recent errors in tail",
+            )
+        except Exception as e:
+            return ProbeResult(
+                "bot_ws", False,
+                f"{type(e).__name__}: {str(e)[:120]}",
+            )
+
     def probe_catalyst_news(self) -> ProbeResult:
         """Phase-25: ping yfinance news on a known-good symbol so we
         notice when the catalyst pipeline is hosed even before the bot
@@ -193,6 +304,7 @@ class HealthMonitor:
             self.probe_audit_recommendation,
             self.probe_yfinance,
             self.probe_alpaca,
+            self.probe_bot_ws,        # Phase-34: WS reconnect-storm detection
             self.probe_catalyst_news,
         ]
         results = []

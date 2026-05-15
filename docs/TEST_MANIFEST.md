@@ -4,14 +4,14 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 69
-- **Total `def test_*` functions**: 724
+- **Total files**: 70
+- **Total `def test_*` functions**: 732
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 242 |
+| critical | 250 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 539 |
+| not_reviewed | 547 |
 | partially_reviewed | 85 |
 | reviewed | 100 |
 
@@ -53,6 +53,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 - `test_pattern_robustness.py`
 - `test_phase_30_trade_push.py`
 - `test_phase_31_alpaca_ws_patch.py`
+- `test_phase_34_ws_health_probe.py`
 - `test_postmortem_20260512.py`
 - `test_pump_dump_filter_bugs.py`
 - `test_review_fixes_p0.py`
@@ -106,6 +107,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_phase_30_trade_push.py` | 12 | critical | yes | not_reviewed | Phase-30: trade-event push notifications. |
 | `test_phase_31_alpaca_ws_patch.py` | 7 | critical | yes | not_reviewed | Phase-31: alpaca-py WebSocket reconnect-backoff patch tests. |
 | `test_phase_32_aligned_scan_start.py` | 6 | critical | no | not_reviewed | Phase-32: aligned_scan_start must never return a time in the past. |
+| `test_phase_34_ws_health_probe.py` | 8 | critical | yes | not_reviewed | Phase-34: bot_ws health probe scans bot.log for WS reconnect storms. |
 | `test_pilot_baseline.py` | 3 | replay | no | partially_reviewed | Pilot-Stats Regression: Backtest-Output darf nicht von Baseline abweichen. |
 | `test_position_recovery_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 6 (2026-05-12): position_recovery.recover_or_flatten robustness. |
 | `test_position_size_multipliers.py` | 12 | unit | no | not_reviewed | Audit-Iter 15 (2026-05-12): compute_position_size multiplier stacking. |

@@ -253,6 +253,7 @@ def test_health_monitor_fires_after_n_consecutive_failures(tmp_path):
     mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
     mon.probe_yfinance = lambda: ProbeResult("yfinance", True, "fresh")
     mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_bot_ws = lambda: ProbeResult("bot_ws", True, "stub-ok")
     mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
     # First tick: 1 failure, streak=1, no alert
     mon.run_once()
