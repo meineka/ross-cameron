@@ -82,8 +82,8 @@ logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 # ─── Cameron-Constants (mirror constraints.yaml) ────────────────────────────
 PRICE_MIN, PRICE_MAX = 2.0, 20.0
 DAILY_GAIN_MIN_PCT = 5.0  # 2026-05-15 user-override: 10 → 5 to widen pool
-RVOL_MIN_PROXY = 5.0  # Cameron-strict (war fälschlich 2.0)
-FLOAT_MAX_SHARES = 10_000_000  # 5. Cameron-Pillar
+RVOL_MIN_PROXY = 3.0  # 2026-05-15 user-override: 5 → 3 (let mid-cap runners in)
+FLOAT_MAX_SHARES = 50_000_000  # 2026-05-15 user-override: 10M → 50M (more small-cap runners)
 CATALYST_REQUIRED = True  # 5. Cameron-Pillar
 # Review-V2 P1.3: catalyst-filter mode. "soft" (default) passes on
 # data-source issues (empty news, yfinance error) — preserves V1 behavior

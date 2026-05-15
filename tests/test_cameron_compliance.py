@@ -12,10 +12,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "06_live_bot"))
 
 
-# ─── #1 RVOL strict ──────────────────────────────────────────────────────────
-def test_rvol_min_is_strict_5():
+# ─── #1 RVOL not too lax ────────────────────────────────────────────────────
+def test_rvol_min_is_strict_enough():
+    """Cameron-strict baseline was 5.0; user-overrides between 3.0 and 5.0
+    are acceptable (still well above the 'no filter' state of 1.0)."""
     import bot
-    assert bot.RVOL_MIN_PROXY == 5.0, "Cameron-strict ist 5.0 — war zu lasch"
+    assert bot.RVOL_MIN_PROXY >= 3.0, \
+        f"RVOL_MIN_PROXY={bot.RVOL_MIN_PROXY} is too lax (< 3x destroys edge)"
+    assert bot.RVOL_MIN_PROXY <= 10.0, \
+        f"RVOL_MIN_PROXY={bot.RVOL_MIN_PROXY} is unrealistically strict (> 10x = no candidates)"
 
 
 # ─── #2 Float-Wiring ─────────────────────────────────────────────────────────
