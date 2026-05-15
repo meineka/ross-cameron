@@ -250,7 +250,7 @@ TIME_NEW_ENTRIES_START = dtime(9, 35)
 # Re-Scan-Strategie: zwei Schichten, ALIGNED zu round-5-Min boundaries
 # SLOW: yfinance Universe-Pull, ~3 Min Laufzeit → 180 Sek Head-Start
 # FAST: Alpaca Snapshot, <1 Sek → 5 Sek Head-Start
-SCAN_HEAD_START_SLOW_SEC = 180  # yfinance scan dauer
+SCAN_HEAD_START_SLOW_SEC = 90   # 2026-05-15 Phase-32: 180→90 — must be < SLOW_INTERVAL*60
 SCAN_HEAD_START_FAST_SEC = 5    # Alpaca snapshot dauer
 RESCAN_SLOW_INTERVAL_MIN = 2    # 2026-05-15 user-override: 5 → 2 (TV-scan every 2 min)
 RESCAN_FAST_INTERVAL_MIN = 1    # alle 1 Min Alpaca-Re-Rank
@@ -262,12 +262,22 @@ def aligned_scan_start(now: datetime, period_min: int, head_start_sec: int) -> d
 
     Beispiel: period_min=5, head_start=180 → finish bei :00, :05, :10, :15, ...
     Start bei :02:00, :07:00, :12:00, :17:00, :22:00, :27:00, :32:00 ...
+
+    Phase-32 (2026-05-15): when head_start_sec >= period_min*60 the old
+    math produced a start-time IN THE PAST, causing the rescan to fire
+    on every loop iteration (~3s) → cascading WS resubscribes →
+    Alpaca connection-limit-exceeded. Now we clamp head_start to at
+    most period-30s and advance forward until start > now.
     """
+    max_head_start = max(0, period_min * 60 - 30)
+    head_start_sec = min(head_start_sec, max_head_start)
     minutes_past = now.minute % period_min
-    next_boundary = now.replace(second=0, microsecond=0) + timedelta(minutes=period_min - minutes_past)
+    next_boundary = now.replace(second=0, microsecond=0) + timedelta(
+        minutes=period_min - minutes_past)
     start = next_boundary - timedelta(seconds=head_start_sec)
-    if start <= now:
-        start = next_boundary + timedelta(minutes=period_min) - timedelta(seconds=head_start_sec)
+    while start <= now:
+        next_boundary = next_boundary + timedelta(minutes=period_min)
+        start = next_boundary - timedelta(seconds=head_start_sec)
     return start
 
 DATA_DIR = Path(__file__).parent
