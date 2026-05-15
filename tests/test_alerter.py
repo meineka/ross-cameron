@@ -73,6 +73,60 @@ def test_log_alerter_creates_parent_dir(tmp_path):
     assert deep.exists()
 
 
+# ─── NtfyAlerter ────────────────────────────────────────────────────────────
+
+def test_ntfy_alerter_posts_to_correct_topic():
+    from alerter import NtfyAlerter
+    seen = {}
+    class FakeResp:
+        status_code = 200
+    def fake_post(url, data=None, headers=None, timeout=None):
+        seen["url"] = url
+        seen["data"] = data
+        seen["headers"] = headers
+        return FakeResp()
+    a = NtfyAlerter(topic="cameron-bot-test", suppress_seconds=0,
+                     http_post=fake_post)
+    assert a.send("critical", "blocker", body="something broke") is True
+    assert seen["url"] == "https://ntfy.sh/cameron-bot-test"
+    assert seen["data"] == b"something broke"
+    assert "CRITICAL" in seen["headers"]["Title"]
+    assert seen["headers"]["Priority"] == "urgent"
+
+
+def test_ntfy_alerter_self_host_server_url():
+    """Caller can point at a private ntfy server instead of the public
+    ntfy.sh service."""
+    from alerter import NtfyAlerter
+    seen = {}
+    class FakeResp:
+        status_code = 202
+    def fake_post(url, data=None, headers=None, timeout=None):
+        seen["url"] = url
+        return FakeResp()
+    a = NtfyAlerter(topic="x", server="https://my-ntfy.internal:8080",
+                     suppress_seconds=0, http_post=fake_post)
+    a.send("info", "test")
+    assert seen["url"] == "https://my-ntfy.internal:8080/x"
+
+
+def test_ntfy_alerter_swallows_http_failure():
+    from alerter import NtfyAlerter
+    def boom(*a, **kw):
+        raise RuntimeError("net down")
+    a = NtfyAlerter(topic="t", suppress_seconds=0, http_post=boom)
+    assert a.send("error", "t") is False
+
+
+def test_make_alerter_includes_ntfy_when_env_set(tmp_path):
+    from alerter import make_alerter, CompositeAlerter, NtfyAlerter
+    env = {"NTFY_TOPIC": "cameron-bot-XYZ"}
+    a = make_alerter(alerts_log_path=tmp_path / "alerts.log", env=env)
+    assert isinstance(a, CompositeAlerter)
+    types_in_composite = {type(c).__name__ for c in a.alerters}
+    assert "NtfyAlerter" in types_in_composite
+
+
 # ─── TelegramAlerter ────────────────────────────────────────────────────────
 
 def test_telegram_alerter_posts_to_correct_url():

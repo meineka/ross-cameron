@@ -76,6 +76,60 @@ class _BaseAlerter:
         raise NotImplementedError
 
 
+class NtfyAlerter(_BaseAlerter):
+    """Push to ntfy.sh — zero-signup push-notification service.
+
+    User installs the ntfy mobile app, subscribes to a unique topic
+    name (their choice, no account needed), then this alerter publishes
+    to https://ntfy.sh/<topic>. The phone receives push immediately.
+
+    Self-host alternative: pass server="https://your-ntfy-server" to
+    point at a private instance instead of the public ntfy.sh service.
+    """
+
+    name = "ntfy"
+
+    def __init__(self, *, topic: str,
+                  server: str = "https://ntfy.sh",
+                  suppress_seconds: int = DEFAULT_SUPPRESS_SECONDS,
+                  http_post=None):
+        super().__init__(suppress_seconds=suppress_seconds)
+        self.topic = topic
+        self.server = server.rstrip("/")
+        self._post = http_post
+
+    def _do_send(self, level: str, title: str, body: str) -> bool:
+        url = f"{self.server}/{self.topic}"
+        # ntfy uses headers for title + priority; body is the message text
+        priority = {
+            "info": "default", "warn": "default",
+            "error": "high", "critical": "urgent",
+        }.get(level, "default")
+        tags = {
+            "info": "information_source", "warn": "warning",
+            "error": "x", "critical": "rotating_light",
+        }.get(level, "bell")
+        headers = {
+            "Title": f"[{level.upper()}] {title}"[:200],
+            "Priority": priority,
+            "Tags": tags,
+        }
+        data = (body or title).encode("utf-8")
+        if self._post is not None:
+            r = self._post(url, data=data, headers=headers, timeout=10)
+        else:
+            import urllib.request
+            req = urllib.request.Request(url, data=data, headers=headers,
+                                          method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return resp.status in (200, 202)
+            except Exception as e:
+                log.warning("ntfy urlopen failed: %s", e)
+                return False
+        return getattr(r, "status_code", 0) in (200, 202)
+
+
 class TelegramAlerter(_BaseAlerter):
     """Push to a Telegram bot. Set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID."""
 
@@ -210,10 +264,11 @@ def make_alerter(*, alerts_log_path: Path | str | None = None,
                   env: dict | None = None) -> _BaseAlerter:
     """Build the best alerter available from env vars.
 
-    Priority:
-      1. TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID  → TelegramAlerter + LogAlerter
-      2. SMTP_HOST + SMTP_USER + SMTP_PASS + SMTP_TO  → SMTPAlerter + LogAlerter
-      3. Neither  → LogAlerter only
+    Priority (every configured channel gets included; LogAlerter always):
+      - NTFY_TOPIC (+ optional NTFY_SERVER)        → NtfyAlerter
+      - TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID      → TelegramAlerter
+      - SMTP_HOST + SMTP_USER + SMTP_PASS + SMTP_TO → SMTPAlerter
+      - (always) LogAlerter on disk
 
     The Log alerter is ALWAYS included so you have a disk audit trail.
 
@@ -234,6 +289,11 @@ def make_alerter(*, alerts_log_path: Path | str | None = None,
         alerts_log_path = Path(__file__).resolve().parent / "alerts.log"
     log_alerter = LogAlerter(path=alerts_log_path)
     children: list[_BaseAlerter] = []
+
+    ntfy_topic = env.get("NTFY_TOPIC")
+    if ntfy_topic:
+        ntfy_server = env.get("NTFY_SERVER", "https://ntfy.sh")
+        children.append(NtfyAlerter(topic=ntfy_topic, server=ntfy_server))
 
     tg_token = env.get("TELEGRAM_BOT_TOKEN")
     tg_chat = env.get("TELEGRAM_CHAT_ID")
