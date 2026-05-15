@@ -105,6 +105,77 @@ def test_safe_bracket_imports():
     assert hasattr(safe_bracket, "quote_based_entry")
 
 
+# Phase-24: assume_queued=True must NOT cancel the order on timeout —
+# returns status="queued" so the caller can keep it on the books for
+# the next session open (e.g. submitting during pre-market for RTH).
+
+def test_safe_bracket_assume_queued_skips_cancel_on_timeout():
+    """When assume_queued=True and the order doesn't fill within
+    wait_seconds, the wrapper must NOT call cancel_order_by_id — the
+    order stays live for the next session."""
+    from safe_bracket import safe_bracket_buy
+    from unittest.mock import MagicMock
+
+    tc = MagicMock()
+    # Stub submit_order to return an object with .id; never reaches FILLED
+    submitted = MagicMock()
+    submitted.id = "test-order-id"
+    submitted.status = "new"
+    tc.submit_order.return_value = submitted
+
+    # get_order_by_id keeps returning the same non-FILLED status
+    def _poll(order_id):
+        m = MagicMock()
+        m.id = order_id
+        m.status = "new"
+        m.filled_avg_price = None
+        return m
+    tc.get_order_by_id.side_effect = _poll
+
+    result = safe_bracket_buy(
+        tc, "AAA", 5,
+        entry_limit=10.0, stop=9.5, take_profit=11.0,
+        wait_seconds=2,
+        assume_queued=True,
+    )
+    assert result["status"] == "queued"
+    assert result["order_id"] == "test-order-id"
+    assert result["entry_limit"] == 10.0
+    assert result["stop"] == 9.5
+    assert result["take_profit"] == 11.0
+    assert result["shares"] == 5
+    # Critical: cancel must NOT have been called
+    tc.cancel_order_by_id.assert_not_called()
+
+
+def test_safe_bracket_default_still_cancels_on_timeout():
+    """Without assume_queued (default), the legacy cancel-on-timeout
+    behavior is preserved."""
+    from safe_bracket import safe_bracket_buy
+    from unittest.mock import MagicMock
+
+    tc = MagicMock()
+    submitted = MagicMock()
+    submitted.id = "test-order-id-2"
+    submitted.status = "new"
+    tc.submit_order.return_value = submitted
+    def _poll(order_id):
+        m = MagicMock()
+        m.id = order_id
+        m.status = "new"
+        m.filled_avg_price = None
+        return m
+    tc.get_order_by_id.side_effect = _poll
+
+    result = safe_bracket_buy(
+        tc, "AAA", 5,
+        entry_limit=10.0, stop=9.5, take_profit=11.0,
+        wait_seconds=2,
+    )
+    assert result["status"] == "timeout"
+    tc.cancel_order_by_id.assert_called_once_with("test-order-id-2")
+
+
 # ─── Liquidity-Check (HSPT-style detection) ──────────────────────────────────
 def test_liquidity_rejects_low_daily_volume():
     """HSPT-Profil: 188 daily volume, fake last_trade $10.55."""

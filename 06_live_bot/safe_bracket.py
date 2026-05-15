@@ -64,12 +64,19 @@ def safe_bracket_buy(
     tc, symbol: str, shares: int,
     entry_limit: float, stop: float, take_profit: float,
     *, wait_seconds: int = 20,
+    assume_queued: bool = False,
 ) -> dict:
     """Submit Bracket + Post-Fill-Check + Auto-Repair wenn Stop invalid.
 
     Returns:
         {"order_id", "fill_price", "shares", "stop", "take_profit",
-         "repaired": bool, "status": "filled"/"failed"/"timeout"}
+         "repaired": bool, "status": "filled"/"failed"/"timeout"/"queued"}
+
+    Phase-24: `assume_queued=True` means the caller knows this order will
+    sit on the books (market closed, or pre-RTH submission). In that
+    case the function does NOT cancel the order on timeout — it returns
+    status="queued" instead so the order is preserved for the eventual
+    fill at the next session open.
     """
     from alpaca.trading.requests import (
         LimitOrderRequest, TakeProfitRequest, StopLossRequest,
@@ -132,6 +139,19 @@ def safe_bracket_buy(
         except Exception as e:
             log.debug("safe_bracket poll err: %s", e)
     if fill_price is None:
+        # Phase-24 (ChatGPT no-trade-day testing): if caller said
+        # assume_queued=True (e.g. submitting during pre-market for RTH
+        # open), do NOT cancel — leave the order in place to fill at the
+        # next session open. Return status="queued" so the caller knows
+        # it's intentional, not a failure.
+        if assume_queued:
+            log.info("safe_bracket: order %s queued for next session open",
+                     o.id)
+            return {"status": "queued", "order_id": str(o.id),
+                    "entry_limit": round(entry_limit, 2),
+                    "stop": round(stop, 2),
+                    "take_profit": round(take_profit, 2),
+                    "shares": shares}
         # Audit-Iter 27 (SB-6 follow-up): wenn wir auf timeout gehen UND der
         # Order noch live ist, könnte er später noch fillen → cancel attempt
         # damit kein stranded order übrig bleibt.

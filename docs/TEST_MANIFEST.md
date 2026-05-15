@@ -5,13 +5,13 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 ## Summary
 
 - **Total files**: 63
-- **Total `def test_*` functions**: 651
+- **Total `def test_*` functions**: 653
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 169 |
+| critical | 171 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -23,7 +23,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 | Status | Tests |
 |---|---|
 | not_reviewed | 468 |
-| partially_reviewed | 83 |
+| partially_reviewed | 85 |
 | reviewed | 100 |
 
 Status meaning:
@@ -118,7 +118,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_review_v2_phase7.py` | 10 | unit | yes | not_reviewed | Review-V2 Phase 7 behavior tests: |
 | `test_risk_engine.py` | 9 | critical | no | partially_reviewed | Risk-Engine Tests — Position-Sizing, Daily-Caps, Spiral-Detection. |
 | `test_risk_engine_bugs.py` | 9 | critical | no | not_reviewed | Latente Risk-Engine-Bugs aus dem 2. Audit-Pass. |
-| `test_safe_bracket_fix.py` | 12 | critical | no | partially_reviewed | Tests für den 2026-05-12 14:00 ET HSPT/ATRA-Bug: |
+| `test_safe_bracket_fix.py` | 14 | critical | no | partially_reviewed | Tests für den 2026-05-12 14:00 ET HSPT/ATRA-Bug: |
 | `test_safe_bracket_status_bugs.py` | 11 | critical | no | partially_reviewed | Audit-Iter 27 (2026-05-13): safe_bracket_buy status-comparison bugs. |
 | `test_secrets_loader_bugs.py` | 11 | unit | no | not_reviewed | Audit-Iter 35 (2026-05-13): secrets_loader.py edge cases. |
 | `test_smoke_imports.py` | 8 | smoke | no | reviewed | Phase-21 (ChatGPT-09:15 Task 1): smoke gate — populates the `smoke` |
