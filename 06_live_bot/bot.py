@@ -50,6 +50,15 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
+# Phase-31: patch alpaca-py DataStream._run_forever so connection-limit-
+# exceeded errors hit a real backoff instead of hammering Alpaca at 1.6Hz.
+# Idempotent — safe to call on every import (e.g. test collection).
+try:
+    from alpaca_ws_patch import install_patch as _install_alpaca_ws_patch
+    _install_alpaca_ws_patch()
+except Exception as _e:
+    logging.getLogger(__name__).warning("alpaca_ws_patch install failed: %s", _e)
+
 # Lokale Module für Verbesserungen
 sys.path.insert(0, str(Path(__file__).parent))
 from pre_flight import run_preflight
