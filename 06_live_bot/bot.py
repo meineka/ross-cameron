@@ -93,6 +93,17 @@ PRICE_MIN, PRICE_MAX = 1.5, 30.0  # Phase-33: was 2.0/20.0 — widen for more ca
 DAILY_GAIN_MIN_PCT = 3.0  # Phase-33 user-override: 5 → 3 (see-some-trades)
 RVOL_MIN_PROXY = 2.0  # Phase-33 user-override: 3 → 2 (let mid-cap runners in)
 FLOAT_MAX_SHARES = 100_000_000  # Phase-33 user-override: 50M → 100M
+
+# ── Phase-35: Alpaca rate-limits + stall-probe behavior ──────────────────
+# These are the single source of truth for Alpaca's documented account
+# limits. Override in alpaca_rate_guard.py if you need different
+# behavior — bot.py just imports + exposes them here for visibility
+# from the constants section.
+from alpaca_rate_guard import (
+    ALPACA_MAX_CALLS_PER_MIN,
+    ALPACA_STALL_PROBE_INTERVAL_SEC,
+    ALPACA_STALL_AFTER_N_FAILS,
+)  # noqa: E402, F401  — explicit re-export for operator visibility
 CATALYST_REQUIRED = True  # 5. Cameron-Pillar
 # Review-V2 P1.3: catalyst-filter mode. "soft" (default) passes on
 # data-source issues (empty news, yfinance error) — preserves V1 behavior

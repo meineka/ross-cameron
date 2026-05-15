@@ -38,6 +38,18 @@ BASE_SLEEP_SEC = 2.0
 CAP_SLEEP_SEC = 60.0
 RESET_SLOT_SEC = 30.0  # minimum sleep on "connection limit exceeded"
 
+# Phase-35 (user request 2026-05-15): on "connection limit exceeded",
+# stop sleeping blindly and instead probe the WS slot every 5 sec
+# until it's free, then reconnect immediately.
+try:
+    from alpaca_rate_guard import (
+        wait_until_ws_slot_free,
+        ALPACA_STALL_PROBE_INTERVAL_SEC,
+    )
+    _STALL_PROBE_AVAILABLE = True
+except Exception:
+    _STALL_PROBE_AVAILABLE = False
+
 _PATCHED = False
 
 
@@ -111,9 +123,50 @@ def install_patch() -> bool:
                 except Exception:
                     pass
                 self._running = False
-                # Pick sleep duration
+                # Pick sleep duration / stall-probe strategy
                 msg = str(e)
-                if "connection limit" in msg.lower():
+                if "connection limit" in msg.lower() and _STALL_PROBE_AVAILABLE:
+                    # Phase-35: instead of sleeping 30-60s blindly, probe
+                    # the WS slot every 5 sec until it's free, then
+                    # reconnect immediately. Caps the wait at 5 min so
+                    # we eventually surrender + let outer ws_loop apply
+                    # its own circuit-breaker.
+                    log.warning("WS slot locked — probing every %ds "
+                                 "until free (consec=%d)",
+                                 ALPACA_STALL_PROBE_INTERVAL_SEC,
+                                 consec_value_errors)
+                    try:
+                        api_key = getattr(self, "_api_key", "")
+                        api_secret = getattr(self, "_secret_key", "")
+                        feed = "iex"
+                        # feed name from endpoint URL like ".../v2/iex"
+                        ep = getattr(self, "_endpoint", "")
+                        if "/sip" in ep.lower():
+                            feed = "sip"
+                        ok, attempts, detail = await wait_until_ws_slot_free(
+                            api_key=api_key, api_secret=api_secret,
+                            max_wait_sec=300,
+                            interval_sec=ALPACA_STALL_PROBE_INTERVAL_SEC,
+                        )
+                        if ok:
+                            log.info("WS slot released after %d probes (%s) — "
+                                     "reconnecting now",
+                                     attempts, detail)
+                            consec_value_errors = 0
+                            # Skip the sleep_for fallback — loop top will
+                            # reconnect on next iteration
+                            continue
+                        # probe timeout: fall through to legacy sleep
+                        log.warning("WS slot still locked after %d probes "
+                                     "— falling back to blind sleep",
+                                     attempts)
+                    except Exception as probe_err:
+                        log.warning("stall-probe crashed (%s) — falling back",
+                                     probe_err)
+                    sleep_for = max(RESET_SLOT_SEC,
+                                     min(CAP_SLEEP_SEC,
+                                         BASE_SLEEP_SEC * (2 ** consec_value_errors)))
+                elif "connection limit" in msg.lower():
                     sleep_for = max(RESET_SLOT_SEC,
                                      min(CAP_SLEEP_SEC,
                                          BASE_SLEEP_SEC * (2 ** consec_value_errors)))

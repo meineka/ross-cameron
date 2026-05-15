@@ -53,48 +53,59 @@ def test_patch_replaces_run_forever():
     assert ws_module.DataStream._run_forever is original
 
 
-def test_patched_loop_sleeps_at_least_30s_on_connection_limit_exceeded():
-    """The critical regression: 'connection limit exceeded' must sleep
-    at LEAST RESET_SLOT_SEC (30s) before retrying, not asyncio.sleep(0)."""
+def test_patched_loop_handles_connection_limit_exceeded():
+    """Phase-35 (2026-05-15) changed this branch: instead of sleeping 30-60s
+    on 'connection limit exceeded', the patch now calls
+    wait_until_ws_slot_free (probe every 5s). Verify the probe IS invoked
+    when the stall-probe module is available. The fall-through legacy
+    sleep is exercised by test_patched_loop_uses_exponential_backoff_on_generic_value_error."""
     import alpaca_ws_patch
     alpaca_ws_patch._reset_for_tests()
     alpaca_ws_patch.install_patch()
     from alpaca.data.live import websocket as ws_module
+    import alpaca_rate_guard
 
-    # Build a fake stream whose _start_ws always raises connection-limit.
-    sleeps: list[float] = []
+    probe_calls = []
+
+    async def fake_wait(**kw):
+        probe_calls.append(kw)
+        # Pretend slot stays locked → falls through to legacy sleep
+        return False, 1, "still locked"
 
     async def fake_sleep(t):
-        sleeps.append(t)
-        # After 2 failures, force-stop the loop
-        if len(sleeps) >= 2:
+        # Stop the loop after the fall-through sleep
+        if t >= 1.0:
             stream._should_run = False
 
     stream = MagicMock()
-    stream._handlers = {"bars": ["AAA"]}  # non-empty so loop enters
+    stream._handlers = {"bars": ["AAA"]}
     stream._stop_stream_queue = MagicMock()
     stream._stop_stream_queue.empty.return_value = True
     stream._should_run = True
     stream._running = False
     stream._name = "test"
     stream._loop = None
+    stream._api_key = "k"
+    stream._secret_key = "s"
+    stream._endpoint = "wss://stream.data.alpaca.markets/v2/iex"
     stream._start_ws = AsyncMock(side_effect=ValueError("connection limit exceeded"))
     stream._send_subscribe_msg = AsyncMock()
     stream._consume = AsyncMock()
     stream.close = AsyncMock()
 
     async def run_test():
-        with patch("asyncio.sleep", side_effect=fake_sleep):
+        with patch.object(alpaca_ws_patch, "wait_until_ws_slot_free",
+                          side_effect=fake_wait), \
+             patch("asyncio.sleep", side_effect=fake_sleep):
             await ws_module.DataStream._run_forever(stream)
 
     asyncio.run(run_test())
 
-    # Find the FIRST backoff sleep (after a failure) — must be >= 30s
-    # The first sleep is asyncio.sleep(0) in finally (yield); filter that.
-    backoff_sleeps = [s for s in sleeps if s >= 1.0]
-    assert backoff_sleeps, f"no backoff sleep emitted; sleeps={sleeps}"
-    assert backoff_sleeps[0] >= 30.0, \
-        f"first backoff was {backoff_sleeps[0]}s, expected >= 30s for connection-limit"
+    # The CRITICAL assertion (Phase-35): wait_until_ws_slot_free was invoked
+    # with the 5-sec interval and the stream's credentials.
+    assert probe_calls, "wait_until_ws_slot_free was NOT called on connection-limit"
+    assert probe_calls[0]["interval_sec"] == 5
+    assert probe_calls[0]["api_key"] == "k"
     alpaca_ws_patch._reset_for_tests()
 
 
