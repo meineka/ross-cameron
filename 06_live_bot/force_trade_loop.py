@@ -135,6 +135,10 @@ def trade_one(trading_client, alerter, symbol: str, shares: int,
     detection allows it even on already-held symbols. Bracket orders
     don't support extended_hours; outside RTH they queue for next
     regular session.
+
+    Phase-50 (2026-05-15): preflight shortable + open-position check
+    so we don't spam error-pushes for known-impossible cases (small-
+    caps not shortable on paper account, existing bracket conflicts).
     """
     from alpaca.trading.requests import (
         LimitOrderRequest, TakeProfitRequest, StopLossRequest)
@@ -142,6 +146,31 @@ def trade_one(trading_client, alerter, symbol: str, shares: int,
     if direction == "flat":
         log.info("SKIP %s — trend=flat (no clear direction)", symbol)
         return
+    # Phase-50: short-preflight — many small-caps are not shortable
+    # on Alpaca paper. Check + skip silently (info-log only).
+    if direction == "short":
+        try:
+            asset = trading_client.get_asset(symbol)
+            if not getattr(asset, "shortable", False):
+                log.info("SKIP %s SHORT — not shortable on Alpaca paper",
+                          symbol)
+                return
+        except Exception as e:
+            log.debug("shortable-check %s err: %s", symbol, e)
+    # Phase-50: bracket-conflict preflight — if symbol already has an
+    # open bracket parent, a new bracket on the same symbol will fail
+    # with "bracket orders must be entry orders". Skip + info-log.
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+        opens = trading_client.get_orders(filter=GetOrdersRequest(
+            status=QueryOrderStatus.OPEN, symbols=[symbol], limit=10))
+        if any(getattr(o, "legs", None) for o in opens):
+            log.info("SKIP %s — open bracket already exists (%d open orders)",
+                      symbol, len(opens))
+            return
+    except Exception as e:
+        log.debug("bracket-conflict-check %s err: %s", symbol, e)
     try:
         entry = price_hint or 5.0
         if direction == "long":
@@ -255,12 +284,26 @@ def trade_one(trading_client, alerter, symbol: str, shares: int,
             except Exception as e:
                 log.debug("push failed: %s", e)
     except Exception as e:
+        msg = str(e)
+        # Phase-50: silence expected Alpaca constraint errors. These
+        # are recoverable (just skip the symbol this tick) and used to
+        # spam ntfy with [ERROR] pushes. Now: info-log only, no push.
+        QUIET_PATTERNS = (
+            "cannot be sold short",
+            "bracket orders must be entry orders",
+            "potential wash trade",
+            "insufficient qty",
+        )
+        if any(p in msg for p in QUIET_PATTERNS):
+            log.info("SKIP %s %s — %s",
+                      symbol, direction.upper(), msg[:120])
+            return
         log.error("FORCE-TRADE %s %s err: %s", direction.upper(), symbol, e)
         if alerter is not None:
             try:
                 alerter.send("error",
                               f"FORCE-{direction.upper()} {symbol} ERROR",
-                              body=str(e)[:200], force=True)
+                              body=msg[:200], force=True)
             except Exception:
                 pass
 
