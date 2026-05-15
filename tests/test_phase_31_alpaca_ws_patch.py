@@ -54,27 +54,28 @@ def test_patch_replaces_run_forever():
 
 
 def test_patched_loop_handles_connection_limit_exceeded():
-    """Phase-35 (2026-05-15) changed this branch: instead of sleeping 30-60s
-    on 'connection limit exceeded', the patch now calls
-    wait_until_ws_slot_free (probe every 5s). Verify the probe IS invoked
-    when the stall-probe module is available. The fall-through legacy
-    sleep is exercised by test_patched_loop_uses_exponential_backoff_on_generic_value_error."""
+    """Phase-38 (2026-05-15) FIX: on 'connection limit exceeded' the
+    patch now sleeps 5s and retries on the EXISTING ws instance instead
+    of running a separate probe that itself consumes the slot.
+
+    The old Phase-35 probe-every-5s was self-defeating: each probe
+    opened its own _connect+_auth, briefly held the slot, then closed.
+    Alpaca held the slot ~30s server-side post-close, so the next probe
+    always saw it locked. We were locking the slot we were checking.
+
+    Now: 5s sleep, then retry on self._start_ws() (next loop iter).
+    No extra WS clients spawned."""
     import alpaca_ws_patch
     alpaca_ws_patch._reset_for_tests()
     alpaca_ws_patch.install_patch()
     from alpaca.data.live import websocket as ws_module
-    import alpaca_rate_guard
 
-    probe_calls = []
-
-    async def fake_wait(**kw):
-        probe_calls.append(kw)
-        # Pretend slot stays locked → falls through to legacy sleep
-        return False, 1, "still locked"
+    sleeps: list[float] = []
 
     async def fake_sleep(t):
-        # Stop the loop after the fall-through sleep
-        if t >= 1.0:
+        sleeps.append(t)
+        # After 2 backoff sleeps (>=1s) stop the loop
+        if sum(1 for s in sleeps if s >= 1.0) >= 2:
             stream._should_run = False
 
     stream = MagicMock()
@@ -94,18 +95,18 @@ def test_patched_loop_handles_connection_limit_exceeded():
     stream.close = AsyncMock()
 
     async def run_test():
-        with patch.object(alpaca_ws_patch, "wait_until_ws_slot_free",
-                          side_effect=fake_wait), \
-             patch("asyncio.sleep", side_effect=fake_sleep):
+        with patch("asyncio.sleep", side_effect=fake_sleep):
             await ws_module.DataStream._run_forever(stream)
 
     asyncio.run(run_test())
 
-    # The CRITICAL assertion (Phase-35): wait_until_ws_slot_free was invoked
-    # with the 5-sec interval and the stream's credentials.
-    assert probe_calls, "wait_until_ws_slot_free was NOT called on connection-limit"
-    assert probe_calls[0]["interval_sec"] == 5
-    assert probe_calls[0]["api_key"] == "k"
+    # Phase-38 assertion: backoff sleep on connection-limit is 5s
+    # (= ALPACA_STALL_PROBE_INTERVAL_SEC), not 30+ seconds. NO
+    # separate probe ws is spawned.
+    backoff_sleeps = [s for s in sleeps if s >= 1.0]
+    assert backoff_sleeps, "no backoff sleep emitted"
+    assert backoff_sleeps[0] == 5.0, \
+        f"expected 5s retry on conn-limit, got {backoff_sleeps[0]}s"
     alpaca_ws_patch._reset_for_tests()
 
 

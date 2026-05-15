@@ -212,14 +212,21 @@ def test_wait_until_ws_slot_free_times_out(monkeypatch):
     assert "locked" in detail.lower()
 
 
-def test_ws_patch_invokes_wait_until_ws_slot_free_on_conn_limit():
-    """Source-grep: alpaca_ws_patch.py must invoke wait_until_ws_slot_free
-    when it sees 'connection limit'."""
+def test_ws_patch_uses_5s_retry_on_conn_limit_without_separate_probe():
+    """Phase-38: source-grep verifying the patch retries every
+    ALPACA_STALL_PROBE_INTERVAL_SEC on connection-limit by sleeping
+    + falling through to next while-iter, NOT by running a separate
+    wait_until_ws_slot_free probe (which was the self-locking bug)."""
     src = (ROOT / "06_live_bot" / "alpaca_ws_patch.py").read_text(encoding="utf-8")
-    assert "wait_until_ws_slot_free" in src
+    # connection-limit branch exists
     assert "connection limit" in src.lower()
-    # The probe-then-continue branch must precede the fall-through sleep
-    probe_idx = src.find("wait_until_ws_slot_free(")
-    sleep_idx = src.find("await asyncio.sleep(sleep_for)")
-    assert probe_idx > 0
-    assert sleep_idx > probe_idx
+    # The reference to ALPACA_STALL_PROBE_INTERVAL_SEC must be inside the
+    # connection-limit branch (5-sec retry cadence on direct ws instance)
+    assert "ALPACA_STALL_PROBE_INTERVAL_SEC" in src
+    # The self-locking probe invocation must be GONE from the patch
+    # (still importable for tests/other callers, but the patch itself
+    # does not call it anymore)
+    assert "wait_until_ws_slot_free(" not in src, (
+        "wait_until_ws_slot_free still wired into alpaca_ws_patch.py — "
+        "this was the self-locking bug fixed in Phase-38"
+    )
