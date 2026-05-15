@@ -1930,23 +1930,11 @@ class Bot:
             log.error("Alpaca-Connection FAIL: %s", e, exc_info=True)
             return
 
-        # Phase-37 (user request 2026-05-15): startup push so user knows
-        # on the phone that the bot is live + connected + ready to trade.
-        # Sent AFTER Alpaca-Connection OK so an offline broker doesn't
-        # produce a false-positive "bot started" push.
-        # Phase-40 fix (user-spotted 2026-05-15): NtfyAlerter prepends
-        # "[LEVEL] " to titles already, so a manual "[INFO]" produced
-        # "[INFO] [INFO] Bot started" — duplicate prefix on the phone.
-        if getattr(self, "alerter", None) is not None:
-            try:
-                self.alerter.send(
-                    "info",
-                    "Bot started",   # alerter adds "[INFO] " prefix
-                    body=f"Cameron-Bot live — equity ${equity:,.2f}",
-                    force=True,
-                )
-            except Exception as _e:
-                log.debug("startup push failed: %s", _e)
+        # Phase-44 (2026-05-15): "Bot started" push moved to daemon_run()
+        # so it fires regardless of market state. Bot.run() only runs
+        # during trading hours; daemon_run runs ALL the time. Keeping
+        # the push in only one place avoids the user getting two on a
+        # trading day's first scan.
 
         # 0a. #6 SPY-Trend-Filter
         spy_pct = await asyncio.to_thread(fetch_spy_today_pct)
@@ -3278,6 +3266,30 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
     except Exception as e:
         log.error("position-recovery raised: %s — daemon aborts", e, exc_info=True)
         return
+
+    # Phase-44 (user-fix 2026-05-15): "Bot started" push at DAEMON boot,
+    # not inside Bot.run(). When the daemon spawns after market hours,
+    # Bot.run() is never called until next premarket — so the Phase-37
+    # startup push (which was inside Bot.run) never fired. Move it here
+    # so the user gets a notification on EVERY daemon boot regardless
+    # of market state.
+    try:
+        from alerter import make_alerter
+        from alpaca.trading.client import TradingClient
+        _alerter = make_alerter()
+        if _alerter is not None:
+            try:
+                _eq = float(TradingClient(api_key, api_secret, paper=True).get_account().equity)
+            except Exception:
+                _eq = 0.0
+            _alerter.send(
+                "info",
+                "Bot started",
+                body=f"Cameron-Bot daemon live — equity ${_eq:,.2f}",
+                force=True,
+            )
+    except Exception as _e:
+        log.debug("daemon startup push failed: %s", _e)
     while True:
         # Mid-day-resume: wenn Restart während Trading-Fenster (06:27–HARD_FLAT) an Werktag → sofort traden statt morgen warten
         ny_now = datetime.now(NY_TZ)
