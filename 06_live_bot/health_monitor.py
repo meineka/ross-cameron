@@ -118,6 +118,13 @@ class HealthMonitor:
                 return ProbeResult("alpaca", False, f"account_status={a.status}")
             if a.trading_blocked:
                 return ProbeResult("alpaca", False, "trading_blocked=True")
+            # Market-hours-aware staleness check
+            try:
+                clock = tc.get_clock()
+                is_open = bool(getattr(clock, "is_open", False))
+            except Exception:
+                is_open = False
+            stale_threshold = 600 if is_open else 24 * 3600  # 10 min RTH / 24 h closed
             # Quick data ping
             dc = StockHistoricalDataClient(k, s)
             snap = dc.get_stock_snapshot(
@@ -126,12 +133,12 @@ class HealthMonitor:
             if not sp or not sp.latest_trade:
                 return ProbeResult("alpaca", False, "SPY snapshot empty")
             age = (datetime.now(timezone.utc) - sp.latest_trade.timestamp).total_seconds()
-            if age > ALPACA_QUOTE_MAX_AGE_SEC:
+            if age > stale_threshold:
                 return ProbeResult("alpaca", False,
-                                    f"SPY trade {age:.0f}s old",
+                                    f"SPY trade {age:.0f}s old (market_open={is_open}, threshold={stale_threshold}s)",
                                     value=age)
             return ProbeResult("alpaca", True,
-                                f"account=ACTIVE, SPY age={age:.0f}s",
+                                f"account=ACTIVE, market_open={is_open}, SPY age={age:.0f}s",
                                 value=age)
         except Exception as e:
             return ProbeResult("alpaca", False,
