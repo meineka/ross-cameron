@@ -5,13 +5,13 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 ## Summary
 
 - **Total files**: 72
-- **Total `def test_*` functions**: 753
+- **Total `def test_*` functions**: 755
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 271 |
+| critical | 273 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 568 |
+| not_reviewed | 570 |
 | partially_reviewed | 85 |
 | reviewed | 100 |
 
@@ -107,7 +107,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_pattern_robustness.py` | 7 | unit | yes | not_reviewed | Pattern-Detector Robustheit gegen pathologische Eingaben. |
 | `test_phase_26_27_wiring.py` | 8 | critical | no | not_reviewed | Phase-26/27: structured logger wiring + premarket-v2 shadow + catalyst override. |
 | `test_phase_30_trade_push.py` | 12 | critical | yes | not_reviewed | Phase-30: trade-event push notifications. |
-| `test_phase_31_alpaca_ws_patch.py` | 7 | critical | yes | not_reviewed | Phase-31: alpaca-py WebSocket reconnect-backoff patch tests. |
+| `test_phase_31_alpaca_ws_patch.py` | 9 | critical | yes | not_reviewed | Phase-31: alpaca-py WebSocket reconnect-backoff patch tests. |
 | `test_phase_32_aligned_scan_start.py` | 6 | critical | no | not_reviewed | Phase-32: aligned_scan_start must never return a time in the past. |
 | `test_phase_34_ws_health_probe.py` | 8 | critical | yes | not_reviewed | Phase-34: bot_ws health probe scans bot.log for WS reconnect storms. |
 | `test_phase_35_alpaca_rate_guard.py` | 12 | critical | yes | not_reviewed | Phase-35: Alpaca rate-guard + 5-sec stall-probe. |

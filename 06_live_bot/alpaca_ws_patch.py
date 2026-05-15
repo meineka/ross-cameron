@@ -46,6 +46,16 @@ RESET_SLOT_SEC = 30.0  # minimum sleep on "connection limit exceeded"
 # stall, well under the 200/min rate cap.
 CONN_LIMIT_SLEEP_SCHEDULE = [5, 60, 120, 180, 300]  # seconds per consec idx
 
+# Phase-42 (2026-05-15): module-global cool-down so every NEW
+# StockDataStream instance (bot.py creates fresh ones on watchlist
+# changes — each has its own consec counter starting at 0) respects
+# the recent connection-limit-exceeded state. Without this, instance
+# A fails -> instance B spawns 5 seconds later -> instance B fails
+# -> instance C 5s later. Net: 5s cadence even though Phase-41 schedule
+# is 60+s per-instance.
+COOL_DOWN_AFTER_CONN_LIMIT_SEC = 90  # > observed Alpaca session-linger (60s)
+_global_cool_down_until: float = 0.0  # time.monotonic() value
+
 # Phase-35 (user request 2026-05-15): retry cadence on "connection
 # limit exceeded" comes from alpaca_rate_guard.
 #
@@ -105,6 +115,21 @@ def install_patch() -> bool:
                     log.info("%s stream stopped", getattr(self, "_name", "?"))
                     return
                 if not self._running:
+                    # Phase-42: respect the module-global cool-down BEFORE
+                    # any new auth attempt. This prevents fresh
+                    # StockDataStream instances (created by bot.py on
+                    # watchlist changes) from circumventing the per-instance
+                    # backoff and hammering Alpaca every 5s.
+                    import alpaca_ws_patch as _mod
+                    cool_left = _mod._global_cool_down_until - time.monotonic()
+                    if cool_left > 0:
+                        log.warning("cool-down active: sleeping %.1fs before "
+                                     "next auth (slot recently locked)",
+                                     cool_left)
+                        try:
+                            await asyncio.sleep(cool_left)
+                        except asyncio.CancelledError:
+                            return
                     log.info("starting %s websocket connection",
                               getattr(self, "_name", "?"))
                     await self._start_ws()
@@ -145,6 +170,11 @@ def install_patch() -> bool:
                 # gap > linger.
                 msg = str(e)
                 if "connection limit" in msg.lower():
+                    # Phase-42: set module-global cool-down so any new
+                    # StockDataStream instance respects this state
+                    import alpaca_ws_patch as _mod
+                    _mod._global_cool_down_until = (
+                        time.monotonic() + COOL_DOWN_AFTER_CONN_LIMIT_SEC)
                     idx = min(consec_value_errors, len(CONN_LIMIT_SLEEP_SCHEDULE) - 1)
                     sleep_for = float(CONN_LIMIT_SLEEP_SCHEDULE[idx])
                 elif is_value:
@@ -180,7 +210,8 @@ def is_patched() -> bool:
 
 def _reset_for_tests() -> None:
     """ONLY for unit tests — restore original."""
-    global _PATCHED
+    global _PATCHED, _global_cool_down_until
+    _global_cool_down_until = 0.0  # Phase-42: clear leaked state between tests
     if not _PATCHED:
         return
     try:

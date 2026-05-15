@@ -27,6 +27,99 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "06_live_bot"))
 
 
+def test_global_cool_down_blocks_new_instance_auth():
+    """Phase-42: module-global cool-down ensures a freshly-spawned
+    StockDataStream (which has consec=0 by default) cannot bypass the
+    per-instance backoff when Alpaca's slot was recently locked.
+
+    Sets _global_cool_down_until = now+10s. A new patched_run_forever
+    instance must sleep ~10s before its first _start_ws() call."""
+    import alpaca_ws_patch
+    alpaca_ws_patch._reset_for_tests()
+    alpaca_ws_patch.install_patch()
+    from alpaca.data.live import websocket as ws_module
+    import time as _t
+
+    # Pre-set the cool-down to 8 seconds from now
+    alpaca_ws_patch._global_cool_down_until = _t.monotonic() + 8
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(t):
+        sleeps.append(t)
+        # After the cool-down sleep, kill the loop so we don't hit _start_ws
+        if t >= 5.0:
+            stream._should_run = False
+
+    stream = MagicMock()
+    stream._handlers = {"bars": ["AAA"]}
+    stream._stop_stream_queue = MagicMock()
+    stream._stop_stream_queue.empty.return_value = True
+    stream._should_run = True
+    stream._running = False
+    stream._name = "test"
+    stream._loop = None
+    stream._start_ws = AsyncMock()
+    stream._send_subscribe_msg = AsyncMock()
+    stream._consume = AsyncMock()
+    stream.close = AsyncMock()
+
+    async def run_test():
+        with patch("asyncio.sleep", side_effect=fake_sleep):
+            await ws_module.DataStream._run_forever(stream)
+
+    asyncio.run(run_test())
+    # The cool-down sleep (~8s) must have fired BEFORE any _start_ws call
+    cool_down_sleeps = [s for s in sleeps if 5 < s < 12]
+    assert cool_down_sleeps, (
+        f"expected ~8s cool-down sleep, got {sleeps[:5]}"
+    )
+    alpaca_ws_patch._global_cool_down_until = 0.0
+    alpaca_ws_patch._reset_for_tests()
+
+
+def test_conn_limit_failure_sets_global_cool_down():
+    """Phase-42: when patched _run_forever sees 'connection limit
+    exceeded', it sets _global_cool_down_until = now + 90s."""
+    import alpaca_ws_patch
+    alpaca_ws_patch._reset_for_tests()
+    alpaca_ws_patch._global_cool_down_until = 0.0
+    alpaca_ws_patch.install_patch()
+    from alpaca.data.live import websocket as ws_module
+    import time as _t
+
+    async def fake_sleep(t):
+        # Stop after first backoff
+        if t >= 1.0:
+            stream._should_run = False
+
+    stream = MagicMock()
+    stream._handlers = {"bars": ["AAA"]}
+    stream._stop_stream_queue = MagicMock()
+    stream._stop_stream_queue.empty.return_value = True
+    stream._should_run = True
+    stream._running = False
+    stream._name = "test"
+    stream._loop = None
+    stream._start_ws = AsyncMock(side_effect=ValueError("connection limit exceeded"))
+    stream._send_subscribe_msg = AsyncMock()
+    stream._consume = AsyncMock()
+    stream.close = AsyncMock()
+
+    t_before = _t.monotonic()
+    async def run_test():
+        with patch("asyncio.sleep", side_effect=fake_sleep):
+            await ws_module.DataStream._run_forever(stream)
+    asyncio.run(run_test())
+
+    cd = alpaca_ws_patch._global_cool_down_until
+    # Should be set to t_before + 90 (give or take small clock drift)
+    assert cd > t_before + 80, f"cool-down too short: {cd - t_before}"
+    assert cd < t_before + 100, f"cool-down too long: {cd - t_before}"
+    alpaca_ws_patch._global_cool_down_until = 0.0
+    alpaca_ws_patch._reset_for_tests()
+
+
 def test_install_patch_is_idempotent():
     import alpaca_ws_patch
     alpaca_ws_patch._reset_for_tests()
