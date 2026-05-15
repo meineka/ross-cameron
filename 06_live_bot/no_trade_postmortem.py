@@ -134,13 +134,119 @@ _LOG_LINE_RX = re.compile(r"^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})")
 
 
 def _extract_last_error(text: str) -> str | None:
-    """Last line matching ERROR/WARNING substring (most-recent first)."""
+    """Last line matching ERROR substring (most-recent first)."""
     if not text:
         return None
     for line in reversed(text.splitlines()):
         if "ERROR" in line or "error" in line.lower():
             return line.strip()[:500]
     return None
+
+
+_WD_RESTART_MARKERS = ("WATCHDOG START", "Started bot.py", "Preflight OK")
+
+
+def _last_restart_line_index(lines: list[str]) -> int:
+    """Phase-15 (ChatGPT-08:11 #3): return the index of the most recent
+    successful watchdog restart marker. Anything before that index is
+    a stale error from a previous run and should NOT be reported as
+    "current cause"."""
+    for i in range(len(lines) - 1, -1, -1):
+        for marker in _WD_RESTART_MARKERS:
+            if marker in lines[i]:
+                return i
+    return -1
+
+
+def _extract_last_error_since_restart(text: str) -> str | None:
+    """Phase-15: like _extract_last_error but only considers lines AFTER
+    the most recent WATCHDOG START / Preflight OK / Started bot.py marker.
+    Returns None if the watchdog has restarted cleanly since the last error
+    — which is the correct signal for "the bot is healthy now"."""
+    if not text:
+        return None
+    lines = text.splitlines()
+    cutoff = _last_restart_line_index(lines)
+    # Scan only lines after cutoff (cutoff == -1 means scan all)
+    for i in range(len(lines) - 1, cutoff, -1):
+        line = lines[i]
+        if "ERROR" in line or "error" in line.lower():
+            return line.strip()[:500]
+    return None
+
+
+def _get_parent_pid_map() -> dict[int, int]:
+    """Phase-15: best-effort {child_pid: parent_pid} for python.exe so the
+    postmortem can flag venv-launcher/child-daemon pairs as a single
+    process group instead of two unrelated 'live' Bot processes."""
+    out_map: dict[int, int] = {}
+    if os.name != "nt":
+        return out_map
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["wmic", "process", "where", "name='python.exe'",
+             "get", "ProcessId,ParentProcessId", "/format:csv"],
+            text=True, timeout=10,
+        )
+    except Exception:
+        return out_map
+    for line in out.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        # CSV header: Node,ParentProcessId,ProcessId
+        if len(parts) < 3:
+            continue
+        ppid_s, pid_s = parts[-2], parts[-1]
+        if not (ppid_s.isdigit() and pid_s.isdigit()):
+            continue
+        out_map[int(pid_s)] = int(ppid_s)
+    return out_map
+
+
+def _classify_pid_pair(pids: list[int],
+                        parent_map: dict[int, int] | None = None
+                        ) -> dict:
+    """Phase-15: return a structured summary of a PID list so the
+    postmortem distinguishes a launcher+child pair from two independent
+    processes.
+
+    Returns:
+      {"pids": [...],
+       "process_pairs": [{"launcher": <pid>, "child": <pid>}],
+       "standalone_pids": [...],
+       "interpretation": "single venv pair" | "N processes" | ...}
+    """
+    if parent_map is None:
+        parent_map = _get_parent_pid_map()
+    pid_set = set(pids)
+    pairs = []
+    paired_children = set()
+    paired_launchers = set()
+    for child in pids:
+        parent = parent_map.get(child)
+        if parent in pid_set and parent != child:
+            pairs.append({"launcher": parent, "child": child})
+            paired_children.add(child)
+            paired_launchers.add(parent)
+    standalone = [p for p in pids
+                   if p not in paired_children and p not in paired_launchers]
+    if len(pairs) == 1 and not standalone:
+        interp = "single venv launcher/child pair"
+    elif len(pairs) >= 1 and not standalone:
+        interp = f"{len(pairs)} venv launcher/child pairs"
+    elif len(pairs) == 0 and len(standalone) == 1:
+        interp = "single standalone process"
+    elif len(pairs) == 0 and len(standalone) > 1:
+        interp = f"{len(standalone)} independent processes (no launcher/child relationship detected)"
+    else:
+        interp = (f"{len(pairs)} launcher/child pair(s) + "
+                  f"{len(standalone)} standalone process(es)")
+    return {
+        "pids": list(pids),
+        "process_pairs": pairs,
+        "standalone_pids": standalone,
+        "interpretation": interp,
+    }
 
 
 def _extract_last_match(text: str, needle: str) -> str | None:
@@ -225,6 +331,11 @@ def build_postmortem(target_date: str | None = None) -> dict:
     watchdog_pids = _find_watchdog_pids()
     bot_daemon_alive = any(_is_pid_alive(p) for p in bot_pids)
     watchdog_alive = any(_is_pid_alive(p) for p in watchdog_pids)
+    # Phase-15 (#3 dedupe): classify launcher/child pairs so reports
+    # don't suggest two independent strategies are running.
+    parent_map = _get_parent_pid_map()
+    bot_daemon_pid_pairs = _classify_pid_pair(bot_pids, parent_map)
+    watchdog_pid_pairs = _classify_pid_pair(watchdog_pids, parent_map)
 
     heartbeat_file_age_sec = None
     heartbeat_content = None
@@ -241,7 +352,11 @@ def build_postmortem(target_date: str | None = None) -> dict:
     # 3) Log scrapes
     daemon_text = _tail_text(DAEMON_LOG)
     watchdog_text = _tail_text(WATCHDOG_LOG)
-    last_watchdog_error = _extract_last_error(watchdog_text)
+    # Phase-15: report only errors AFTER the last successful restart marker
+    # so stale errors from a previous run don't masquerade as the current
+    # cause. last_watchdog_error_raw kept for backwards compatibility.
+    last_watchdog_error = _extract_last_error_since_restart(watchdog_text)
+    last_watchdog_error_raw = _extract_last_error(watchdog_text)
     last_bot_start = _extract_last_match(daemon_text, "Started bot.py") \
                      or _extract_last_match(watchdog_text, "Started bot.py")
     last_ws_subscription = _extract_last_match(daemon_text, "WS subscribed") \
@@ -289,9 +404,12 @@ def build_postmortem(target_date: str | None = None) -> dict:
         "target_date_ny": target_date,
         "bot_daemon_alive": bot_daemon_alive,
         "bot_daemon_pids": bot_pids,
+        "bot_daemon_pid_pairs": bot_daemon_pid_pairs,
         "watchdog_alive": watchdog_alive,
         "watchdog_pids": watchdog_pids,
+        "watchdog_pid_pairs": watchdog_pid_pairs,
         "last_watchdog_error": last_watchdog_error,
+        "last_watchdog_error_raw_unfiltered": last_watchdog_error_raw,
         "last_bot_start": last_bot_start,
         "last_ws_subscription": last_ws_subscription,
         "status_json_ts": status_ts,
