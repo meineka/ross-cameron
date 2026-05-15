@@ -621,7 +621,12 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
         # Review-V2 P1.3: use configurable CATALYST_MODE.
         # "soft" (default) tolerates yfinance off-hours empty/error.
         # "strict" fails-closed for live trading.
-        if CATALYST_REQUIRED and not passes_catalyst_filter(sym, mode=CATALYST_MODE):
+        # Phase-26: pass gap+rvol so soft-mode can override yfinance-sparse
+        # stale-news rejections when the move itself IS the catalyst.
+        gap = getattr(row, "intraday_pct", None)
+        rvol = getattr(row, "rvol_proxy", None)
+        if CATALYST_REQUIRED and not passes_catalyst_filter(
+                sym, mode=CATALYST_MODE, gap_pct=gap, rvol=rvol):
             log.info("    REJECT %s (no recent catalyst, mode=%s)", sym, CATALYST_MODE)
             continue
         filtered.append(row)
@@ -635,6 +640,16 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
         log.info("  #%d %s  $%.2f  +%.1f%%  RVOL %.1fx  score=%.0f",
                  rank, row.ticker, row.close, row.intraday_pct, row.rvol_proxy, row.score)
     log.info("=" * 60)
+    # Phase-27 (premarket-scanner-v2 shadow): run the new Alpaca-bars-based
+    # scanner side-by-side on the SAME top-N tickers, log the comparison
+    # to bot.log, and write the v2-reject-reasons to
+    # premarket_v2_shadow.jsonl. Decision is STILL made by the legacy
+    # output below — shadow mode only collects parity evidence so we can
+    # later cut over when v2 proves at least as good for N days.
+    try:
+        _run_premarket_v2_shadow(all_cands, top_n)
+    except Exception as e:
+        log.warning("premarket-v2 shadow scan failed (non-blocking): %s", e)
     # Audit-Iter 22: intraday_pct + rvol_proxy in TickerState durchreichen,
     # damit pd_size_multiplier den vollen Filter (nicht nur Score) nutzen kann.
     return [
@@ -645,6 +660,77 @@ def _premarket_scan_inner(top_n: int) -> list[TickerState]:
         )
         for rank, row in enumerate(all_cands.itertuples())
     ]
+
+
+def _run_premarket_v2_shadow(all_cands, top_n: int) -> None:
+    """Phase-27: shadow-mode invocation of premarket_scanner_v2.
+
+    Runs the new Alpaca-bars + reject-reasons scanner on the same
+    legacy-watchlist symbols, logs per-symbol pass/reject decisions,
+    appends one summary row per scan to premarket_v2_shadow.jsonl.
+    NEVER affects trading — pure observability."""
+    import json as _json
+    from pathlib import Path as _P
+    from datetime import datetime as _dt, timezone as _tz
+
+    if all_cands is None or len(all_cands) == 0:
+        return
+    try:
+        symbols = [r.ticker for r in all_cands.itertuples()]
+    except Exception:
+        return
+    if not symbols:
+        return
+
+    # Lazy-import alpaca data + scanner so test/non-live paths skip cleanly
+    try:
+        from secrets_loader import get_alpaca_keys
+        from alpaca.data.historical import StockHistoricalDataClient
+        from premarket_scanner_v2 import (
+            scan_alpaca_premarket_with_reasons,
+            scan_extended_hours_bars,
+            merge_premarket_rvol_into_rows,
+        )
+        k, s = get_alpaca_keys()
+        dc = StockHistoricalDataClient(k, s)
+    except Exception as e:
+        log.info("premarket-v2 shadow: deps unavailable (%s) — skipped", e)
+        return
+
+    rows = scan_alpaca_premarket_with_reasons(dc, symbols, mode="strict")
+    try:
+        bar_stats = scan_extended_hours_bars(dc, symbols)
+    except Exception as e:
+        log.warning("premarket-v2 shadow: extended-hours bars fetch failed: %s", e)
+        bar_stats = {}
+    rows = merge_premarket_rvol_into_rows(rows, bar_stats, mode="strict")
+
+    n_pass = sum(1 for r in rows if r.get("passed"))
+    n_total = len(rows)
+    log.info("SHADOW-V2: %d/%d candidates would pass new scanner",
+             n_pass, n_total)
+    # Per-symbol summary
+    for r in rows[:top_n]:
+        passed = r.get("passed")
+        reasons = r.get("reject_reasons") or []
+        log.info("SHADOW-V2   %s  %s  %s",
+                 r.get("ticker"),
+                 "PASS" if passed else "REJECT",
+                 ",".join(reasons) if reasons else "")
+    # Persist for postmortem
+    out_path = _P(__file__).resolve().parent / "premarket_v2_shadow.jsonl"
+    try:
+        record = {
+            "ts": _dt.now(_tz.utc).isoformat(),
+            "n_total": n_total,
+            "n_pass": n_pass,
+            "n_reject": n_total - n_pass,
+            "rows": rows,
+        }
+        with out_path.open("a", encoding="utf-8") as f:
+            f.write(_json.dumps(record) + "\n")
+    except OSError as e:
+        log.warning("premarket-v2 shadow: write failed: %s", e)
 
 
 # ─── Pattern-Detector (auf rolling Bar-Window) ──────────────────────────────
@@ -949,6 +1035,10 @@ class AlpacaExecutor:
         self.client = TradingClient(api_key, api_secret, paper=paper)
         if dry_run:
             log.info("DRY-RUN mode: no orders submitted")
+        # Phase-26: default to null loggers; Bot.__init__ injects real ones.
+        from structured_logger import NullMarketDataLogger, NullOrderLifecycleLogger
+        self.md_logger = NullMarketDataLogger()
+        self.ol_logger = NullOrderLifecycleLogger()
 
     def get_equity(self) -> float:
         try:
@@ -1092,13 +1182,28 @@ class AlpacaExecutor:
         if take_profit <= entry:
             log.error("BRACKET-BUY %s INVALID: tp %.2f <= entry %.2f — skip", symbol, take_profit, entry)
             return {"status": "failed", "reason": "tp<=entry"}
+        # Phase-26: emit `intent` to the structured order-lifecycle log so
+        # downstream postmortem sees the planned values regardless of fate.
+        intent_id = self.ol_logger.emit_intent(
+            symbol=symbol, side="BUY", qty=shares,
+            planned_price=round(entry, 2),
+            planned_stop=round(stop, 2),
+            planned_target=round(take_profit, 2),
+        )
         if self.dry_run:
             log.info("[DRY] BRACKET-BUY %s %d entry=%.2f stop=%.2f tp=%.2f",
                      symbol, shares, entry, stop, take_profit)
+            self.ol_logger.emit_filled(
+                intent_id, symbol=symbol, side="BUY", qty=shares,
+                filled_qty=shares, actual_price=round(entry, 2),
+                broker_order_id=f"dryrun-{symbol}",
+                extra={"dry_run": True},
+            )
             # In dry-run wir SIMULIEREN einen fill bei limit-price
             return {"status": "filled",
                     "order_id": f"dryrun-{symbol}-{datetime.now().timestamp()}",
-                    "fill_price": entry, "shares": shares}
+                    "fill_price": entry, "shares": shares,
+                    "intent_id": intent_id}
         try:
             req = LimitOrderRequest(
                 symbol=symbol, qty=shares, side=OrderSide.BUY,
@@ -1109,10 +1214,18 @@ class AlpacaExecutor:
             )
             o = self.client.submit_order(req)
             order_id = o.id
+            self.ol_logger.emit_submitted(
+                intent_id, symbol=symbol, side="BUY", qty=shares,
+                broker_order_id=str(order_id),
+            )
             log.info("BRACKET-BUY %s %d entry=%.2f STOP=%.2f TP=%.2f → %s (waiting fill)",
                      symbol, shares, entry, stop, take_profit, order_id)
         except Exception as e:
             log.error("submit_bracket_buy err %s: %s", symbol, e)
+            self.ol_logger.emit_rejected(
+                intent_id, symbol=symbol, side="BUY", qty=shares,
+                error_class=type(e).__name__, reason=str(e)[:200],
+            )
             return {"status": "failed", "reason": str(e)}
         # Poll for fill
         import time as _t
@@ -1143,18 +1256,35 @@ class AlpacaExecutor:
                     fill_price = entry
                 log.info("BRACKET-BUY %s FILLED @ $%.4f (planned $%.2f, qty %d/%d)",
                          symbol, fill_price, entry, fill_qty, shares)
+                self.ol_logger.emit_filled(
+                    intent_id, symbol=symbol, side="BUY", qty=shares,
+                    filled_qty=fill_qty, actual_price=fill_price,
+                    broker_order_id=str(order_id),
+                )
                 return {"status": "filled", "order_id": order_id,
-                        "fill_price": fill_price, "shares": fill_qty}
+                        "fill_price": fill_price, "shares": fill_qty,
+                        "intent_id": intent_id}
             if status_str in ("REJECTED", "CANCELED", "EXPIRED"):
                 log.warning("BRACKET-BUY %s order %s status=%s", symbol, order_id, status_str)
-                return {"status": "rejected", "order_id": order_id}
+                self.ol_logger.emit_rejected(
+                    intent_id, symbol=symbol, side="BUY", qty=shares,
+                    broker_order_id=str(order_id),
+                    reason=f"broker_status={status_str}",
+                )
+                return {"status": "rejected", "order_id": order_id,
+                        "intent_id": intent_id}
         # Timeout — cancel the unfilled order
         log.warning("BRACKET-BUY %s TIMEOUT — cancelling order %s", symbol, order_id)
         try:
             self.client.cancel_order_by_id(order_id)
         except Exception:
             pass
-        return {"status": "timeout", "order_id": order_id}
+        self.ol_logger.emit_canceled(
+            intent_id, symbol=symbol, side="BUY", qty=shares,
+            broker_order_id=str(order_id), reason="wait_fill_timeout",
+        )
+        return {"status": "timeout", "order_id": order_id,
+                "intent_id": intent_id}
 
     def verify_and_repair_protection(self, symbol: str, fill_price: float,
                                      planned_stop: float, planned_tp: float,
@@ -1610,6 +1740,37 @@ class Bot:
         # 5-Min. Aggregator schließt 1-min bars in 5-min Buckets.
         from bar_aggregator import BarAggregator
         self.aggregator = BarAggregator(bucket_minutes=BAR_AGGREGATION_MINUTES)
+        # Phase-26: structured loggers wired in (NullLogger fallback so tests
+        # via __new__ or partial init never crash). Live mode writes
+        # market_data_calls.jsonl + order_lifecycle.jsonl side-by-side with
+        # trades_live.jsonl. Each external call gets a row; each order
+        # lifecycle transition gets a row keyed by intent_id.
+        try:
+            from structured_logger import (
+                MarketDataLogger, OrderLifecycleLogger,
+                MARKET_DATA_PATH, ORDER_LIFECYCLE_PATH,
+            )
+            self.md_logger = MarketDataLogger(MARKET_DATA_PATH)
+            self.ol_logger = OrderLifecycleLogger(ORDER_LIFECYCLE_PATH)
+        except Exception as e:
+            log.warning("structured loggers not available: %s — using nulls", e)
+            from structured_logger import NullMarketDataLogger, NullOrderLifecycleLogger
+            self.md_logger = NullMarketDataLogger()
+            self.ol_logger = NullOrderLifecycleLogger()
+        # Wire the same loggers into the executor so AlpacaExecutor.submit_*
+        # methods can emit lifecycle events alongside the bot's intent rows.
+        try:
+            self.executor.md_logger = self.md_logger
+            self.executor.ol_logger = self.ol_logger
+        except Exception:
+            pass
+        # Phase-26: inject md_logger into catalyst_filter so yfinance.news
+        # calls show up in market_data_calls.jsonl with latency + status.
+        try:
+            from catalyst_filter import set_market_data_logger
+            set_market_data_logger(self.md_logger)
+        except Exception:
+            pass
 
     async def run(self):
         log.info("=" * 60)

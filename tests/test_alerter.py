@@ -1,0 +1,255 @@
+"""Phase-25: alerter + health_monitor.
+
+Tests cover:
+  - LogAlerter writes JSONL with ts/level/title/body
+  - Debounce: same (level, title) suppressed within window
+  - force=True bypasses debounce
+  - TelegramAlerter posts to api.telegram.org with right payload
+  - SMTPAlerter calls login + sendmail with right subject/from/to
+  - CompositeAlerter sends through all children
+  - make_alerter() picks Telegram > SMTP > Log-only based on env
+  - HealthMonitor fires alert after N consecutive failures
+  - HealthMonitor sends "recovered" alert on transition back to OK
+  - All alerter failures swallowed — never raise into the bot
+"""
+from __future__ import annotations
+import json
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+pytestmark = pytest.mark.critical  # Phase-25: live-safety gate
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "06_live_bot"))
+
+
+def _lines(p: Path) -> list[dict]:
+    return [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines()
+            if l.strip()]
+
+
+# ─── LogAlerter ─────────────────────────────────────────────────────────────
+
+def test_log_alerter_writes_jsonl(tmp_path):
+    from alerter import LogAlerter
+    p = tmp_path / "alerts.log"
+    a = LogAlerter(path=p, suppress_seconds=0)
+    a.send("error", "test-title", body="test body")
+    rows = _lines(p)
+    assert len(rows) == 1
+    assert rows[0]["level"] == "error"
+    assert rows[0]["title"] == "test-title"
+    assert rows[0]["body"] == "test body"
+
+
+def test_log_alerter_debounces_duplicate(tmp_path):
+    from alerter import LogAlerter
+    p = tmp_path / "alerts.log"
+    a = LogAlerter(path=p, suppress_seconds=3600)
+    assert a.send("error", "same") is True
+    assert a.send("error", "same") is False  # suppressed
+    rows = _lines(p)
+    assert len(rows) == 1
+
+
+def test_log_alerter_force_bypasses_debounce(tmp_path):
+    from alerter import LogAlerter
+    p = tmp_path / "alerts.log"
+    a = LogAlerter(path=p, suppress_seconds=3600)
+    assert a.send("error", "same") is True
+    assert a.send("error", "same", force=True) is True
+    rows = _lines(p)
+    assert len(rows) == 2
+
+
+def test_log_alerter_creates_parent_dir(tmp_path):
+    from alerter import LogAlerter
+    deep = tmp_path / "a" / "b" / "alerts.log"
+    a = LogAlerter(path=deep, suppress_seconds=0)
+    a.send("info", "t")
+    assert deep.exists()
+
+
+# ─── TelegramAlerter ────────────────────────────────────────────────────────
+
+def test_telegram_alerter_posts_to_correct_url():
+    from alerter import TelegramAlerter
+    seen = {}
+    class FakeResp:
+        status_code = 200
+    def fake_post(url, json=None, timeout=None):
+        seen["url"] = url
+        seen["payload"] = json
+        return FakeResp()
+    a = TelegramAlerter(bot_token="TOKEN123", chat_id="CHAT456",
+                         suppress_seconds=0, http_post=fake_post)
+    assert a.send("critical", "live blocker", body="something is on fire") is True
+    assert seen["url"] == "https://api.telegram.org/botTOKEN123/sendMessage"
+    assert seen["payload"]["chat_id"] == "CHAT456"
+    assert "CRITICAL" in seen["payload"]["text"]
+    assert "live blocker" in seen["payload"]["text"]
+    assert "something is on fire" in seen["payload"]["text"]
+
+
+def test_telegram_alerter_swallows_http_failure():
+    from alerter import TelegramAlerter
+    def boom(*a, **kw):
+        raise RuntimeError("network down")
+    a = TelegramAlerter(bot_token="X", chat_id="Y",
+                         suppress_seconds=0, http_post=boom)
+    # Must NOT raise — alerter failures cannot crash the bot
+    assert a.send("error", "t") is False
+
+
+# ─── SMTPAlerter ────────────────────────────────────────────────────────────
+
+def test_smtp_alerter_calls_login_and_sendmail():
+    from alerter import SMTPAlerter
+    fake_client = MagicMock()
+    factory_calls = []
+    def factory(host, port):
+        factory_calls.append((host, port))
+        return fake_client
+    a = SMTPAlerter(host="smtp.example.com", port=465,
+                     user="me@example.com", password="pw",
+                     to_addr="alerts@example.com",
+                     suppress_seconds=0, smtp_factory=factory)
+    assert a.send("critical", "blocker", body="body text") is True
+    assert factory_calls == [("smtp.example.com", 465)]
+    fake_client.login.assert_called_once_with("me@example.com", "pw")
+    sm_call = fake_client.sendmail.call_args
+    assert sm_call.args[0] == "me@example.com"
+    assert sm_call.args[1] == ["alerts@example.com"]
+    raw = sm_call.args[2]
+    assert "Subject: [CAMERON-CRITICAL] blocker" in raw
+    assert "body text" in raw
+
+
+# ─── CompositeAlerter ──────────────────────────────────────────────────────
+
+def test_composite_alerter_sends_to_all(tmp_path):
+    from alerter import CompositeAlerter, LogAlerter
+    a1 = LogAlerter(path=tmp_path / "a1.log", suppress_seconds=0)
+    a2 = LogAlerter(path=tmp_path / "a2.log", suppress_seconds=0)
+    c = CompositeAlerter([a1, a2], suppress_seconds=0)
+    assert c.send("info", "broadcast") is True
+    assert (tmp_path / "a1.log").exists()
+    assert (tmp_path / "a2.log").exists()
+
+
+def test_composite_alerter_survives_child_failure(tmp_path):
+    from alerter import CompositeAlerter, LogAlerter
+    class Bad:
+        name = "bad"
+        def send(self, *a, **kw): raise RuntimeError("broken")
+    good = LogAlerter(path=tmp_path / "good.log", suppress_seconds=0)
+    c = CompositeAlerter([Bad(), good], suppress_seconds=0)
+    assert c.send("info", "still ok") is True
+    assert (tmp_path / "good.log").exists()
+
+
+# ─── make_alerter() factory ────────────────────────────────────────────────
+
+def test_make_alerter_returns_log_only_when_no_env(tmp_path):
+    from alerter import make_alerter, LogAlerter
+    a = make_alerter(alerts_log_path=tmp_path / "alerts.log", env={})
+    assert isinstance(a, LogAlerter)
+
+
+def test_make_alerter_includes_telegram_when_env_set(tmp_path):
+    from alerter import make_alerter, CompositeAlerter, TelegramAlerter, LogAlerter
+    env = {"TELEGRAM_BOT_TOKEN": "T", "TELEGRAM_CHAT_ID": "C"}
+    a = make_alerter(alerts_log_path=tmp_path / "alerts.log", env=env)
+    assert isinstance(a, CompositeAlerter)
+    types_in_composite = {type(c).__name__ for c in a.alerters}
+    assert "TelegramAlerter" in types_in_composite
+    assert "LogAlerter" in types_in_composite
+
+
+def test_make_alerter_includes_smtp_when_env_set(tmp_path):
+    from alerter import make_alerter, CompositeAlerter, SMTPAlerter
+    env = {
+        "SMTP_HOST": "smtp.x.com", "SMTP_USER": "me", "SMTP_PASS": "pw",
+        "SMTP_TO": "alerts@x.com", "SMTP_PORT": "465",
+    }
+    a = make_alerter(alerts_log_path=tmp_path / "alerts.log", env=env)
+    assert isinstance(a, CompositeAlerter)
+    types_in_composite = {type(c).__name__ for c in a.alerters}
+    assert "SMTPAlerter" in types_in_composite
+
+
+# ─── HealthMonitor ─────────────────────────────────────────────────────────
+
+def test_health_monitor_fires_after_n_consecutive_failures(tmp_path):
+    from health_monitor import HealthMonitor
+    from alerter import LogAlerter
+    alerts_log = tmp_path / "alerts.log"
+    a = LogAlerter(path=alerts_log, suppress_seconds=0)
+    mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=2)
+    # Replace all probes with a single always-failing one
+    from health_monitor import ProbeResult
+    def bad():
+        return ProbeResult("yfinance", False, "stub-fail")
+    mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
+    mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
+    mon.probe_yfinance = bad
+    mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
+    # First tick: 1 failure, streak=1, no alert
+    mon.run_once()
+    assert not alerts_log.exists() or len(_lines(alerts_log)) == 0
+    # Second tick: streak=2, alert fires
+    mon.run_once()
+    rows = _lines(alerts_log)
+    assert len(rows) == 1
+    assert "yfinance" in rows[0]["title"]
+    assert rows[0]["level"] in ("error", "critical")
+
+
+def test_health_monitor_sends_recovered_on_back_to_ok(tmp_path):
+    from health_monitor import HealthMonitor, ProbeResult
+    from alerter import LogAlerter
+    alerts_log = tmp_path / "alerts.log"
+    a = LogAlerter(path=alerts_log, suppress_seconds=0)
+    mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=1)
+    # Other probes always OK
+    mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
+    mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
+    mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
+    # Two states for yfinance: first fail, then recover
+    state = {"fail": True}
+    def yf():
+        return ProbeResult("yfinance",
+                            not state["fail"],
+                            "bad" if state["fail"] else "back")
+    mon.probe_yfinance = yf
+    mon.run_once()  # fails, alert fires (n_consecutive=1)
+    state["fail"] = False
+    mon.run_once()  # recovers, info-alert
+    rows = _lines(alerts_log)
+    assert any("yfinance unhealthy" in r["title"] for r in rows)
+    assert any("recovered" in r["title"] for r in rows)
+
+
+def test_health_monitor_alert_does_not_repeat_while_failing(tmp_path):
+    """Once we've alerted, we don't re-alert every tick — only on
+    a recovered-then-fail transition. Prevents spam."""
+    from health_monitor import HealthMonitor, ProbeResult
+    from alerter import LogAlerter
+    alerts_log = tmp_path / "alerts.log"
+    a = LogAlerter(path=alerts_log, suppress_seconds=0)
+    mon = HealthMonitor(alerter=a, interval_sec=1, n_consecutive=1)
+    mon.probe_heartbeat = lambda: ProbeResult("heartbeat", True, "fresh")
+    mon.probe_audit_recommendation = lambda: ProbeResult("audit", True, "single")
+    mon.probe_yfinance = lambda: ProbeResult("yfinance", False, "still bad")
+    mon.probe_alpaca = lambda: ProbeResult("alpaca", True, "fresh")
+    mon.probe_catalyst_news = lambda: ProbeResult("catalyst_news", True, "fresh")
+    for _ in range(5):
+        mon.run_once()
+    rows = _lines(alerts_log)
+    # Only ONE yfinance-unhealthy alert despite 5 consecutive failures
+    assert sum(1 for r in rows if "yfinance unhealthy" in r["title"]) == 1

@@ -4,14 +4,14 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 63
-- **Total `def test_*` functions**: 653
+- **Total files**: 65
+- **Total `def test_*` functions**: 676
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 171 |
+| critical | 194 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 468 |
+| not_reviewed | 491 |
 | partially_reviewed | 85 |
 | reviewed | 100 |
 
@@ -35,6 +35,7 @@ Status meaning:
 
 Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rather than calling code paths. These are easier to write but easier to drift — review needed.
 
+- `test_alerter.py`
 - `test_audit_multi_bot_gate.py`
 - `test_behavior_audit.py`
 - `test_bracket_protection.py`
@@ -70,6 +71,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 
 | File | Tests | Category | Source-grep | Review | Purpose |
 |---|---|---|---|---|---|
+| `test_alerter.py` | 15 | critical | yes | not_reviewed | Phase-25: alerter + health_monitor. |
 | `test_audit_bugs.py` | 11 | critical | no | not_reviewed | Audit-Iter 29 (2026-05-13): audit.py health-monitoring bugs. |
 | `test_audit_multi_bot_gate.py` | 9 | critical | yes | reviewed | Phase-18 (ChatGPT-08:49 #5 P0): single-bot-process gate. |
 | `test_backoff_edge_bugs.py` | 18 | unit | no | not_reviewed | Audit-Iter 24 (2026-05-12): ReconnectBackoff edge cases. |
@@ -98,6 +100,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_pattern_detector.py` | 9 | unit | no | not_reviewed | Bull-Flag Pattern-Detector Tests — synthetic bars. |
 | `test_pattern_detector_edges.py` | 9 | unit | no | not_reviewed | Audit-Iter 20 (2026-05-12): detect_bull_flag edge-case bugs. |
 | `test_pattern_robustness.py` | 7 | unit | yes | not_reviewed | Pattern-Detector Robustheit gegen pathologische Eingaben. |
+| `test_phase_26_27_wiring.py` | 8 | critical | no | not_reviewed | Phase-26/27: structured logger wiring + premarket-v2 shadow + catalyst override. |
 | `test_pilot_baseline.py` | 3 | replay | no | partially_reviewed | Pilot-Stats Regression: Backtest-Output darf nicht von Baseline abweichen. |
 | `test_position_recovery_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 6 (2026-05-12): position_recovery.recover_or_flatten robustness. |
 | `test_position_size_multipliers.py` | 12 | unit | no | not_reviewed | Audit-Iter 15 (2026-05-12): compute_position_size multiplier stacking. |

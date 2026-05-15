@@ -23,6 +23,7 @@ Legacy `strict=False` → mode="soft", `strict=True` → mode="strict".
 """
 from __future__ import annotations
 import logging
+import sys
 import time
 from datetime import datetime
 
@@ -31,6 +32,17 @@ log = logging.getLogger("catalyst")
 _cache: dict[str, tuple[bool, float]] = {}  # symbol -> (has_catalyst, ts)
 _CACHE_TTL = 3600  # 1 h
 _LOOKBACK_HOURS = 24
+
+# Phase-26: optional MarketDataLogger injection so every yfinance.news
+# call gets a row in market_data_calls.jsonl (source/latency/error class).
+_md_logger = None
+
+
+def set_market_data_logger(logger) -> None:
+    """Bot.__init__ injects its MarketDataLogger here so catalyst yfinance
+    calls become diagnosable in postmortems."""
+    global _md_logger
+    _md_logger = logger
 
 
 def clear_cache() -> None:
@@ -50,7 +62,9 @@ def _resolve_mode(strict: bool | None, mode: str | None) -> str:
 
 
 def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS,
-                    strict: bool | None = None, mode: str | None = None) -> bool:
+                    strict: bool | None = None, mode: str | None = None,
+                    *, gap_pct: float | None = None,
+                    rvol: float | None = None) -> bool:
     """Returns True if symbol has fresh news (or in soft-mode on unknown).
 
     mode="off" → always True (filter disabled).
@@ -58,6 +72,12 @@ def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS,
     mode="strict" → False on empty/error/all-stale (fail-closed).
 
     Legacy: strict=False maps to "soft", strict=True maps to "strict".
+
+    Phase-26 (yfinance-sparse-small-cap fix): in soft mode, override
+    "all-stale" rejection IF gap_pct >= 15% AND rvol >= 10. Cameron's
+    own teaching is "huge gap + huge RVOL IS the catalyst" — if those
+    are present and we can't find news via yfinance, that's a yfinance
+    data gap, not an absent catalyst. Strict mode is unchanged.
     """
     resolved = _resolve_mode(strict, mode)
     if resolved == "off":
@@ -70,7 +90,29 @@ def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS,
             return val
     try:
         import yfinance as yf
-        news = yf.Ticker(symbol).news or []
+        # Phase-26: instrument with structured logger so every yfinance
+        # news call leaves a market_data_calls.jsonl breadcrumb.
+        import time as _t
+        _t0 = _t.perf_counter()
+        try:
+            news = yf.Ticker(symbol).news or []
+            if _md_logger is not None:
+                _md_logger.log_call(
+                    source="yfinance", call="news", status="ok",
+                    latency_ms=round((_t.perf_counter() - _t0) * 1000, 2),
+                    symbols=[symbol],
+                    extra={"items": len(news)},
+                )
+        except Exception:
+            if _md_logger is not None:
+                _md_logger.log_call(
+                    source="yfinance", call="news", status="error",
+                    latency_ms=round((_t.perf_counter() - _t0) * 1000, 2),
+                    symbols=[symbol],
+                    error_class=_md_logger.error_class.__call__(sys.exc_info()[1])
+                                if hasattr(_md_logger, "error_class") else None,
+                )
+            raise
         if not news:
             # Empty news feed. Soft-mode: treat as data-source-quirk, pass.
             # Strict-mode: treat as "unknown catalyst", block.
@@ -92,7 +134,17 @@ def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS,
                 _cache[symbol] = (True, now)
                 return True
         # News exist but all older than lookback → genuine "no fresh catalyst".
-        # BOTH soft and strict block here. (Soft only passes empty/error.)
+        # Phase-26 (yfinance-sparse-small-cap fix): in SOFT mode, if the
+        # symbol shows huge gap + huge RVOL, treat that as the catalyst
+        # itself (Cameron: "the move IS the news"). Strict mode unchanged.
+        if (resolved == "soft"
+                and gap_pct is not None and gap_pct >= 15.0
+                and rvol is not None and rvol >= 10.0):
+            log.info("catalyst soft-override %s: gap=%.1f%% rvol=%.1fx — "
+                     "treating strong move as implicit catalyst",
+                     symbol, gap_pct, rvol)
+            _cache[symbol] = (True, now)
+            return True
         log.info("catalyst block %s: news exist but none in last %dh", symbol, lookback_hours)
         _cache[symbol] = (False, now)
         return False
@@ -107,11 +159,18 @@ def has_recent_news(symbol: str, lookback_hours: int = _LOOKBACK_HOURS,
 
 
 def passes_catalyst_filter(symbol: str, strict: bool | None = None,
-                           mode: str | None = None) -> bool:
+                           mode: str | None = None,
+                           *, gap_pct: float | None = None,
+                           rvol: float | None = None) -> bool:
     """Cameron Pillar-5 news-required filter.
 
     Legacy strict-bool API preserved. Recommended: use mode="strict" for
     live trading with CATALYST_REQUIRED=True, mode="soft" for paper, "off"
     to disable.
+
+    Phase-26: pass gap_pct and rvol so soft-mode can override stale-news
+    rejection when the move itself is the catalyst (gap >= 15% and
+    rvol >= 10x → yfinance gap, not catalyst gap).
     """
-    return has_recent_news(symbol, strict=strict, mode=mode)
+    return has_recent_news(symbol, strict=strict, mode=mode,
+                            gap_pct=gap_pct, rvol=rvol)
