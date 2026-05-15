@@ -1825,6 +1825,45 @@ class Bot:
             set_market_data_logger(self.md_logger)
         except Exception:
             pass
+        # Phase-30: trade-event push notifications. Reuses the same alerter
+        # the health-monitor uses (ntfy / Telegram / SMTP / log). Every
+        # entry-fill and every exit-fill emits one push so the user sees
+        # trading activity on their phone. force=True on send() bypasses
+        # the 5-min debounce because each trade is a unique event.
+        try:
+            from alerter import make_alerter
+            self.alerter = make_alerter()
+        except Exception as e:
+            log.warning("trade-alerter init failed: %s — pushes disabled", e)
+            self.alerter = None
+
+    def _push_trade(self, kind: str, symbol: str, shares: int,
+                     price: float, pnl: float | None = None) -> None:
+        """Best-effort push notification for a trade event. Never raises.
+
+        kind: short tag like "BUY", "T1", "T2", "QUICK", "MACD", "STOP".
+              Used in the alert title.
+        pnl:  realized P&L in $ for this fill (None for entries).
+        """
+        alerter = getattr(self, "alerter", None)
+        if alerter is None:
+            return
+        try:
+            level = "info"
+            day_pnl = self.day.realized_pnl
+            if pnl is None:
+                # Entry — no P&L yet
+                title = f"BUY {symbol} {shares} @ ${price:.2f}"
+                body = f"day PnL ${day_pnl:+.2f}"
+            else:
+                arrow = "+" if pnl >= 0 else ""
+                title = f"{kind} {symbol} {shares} @ ${price:.2f} PnL {arrow}${pnl:.2f}"
+                body = f"day PnL ${day_pnl:+.2f} | trade {kind}"
+                if pnl < 0:
+                    level = "warn"
+            alerter.send(level, title, body, force=True)
+        except Exception as e:
+            log.debug("trade-push %s %s failed: %s", kind, symbol, e)
 
     async def run(self):
         log.info("=" * 60)
@@ -2469,6 +2508,8 @@ class Bot:
             "actual_stop": actual_stop, "actual_t1": actual_t1, "actual_t2": actual_t2,
             "spy_mult": self.day.spy_size_multiplier,
         })
+        # Phase-30: push entry-fill to phone
+        self._push_trade("BUY", sym, actual_shares, actual_fill_price)
         # Review-V2 P0.3 fix: ACTIVELY verify broker-side protection matches
         # our recomputed stop/TP. Before this was dead code. If actual_stop
         # diverges from planned stop (HSPT-style fill below stop), the
@@ -2530,6 +2571,7 @@ class Bot:
                              "fill_status": status})
             log.info("  MACD-EXIT %s @ $%.4f (PnL $%.2f, status=%s)",
                      ts.symbol, actual_price, pnl, status)
+            self._push_trade("MACD", ts.symbol, actual_fill, actual_price, pnl=pnl)
             ts.in_position = False
             return
 
@@ -2571,6 +2613,7 @@ class Bot:
                                  "pnl": pnl, "fill_status": status})
                 log.info("  QUICK-EXIT %s @ $%.4f PnL $%.2f (status=%s)",
                          ts.symbol, actual_price, pnl, status)
+                self._push_trade("QUICK", ts.symbol, actual_fill, actual_price, pnl=pnl)
                 ts.in_position = False
                 return
 
@@ -2627,6 +2670,9 @@ class Bot:
             self.logger.log({"event": "T1", "symbol": ts.symbol,
                              "shares": actual_fill, "price": actual_price,
                              "fill_status": status})
+            # T1 is half-take-profit — realized portion gain
+            t1_pnl = (actual_price - ts.entry_price) * actual_fill
+            self._push_trade("T1", ts.symbol, actual_fill, actual_price, pnl=t1_pnl)
             ts.half_filled = True
             ts.t1_shares_sold = actual_fill
             ts.shares -= actual_fill
@@ -2667,6 +2713,7 @@ class Bot:
             self.day.consecutive_losses = 0
             self.day.trades_completed_today += 1
             self._check_daily_goal()
+            self._push_trade("T2", ts.symbol, actual_fill, actual_price, pnl=pnl)
             ts.in_position = False
             return
         # Stop / BE — Review-V2 P0.1: confirm-variant with market-fallback
@@ -2706,6 +2753,8 @@ class Bot:
                             "shares": actual_fill, "price": actual_price, "pnl": pnl,
                             "reason": "stop" if not ts.half_filled else "BE",
                             "fill_status": status})
+            kind = "STOP" if not ts.half_filled else "BE"
+            self._push_trade(kind, ts.symbol, actual_fill, actual_price, pnl=pnl)
             ts.in_position = False
             return
 
