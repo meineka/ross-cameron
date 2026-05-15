@@ -2632,13 +2632,60 @@ class ReplayBot:
         else through legacy submit_sell. Returns (filled_qty, fill_price)
         with confirm-style semantics (filled_qty may differ from qty for
         partial-fill scenarios). Uses getattr fallback so legacy tests
-        that construct ReplayBot via __new__ (bypassing __init__) still work."""
+        that construct ReplayBot via __new__ (bypassing __init__) still work.
+
+        Phase-17 (ChatGPT-12:52 P2.x golden scenario "exit rejected then
+        fallback"): if the broker returns status=rejected with
+        retryable=True, attempt ONE retry on the same symbol. The
+        FakeBroker's `reject_then_market` behavior consumes the per-symbol
+        override on first rejection so the retry sees the default fill
+        behavior — mirroring a transient broker reject followed by a
+        clean retry."""
         executor = getattr(self, "executor", None)
         if executor is not None:
             res = executor.submit_sell_with_confirm(ts.symbol, qty, price, reason)
-            return res.get("filled_qty", 0), res.get("avg_fill_price", price)
+            filled = res.get("filled_qty", 0)
+            if (filled == 0
+                    and res.get("status") == "rejected"
+                    and res.get("retryable")):
+                log.warning("REPLAY %s exit rejected (%s) — retrying once",
+                            ts.symbol, reason)
+                res = executor.submit_sell_with_confirm(
+                    ts.symbol, qty, price, f"{reason}_retry")
+                filled = res.get("filled_qty", 0)
+            return filled, res.get("avg_fill_price", price)
         self.submit_sell(ts.symbol, qty, price, reason)
         return qty, price  # legacy: assume full fill at limit
+
+    def _verify_stop_protection(self, ts):
+        """Phase-17 (ChatGPT-12:52 P2.x golden scenario "missing stop
+        repaired"): on each bar where we believe we're in a position,
+        ask the broker-truth (FakeBroker / AlpacaExecutor) whether a
+        STOP-type protection order is still active. If not, re-submit
+        via protect_position(). No-op for legacy path (executor=None)."""
+        executor = getattr(self, "executor", None)
+        if executor is None:
+            return False
+        if not ts.in_position or ts.shares <= 0:
+            return False
+        # Probe broker-truth — only act if the executor exposes the API
+        has_stop = getattr(executor, "has_stop_protection", None)
+        if has_stop is None:
+            return False
+        if has_stop(ts.symbol):
+            return False
+        # Stop is missing — repair via protect_position. Use the
+        # half_filled BE-stop if we've already taken T1, else the
+        # original stop_price.
+        stop_now = ts.entry_price if ts.half_filled else ts.stop_price
+        protect = getattr(executor, "protect_position", None)
+        if protect is None:
+            return False
+        log.critical("REPLAY %s STOP MISSING — repairing via protect_position "
+                     "(shares=%d, stop=%.2f, target=%.2f)",
+                     ts.symbol, ts.shares, stop_now, ts.target2_price)
+        protect(ts.symbol, ts.shares, stop_now, ts.target2_price)
+        return True
 
     def _book_t1_pnl_once(self, ts):
         """Phase-10 (ChatGPT-18:20): T1-leg PnL must be booked exactly ONCE
@@ -2660,8 +2707,13 @@ class ReplayBot:
         Phase-8 (2026-05-14): exits now route through self._executor_sell so
         when a FakeBroker is injected, ReplayBot drives the SAME order-
         lifecycle code-path live trades use. Default-behavior parity verified.
+        Phase-17: stop-protection probe on every bar — re-submits missing
+        stop via protect_position() so a broker-dropped STOP leg doesn't
+        leave the position unprotected.
         """
         ts.bars_since_entry += 1
+        # Phase-17: detect + repair missing stop protection
+        self._verify_stop_protection(ts)
         if (not ts.half_filled
                 and ts.bars_since_entry <= QUICK_EXIT_BARS_LIMIT
                 and (ts.entry_price - bar["low"]) >= QUICK_EXIT_THRESHOLD_CENTS):

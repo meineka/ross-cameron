@@ -69,11 +69,27 @@ class FakeBroker:
     equity_value: float = 25_000.0
 
     # Behaviors (override per-symbol):
-    #   "filled_at_limit"    → fill at limit_price exactly
-    #   "filled_with_slip"   → fill at limit + slip_cents (caller specifies)
-    #   "partial"            → fill partial_qty only
-    #   "rejected"           → reject immediately
-    #   "timeout"            → no fill, return timeout (caller calls _expire)
+    #   "filled_at_limit"          → fill at limit_price exactly
+    #   "filled_with_slip"         → fill at limit + slip_cents (caller specifies)
+    #   "partial"                  → fill partial_qty only
+    #   "rejected"                 → reject immediately
+    #   "timeout"                  → no fill, return timeout (caller calls _expire)
+    # Phase-17 (ChatGPT-12:52 golden scenarios + ChatGPT-08:11 #2 P2.x):
+    #   "drop_stop_after_fill"     → bracket entry fills normally, but the
+    #                                STOP child is silently canceled by the
+    #                                broker. ReplayBot must detect and
+    #                                repair via protect_position().
+    #   "reject_then_market"       → first submit_sell_with_confirm call
+    #                                returns rejected; on the same symbol the
+    #                                NEXT call falls through to a market-
+    #                                fallback fill (consumes the per-symbol
+    #                                rejection so subsequent calls fill
+    #                                normally). Tests ReplayBot's exit-retry
+    #                                path.
+    #   "stale_quote"              → submit_bracket_buy returns
+    #                                {"status":"rejected","reason":"stale_quote"}
+    #                                without touching positions. Used in
+    #                                pre-entry liveness tests.
 
     def _gen_id(self, sym: str) -> str:
         self.next_order_id += 1
@@ -107,6 +123,15 @@ class FakeBroker:
                                               "BRACKET", entry, stop, take_profit,
                                               status="rejected")
             return {"status": "rejected", "order_id": order_id}
+        if b == "stale_quote":
+            # Phase-17 (P2.x #1252 golden scenario): broker refuses the
+            # bracket because the quote that triggered the limit is too
+            # old. No position is opened.
+            self.orders[order_id] = FakeOrder(order_id, symbol, "BUY", shares,
+                                              "BRACKET", entry, stop, take_profit,
+                                              status="rejected")
+            return {"status": "rejected", "reason": "stale_quote",
+                    "order_id": order_id}
         if b == "timeout":
             self.orders[order_id] = FakeOrder(order_id, symbol, "BUY", shares,
                                               "BRACKET", entry, stop, take_profit,
@@ -147,6 +172,13 @@ class FakeBroker:
                                         parent_id=order_id, status="new")
         self.bracket_children[order_id] = [stop_id, tp_id]
 
+        # Phase-17 (P2.x #1252 golden scenario "missing stop repaired"):
+        # broker silently drops the STOP child. Position is open but
+        # unprotected — bot must detect via has_stop_protection() and
+        # repair via protect_position().
+        if b == "drop_stop_after_fill":
+            self.orders[stop_id].status = "canceled"
+
         return {"status": "filled", "order_id": order_id,
                 "fill_price": fill_price, "shares": fill_qty}
 
@@ -170,6 +202,20 @@ class FakeBroker:
             self.orders[order_id] = FakeOrder(order_id, symbol, "SELL", shares,
                                               "LIMIT", price, status="rejected")
             return {"status": "rejected", "filled_qty": 0, "order_id": order_id}
+
+        if b == "reject_then_market":
+            # Phase-17 (P2.x #1252 golden scenario "exit rejected then
+            # fallback"): first call rejects to surface broker-side reject,
+            # consume the per-symbol override so the NEXT call falls back
+            # to market-style fill semantics. ReplayBot's exit-retry path
+            # should detect rejected and reissue immediately.
+            self.orders[order_id] = FakeOrder(order_id, symbol, "SELL", shares,
+                                              "LIMIT", price, status="rejected")
+            # Switch to filled_at_limit so the very next sell on this
+            # symbol fills cleanly (simulating broker recovering).
+            self.per_symbol_behavior.pop(symbol, None)
+            return {"status": "rejected", "filled_qty": 0,
+                    "order_id": order_id, "retryable": True}
 
         if b == "timeout":
             if market_fallback:
@@ -288,3 +334,31 @@ class FakeBroker:
     def open_brackets_for(self, symbol: str) -> list[FakeOrder]:
         return [o for o in self.orders.values()
                 if o.symbol == symbol and o.status == "new"]
+
+    # ─── Phase-17 (P2.x #1252 golden scenario "missing stop repaired") ───
+    def has_stop_protection(self, symbol: str) -> bool:
+        """Broker-truth query: is there at least one OPEN STOP-type sell
+        order for `symbol`? Used by ReplayBot._verify_stop_protection()
+        to detect broker-side stop-leg loss and trigger repair."""
+        if self.positions.get(symbol, 0) <= 0:
+            return True  # No position → trivially "protected"
+        for o in self.orders.values():
+            if (o.symbol == symbol
+                    and o.side == "SELL"
+                    and o.order_type == "STOP"
+                    and o.status == "new"):
+                return True
+        return False
+
+    def has_target_protection(self, symbol: str) -> bool:
+        """Broker-truth query: is there at least one OPEN take-profit
+        LIMIT sell order for `symbol`?"""
+        if self.positions.get(symbol, 0) <= 0:
+            return True
+        for o in self.orders.values():
+            if (o.symbol == symbol
+                    and o.side == "SELL"
+                    and o.order_type == "LIMIT"
+                    and o.status == "new"):
+                return True
+        return False
