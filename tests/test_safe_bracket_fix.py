@@ -215,13 +215,90 @@ def test_liquidity_rejects_huge_spread():
 
 def test_liquidity_accepts_healthy_stock():
     """AAPL-Profil: tight spread, hohe Vol."""
+    from datetime import datetime, timezone
     from safe_bracket import check_liquidity
     snap = MagicMock()
     snap.daily_bar.volume = 5_000_000
     snap.latest_quote.bid_price = 294.19
     snap.latest_quote.ask_price = 294.22
+    # Phase-61: real timestamp required to pass the freshness gate
+    snap.latest_quote.timestamp = datetime.now(timezone.utc)
     ok, reason = check_liquidity(snap)
     assert ok is True
+
+
+# ─── Phase-61: HSPT stale-quote rejection ────────────────────────────────
+def test_liquidity_rejects_stale_quote_older_than_max_age():
+    """Phase-61 (re-audit of Phase-60 → HSPT 2026-05-12 lesson):
+    The original HSPT failure was a snapshot whose latest_trade was
+    hours old. V2 fixed it by using latest_quote.ask, but the quote
+    ITSELF can also be stale on illiquid premarket movers. This test
+    locks in the freshness gate at 10s default."""
+    from datetime import datetime, timezone, timedelta
+    from safe_bracket import check_liquidity
+    snap = MagicMock()
+    snap.daily_bar.volume = 200_000
+    snap.latest_quote.bid_price = 10.00
+    snap.latest_quote.ask_price = 10.05
+    # Quote 5 minutes old — would have caught HSPT
+    snap.latest_quote.timestamp = (datetime.now(timezone.utc)
+                                     - timedelta(minutes=5))
+    ok, reason = check_liquidity(snap)
+    assert ok is False
+    assert "quote-stale" in reason
+
+
+def test_liquidity_rejects_quote_with_no_timestamp():
+    """Defensive: a real Alpaca quote always has .timestamp, but if the
+    SDK ever returns a partial object, reject rather than trust."""
+    from safe_bracket import check_liquidity
+    snap = MagicMock()
+    snap.daily_bar.volume = 200_000
+    snap.latest_quote.bid_price = 10.00
+    snap.latest_quote.ask_price = 10.05
+    # MagicMock auto-attribute would give a MagicMock for .timestamp,
+    # which is not a datetime — _quote_age_seconds returns None →
+    # reject as "quote-missing-timestamp".
+    ok, reason = check_liquidity(snap)
+    assert ok is False
+    assert "quote-missing-timestamp" in reason
+
+
+def test_liquidity_accepts_fresh_quote_within_max_age():
+    """Symmetry: a quote 2s old (well within the 10s window) passes."""
+    from datetime import datetime, timezone, timedelta
+    from safe_bracket import check_liquidity
+    snap = MagicMock()
+    snap.daily_bar.volume = 200_000
+    snap.latest_quote.bid_price = 10.00
+    snap.latest_quote.ask_price = 10.05
+    snap.latest_quote.timestamp = (datetime.now(timezone.utc)
+                                     - timedelta(seconds=2))
+    ok, reason = check_liquidity(snap)
+    assert ok is True
+
+
+def test_liquidity_freshness_check_skippable_for_backtests():
+    """Backtests by definition replay old snaps. Caller can pass
+    max_quote_age_sec=None to skip the freshness gate."""
+    from datetime import datetime, timezone, timedelta
+    from safe_bracket import check_liquidity
+    snap = MagicMock()
+    snap.daily_bar.volume = 200_000
+    snap.latest_quote.bid_price = 10.00
+    snap.latest_quote.ask_price = 10.05
+    snap.latest_quote.timestamp = (datetime.now(timezone.utc)
+                                     - timedelta(days=30))
+    ok, reason = check_liquidity(snap, max_quote_age_sec=None)
+    assert ok is True
+
+
+def test_max_quote_age_constant_is_sane():
+    """Spec: MAX_QUOTE_AGE_SEC must be small enough that a HSPT-style
+    stall (hours old) gets caught, but big enough that a normal 1-2s
+    network hiccup doesn't reject every trade."""
+    import safe_bracket
+    assert 5.0 <= safe_bracket.MAX_QUOTE_AGE_SEC <= 30.0
 
 
 def test_quote_based_entry_uses_ask_not_last_trade():

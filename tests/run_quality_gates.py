@@ -27,18 +27,42 @@ def _check_python_environment() -> bool:
     have wasted 10+ minutes debugging fake test fails caused by missing
     alpaca/yfinance/pyarrow on system Python — this preflight short-
     circuits that. Returns True if env looks OK to proceed.
+
+    Phase-61 (re-audit): now BLOCKS on wrong venv, not just warns.
+    Rationale: if `.venv` exists but pytest is run from system-Python,
+    even when imports happen to work the alpaca/pyarrow versions can
+    diverge between system and venv, producing test failures that look
+    like real bugs. Forcing the venv eliminates the entire failure mode.
+    Set ALLOW_NON_VENV=1 in env to override (e.g. CI runners that
+    install deps system-wide intentionally).
     """
+    import os
     venv_py = ROOT / ".venv" / "Scripts" / "python.exe"
     if not venv_py.exists():
         venv_py = ROOT / ".venv" / "bin" / "python"  # POSIX
-    if venv_py.exists() and Path(sys.executable).resolve() != venv_py.resolve():
+    wrong_venv = (venv_py.exists()
+                   and Path(sys.executable).resolve() != venv_py.resolve())
+    if wrong_venv and not os.environ.get("ALLOW_NON_VENV"):
         print("=" * 60)
-        print("⚠️  WARNING: not running in project venv!")
-        print(f"   current: {sys.executable}")
+        print("❌ WRONG PYTHON: project venv exists but you're using a different interpreter")
+        print(f"   current : {sys.executable}")
         print(f"   expected: {venv_py}")
         print()
-        print("   Project deps (alpaca, yfinance, pyarrow) may be missing.")
-        print(f"   Re-run with: {venv_py} {' '.join(sys.argv)}")
+        print("   Re-run with the venv:")
+        print(f"     {venv_py} {' '.join(sys.argv)}")
+        print()
+        print("   Or, if you intentionally want a system-Python run "
+              "(e.g. on a")
+        print("   CI runner with deps installed globally), set:")
+        print("     ALLOW_NON_VENV=1")
+        print("=" * 60)
+        return False
+    if wrong_venv:
+        # ALLOW_NON_VENV set — still print a non-blocking warning
+        print("=" * 60)
+        print("⚠️  Running outside project venv (ALLOW_NON_VENV set)")
+        print(f"   current: {sys.executable}")
+        print(f"   venv   : {venv_py}")
         print("=" * 60)
     # Probe critical imports — fail fast if missing
     missing = []
@@ -93,7 +117,17 @@ def main():
     print(f"Cmd: {' '.join(cmd)}")
     print()
 
-    r = subprocess.run(cmd, cwd=ROOT)
+    # Phase-61: bound subprocess so a hung test can't hang the gate forever.
+    # 10 min for fast/default, 30 min for full (replay/pilot can be slow).
+    timeout_sec = 1800 if args.full else 600
+    try:
+        r = subprocess.run(cmd, cwd=ROOT, timeout=timeout_sec)
+    except subprocess.TimeoutExpired:
+        print("\n" + "!" * 60)
+        print(f"QUALITY GATE TIMED OUT after {timeout_sec}s — likely a hung test")
+        print("Re-run with --full for higher limit, or diagnose the stuck case")
+        print("!" * 60)
+        sys.exit(124)
     if r.returncode != 0:
         print("\n" + "!" * 60)
         print("QUALITY GATE FAILED — DO NOT COMMIT until fixed")

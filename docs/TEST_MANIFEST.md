@@ -4,14 +4,14 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 74
-- **Total `def test_*` functions**: 782
+- **Total files**: 75
+- **Total `def test_*` functions**: 793
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 300 |
+| critical | 311 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,8 +22,8 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 597 |
-| partially_reviewed | 85 |
+| not_reviewed | 603 |
+| partially_reviewed | 90 |
 | reviewed | 100 |
 
 Status meaning:
@@ -115,6 +115,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_phase_36_provider_alerts.py` | 9 | critical | yes | not_reviewed | Phase-36: 1m bars + provider-explicit STALL/OK alert titles. |
 | `test_phase_53_guarded_alpaca.py` | 13 | critical | yes | not_reviewed | Phase-53: GuardedTradingClient + GuardedStockHistoricalDataClient. |
 | `test_phase_60_storm_regression.py` | 8 | critical | no | not_reviewed | Phase-60: explicit WS reconnect-throttle + scan-storm regression |
+| `test_phase_61_state_transition_pushes.py` | 6 | critical | no | not_reviewed | Phase-61 (re-audit follow-up to Phase-60): state-transition push tests |
 | `test_pilot_baseline.py` | 3 | replay | no | partially_reviewed | Pilot-Stats Regression: Backtest-Output darf nicht von Baseline abweichen. |
 | `test_position_recovery_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 6 (2026-05-12): position_recovery.recover_or_flatten robustness. |
 | `test_position_size_multipliers.py` | 12 | unit | no | not_reviewed | Audit-Iter 15 (2026-05-12): compute_position_size multiplier stacking. |
@@ -135,7 +136,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_review_v2_phase7.py` | 10 | unit | yes | not_reviewed | Review-V2 Phase 7 behavior tests: |
 | `test_risk_engine.py` | 9 | critical | no | partially_reviewed | Risk-Engine Tests — Position-Sizing, Daily-Caps, Spiral-Detection. |
 | `test_risk_engine_bugs.py` | 9 | critical | no | not_reviewed | Latente Risk-Engine-Bugs aus dem 2. Audit-Pass. |
-| `test_safe_bracket_fix.py` | 14 | critical | no | partially_reviewed | Tests für den 2026-05-12 14:00 ET HSPT/ATRA-Bug: |
+| `test_safe_bracket_fix.py` | 19 | critical | no | partially_reviewed | Tests für den 2026-05-12 14:00 ET HSPT/ATRA-Bug: |
 | `test_safe_bracket_status_bugs.py` | 11 | critical | no | partially_reviewed | Audit-Iter 27 (2026-05-13): safe_bracket_buy status-comparison bugs. |
 | `test_secrets_loader_bugs.py` | 11 | unit | no | not_reviewed | Audit-Iter 35 (2026-05-13): secrets_loader.py edge cases. |
 | `test_smoke_imports.py` | 8 | smoke | no | reviewed | Phase-21 (ChatGPT-09:15 Task 1): smoke gate — populates the `smoke` |

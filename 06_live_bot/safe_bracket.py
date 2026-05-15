@@ -13,20 +13,59 @@ Lösung-V2: vor jedem Order
   3. Limit = ask + 2 cents (NICHT last+5c)
   4. Stop = bei real-ask × 0.95
   5. Post-Fill: verify and repair wie V1
+
+Phase-61 (re-audit): freshness check added — even a valid two-sided
+quote can be hours stale on illiquid premarket movers. If quote.timestamp
+is older than MAX_QUOTE_AGE_SEC, reject the trade BEFORE submit.
+The HSPT incident root-cause was a stale latest_trade with no recent
+quote update; latest_quote.timestamp would have caught it.
 """
 from __future__ import annotations
 import time
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 log = logging.getLogger("safe_bracket")
 
 MIN_DAILY_VOLUME = 10_000
 MAX_SPREAD_PCT = 5.0  # max spread/mid in %
+MAX_QUOTE_AGE_SEC = 10.0  # Phase-61: HSPT-lesson — reject stale quotes
 
 
-def check_liquidity(snap) -> tuple[bool, str]:
-    """Returns (ok, reason). Lehnt thin-Stocks ab BEFORE submit."""
+def _quote_age_seconds(q, now_utc: datetime | None = None) -> float | None:
+    """Return age in seconds of `q.timestamp`, or None if timestamp
+    missing/unreadable. Defensive: real Alpaca Quote objects use UTC tz
+    on the datetime field, but tests sometimes pass naive datetimes or
+    MagicMock auto-attrs — only real `datetime` instances are accepted."""
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    ts = getattr(q, "timestamp", None)
+    if not isinstance(ts, datetime):
+        return None
+    try:
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return (now_utc - ts).total_seconds()
+    except Exception:
+        return None
+
+
+_USE_DEFAULT_AGE = object()  # sentinel — distinguishable from None
+
+
+def check_liquidity(snap, *, max_quote_age_sec=_USE_DEFAULT_AGE
+                       ) -> tuple[bool, str]:
+    """Returns (ok, reason). Lehnt thin-Stocks ab BEFORE submit.
+
+    Phase-61: also rejects when latest_quote.timestamp is older than
+    `max_quote_age_sec` (default MAX_QUOTE_AGE_SEC = 10s). This catches
+    the HSPT-stale-price failure mode that the V2 spread-check missed.
+    Caller can pass `max_quote_age_sec=None` to skip the freshness gate
+    (e.g. during backtests where snap timestamps are by definition old).
+    """
+    if max_quote_age_sec is _USE_DEFAULT_AGE:
+        max_quote_age_sec = MAX_QUOTE_AGE_SEC
     try:
         b = snap.daily_bar
         q = snap.latest_quote
@@ -41,6 +80,15 @@ def check_liquidity(snap) -> tuple[bool, str]:
         spread_pct = (ask - bid) / ((ask + bid) / 2) * 100
         if spread_pct > MAX_SPREAD_PCT:
             return False, f"spread {spread_pct:.1f}% > {MAX_SPREAD_PCT}%"
+        # Phase-61: freshness gate (HSPT lesson)
+        if max_quote_age_sec is not None and max_quote_age_sec > 0:
+            age = _quote_age_seconds(q)
+            if age is None:
+                return False, "quote-missing-timestamp"
+            if age > max_quote_age_sec:
+                return False, (
+                    f"quote-stale: age={age:.1f}s > {max_quote_age_sec:.0f}s"
+                )
         return True, f"OK (vol={b.volume:,}, spread={spread_pct:.2f}%)"
     except Exception as e:
         return False, f"liquidity-check err: {e}"

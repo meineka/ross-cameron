@@ -78,21 +78,46 @@ class AlpacaRateLimitBlocked(Exception):
 # Phase-60 (ChatGPT P1 follow-up): status-transition push so the user
 # learns about a rate-limit block / recovery via ntfy. Module-global
 # state so transitions are debounced (one push per state change).
+#
+# Phase-61 (re-audit fix): _rate_limit_state_changed_ts now ACTIVE.
+# Previously it was set on every transition but never read — dead code.
+# Now used as a debounce window: if a second transition happens within
+# STATE_TRANSITION_DEBOUNCE_SEC (60s), the push is suppressed. This
+# prevents push-spam under flapping conditions where the rate alternates
+# ok → blocked → ok → blocked in rapid succession (seen during the 12:00 ET
+# postmortem run when 50+ snapshots fire simultaneously).
 _rate_limit_state = "ok"  # "ok" | "blocked"
 _rate_limit_state_changed_ts = 0.0
+STATE_TRANSITION_DEBOUNCE_SEC = 60.0
 
 
 def _maybe_push_state_transition(new_state: str, source: str,
                                    method: str, rate_now: int,
                                    cap: int | None) -> None:
     """Push ntfy notification only on state TRANSITION (ok→blocked or
-    blocked→ok). No spam during sustained block."""
+    blocked→ok). No spam during sustained block.
+
+    Phase-61: debounced — a second transition within
+    STATE_TRANSITION_DEBOUNCE_SEC of the prior one is logged but NOT
+    pushed. Prevents alert-fatigue during flapping conditions."""
     global _rate_limit_state, _rate_limit_state_changed_ts
     if new_state == _rate_limit_state:
         return  # no transition
+    now_mono = time.monotonic()
+    since_last = now_mono - _rate_limit_state_changed_ts
+    if (_rate_limit_state_changed_ts > 0
+            and since_last < STATE_TRANSITION_DEBOUNCE_SEC):
+        # Flap-suppress: update state silently, no push
+        log.info("rate-limit transition %s→%s suppressed (debounce: "
+                 "%.1fs since last, threshold %.0fs)",
+                 _rate_limit_state, new_state, since_last,
+                 STATE_TRANSITION_DEBOUNCE_SEC)
+        _rate_limit_state = new_state
+        _rate_limit_state_changed_ts = now_mono
+        return
     prev = _rate_limit_state
     _rate_limit_state = new_state
-    _rate_limit_state_changed_ts = time.monotonic()
+    _rate_limit_state_changed_ts = now_mono
     try:
         from alerter import make_alerter
         a = make_alerter()
