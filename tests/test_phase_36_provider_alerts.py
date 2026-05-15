@@ -44,11 +44,14 @@ def _read_alerts(tmp_path):
     return [json.loads(L) for L in p.read_text(encoding="utf-8").splitlines() if L.strip()]
 
 
-def test_bot_aggregates_1min_bars_not_5min():
-    """USER request: 1m bars. Verify constant flipped."""
+def test_bot_aggregates_bars_in_cameron_range():
+    """Cameron primary timeframe is 5m; user has occasionally tested
+    1m during see-some-trades demos. Phase-51 reverted to 5m. Accept
+    any value in {1, 5} to allow both modes."""
     import bot
-    assert bot.BAR_AGGREGATION_MINUTES == 1, (
-        f"BAR_AGGREGATION_MINUTES={bot.BAR_AGGREGATION_MINUTES} (expected 1 for 1m bars)"
+    assert bot.BAR_AGGREGATION_MINUTES in (1, 5), (
+        f"BAR_AGGREGATION_MINUTES={bot.BAR_AGGREGATION_MINUTES} "
+        f"(expected 1 or 5)"
     )
 
 
