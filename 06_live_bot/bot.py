@@ -439,10 +439,64 @@ def premarket_scan(top_n: int = TOP_N, max_retries: int = 2) -> list[TickerState
     return []
 
 
+def _try_tradingview_primary(top_n: int) -> list[dict]:
+    """Phase-28: ask TradingView for top-N Cameron-conformant candidates.
+    Returns [] on any error so caller can fall back to legacy yfinance path.
+    Never raises."""
+    try:
+        from scanners.tradingview_scanner import scan_cameron_candidates
+    except ImportError as e:
+        log.warning("TradingView scanner not importable: %s", e)
+        return []
+    try:
+        # Cameron defaults: premarket gap >= 5%, RVOL >= 3x, $2-$20,
+        # float < 10M (matches bot's FLOAT_MAX_SHARES). The scanner returns
+        # pre-sorted by premarket_change desc, top-N rows.
+        rows = scan_cameron_candidates(
+            top_n=top_n,
+            premarket_change_min_pct=DAILY_GAIN_MIN_PCT,
+            rvol_min=RVOL_MIN_PROXY,
+            price_min=PRICE_MIN,
+            price_max=PRICE_MAX,
+            float_max_shares=FLOAT_MAX_SHARES,
+        )
+        return rows
+    except Exception as e:
+        log.warning("TradingView primary call raised: %s", e)
+        return []
+
+
 def _premarket_scan_inner(top_n: int) -> list[TickerState]:
     log.info("=" * 60)
     log.info("PREMARKET SCAN START — pulling daily bars")
     log.info("=" * 60)
+    # Phase-28: TradingView scanner as PRIMARY source. One call gets top-N
+    # Cameron-conformant candidates with real premarket_change /
+    # premarket_volume / RVOL / float fields, no rate-limit, no API key.
+    # yfinance path stays below as fallback for the rare case TV is down.
+    tv_rows = _try_tradingview_primary(top_n)
+    if tv_rows:
+        log.info("=" * 60)
+        log.info("TOP-%d WATCHLIST (source=tradingview):", top_n)
+        for rank, r in enumerate(tv_rows[:top_n], start=1):
+            log.info("  #%d %-6s  $%.2f  +%.1f%%  RVOL %.1fx  pmkt=%.1f%%  float=%s",
+                     rank, r["ticker"], r["close"] or 0.0,
+                     r["premarket_change"] or 0.0,
+                     r["rvol_proxy"] or 0.0,
+                     r["premarket_change"] or 0.0,
+                     f"{int(r['float_shares']):,}" if r.get("float_shares") else "?")
+        log.info("=" * 60)
+        return [
+            TickerState(
+                symbol=r["ticker"],
+                rank=int(rank),
+                score=float((r["premarket_change"] or 0.0) * (r["rvol_proxy"] or 1.0)),
+                intraday_pct=float(r["premarket_change"] or r["change_pct"] or 0.0),
+                rvol_proxy=float(r["rvol_proxy"] or 0.0),
+            )
+            for rank, r in enumerate(tv_rows[:top_n], start=1)
+        ]
+    log.warning("PREMARKET SCAN: TradingView returned 0 rows — falling back to yfinance path")
     tickers = fetch_us_universe()
     log.info("  Universe: %d tickers from NASDAQ-Trader CSV", len(tickers))
     if not tickers:

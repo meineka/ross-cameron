@@ -4,14 +4,14 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 65
-- **Total `def test_*` functions**: 686
+- **Total files**: 66
+- **Total `def test_*` functions**: 699
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 204 |
+| critical | 217 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 501 |
+| not_reviewed | 514 |
 | partially_reviewed | 85 |
 | reviewed | 100 |
 
@@ -129,6 +129,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_strategy_improvements.py` | 8 | unit | yes | not_reviewed | Tests für die Cameron-Lessons-Verbesserungen vom 2026-05-12. |
 | `test_structured_logger.py` | 13 | critical | yes | reviewed | Phase-22 (ChatGPT-09:27 Task 4 / ChatGPT-08:49 #3+#4): structured |
 | `test_trade_log_separation.py` | 7 | critical | yes | reviewed | Phase-11 (ChatGPT-18:40 P0.2): live and replay trade logs MUST be |
+| `test_tradingview_scanner.py` | 13 | critical | no | not_reviewed | Phase-28: TradingView scanner integration. |
 | `test_two_source_wiring.py` | 10 | integration | yes | not_reviewed | Audit-Iter 31: two_source_scan wiring + edge tests. |
 | `test_universe_cache_bugs.py` | 12 | unit | no | not_reviewed | Audit-Iter 25 (2026-05-12): fetch_us_universe resilience. |
 | `test_vwap_filter_bugs.py` | 14 | unit | no | not_reviewed | Audit-Iter 21 (2026-05-12): vwap_filter.py edge-case robustness. |
