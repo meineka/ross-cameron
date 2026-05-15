@@ -77,27 +77,33 @@ def test_log_alerter_creates_parent_dir(tmp_path):
 # ─── NtfyAlerter ────────────────────────────────────────────────────────────
 
 def test_ntfy_alerter_posts_to_correct_topic():
+    """Phase-48 (2026-05-15): ntfy alerter now uses JSON POST to the
+    server ROOT instead of headers on /<topic>. JSON body carries the
+    topic + title + message + priority + tags, so UTF-8 emoji like
+    🟢▲ / 🟠▼ survive intact (HTTP headers are latin-1 only)."""
     from alerter import NtfyAlerter
+    import json as _json
     seen = {}
     class FakeResp:
         status_code = 200
     def fake_post(url, data=None, headers=None, timeout=None):
         seen["url"] = url
-        seen["data"] = data
+        seen["payload"] = _json.loads(data.decode("utf-8"))
         seen["headers"] = headers
         return FakeResp()
     a = NtfyAlerter(topic="cameron-bot-test", suppress_seconds=0,
                      http_post=fake_post)
     assert a.send("critical", "blocker", body="something broke") is True
-    assert seen["url"] == "https://ntfy.sh/cameron-bot-test"
-    assert seen["data"] == b"something broke"
-    assert "CRITICAL" in seen["headers"]["Title"]
-    assert seen["headers"]["Priority"] == "urgent"
+    assert seen["url"] == "https://ntfy.sh"
+    assert seen["payload"]["topic"] == "cameron-bot-test"
+    assert "CRITICAL" in seen["payload"]["title"]
+    assert seen["payload"]["message"] == "something broke"
+    assert seen["payload"]["priority"] == 5  # critical = 5
 
 
 def test_ntfy_alerter_self_host_server_url():
     """Caller can point at a private ntfy server instead of the public
-    ntfy.sh service."""
+    ntfy.sh service. JSON POST goes to server root."""
     from alerter import NtfyAlerter
     seen = {}
     class FakeResp:
@@ -108,7 +114,27 @@ def test_ntfy_alerter_self_host_server_url():
     a = NtfyAlerter(topic="x", server="https://my-ntfy.internal:8080",
                      suppress_seconds=0, http_post=fake_post)
     a.send("info", "test")
-    assert seen["url"] == "https://my-ntfy.internal:8080/x"
+    assert seen["url"] == "https://my-ntfy.internal:8080"
+
+
+def test_ntfy_alerter_utf8_emoji_in_title():
+    """Phase-48: emoji characters in title (e.g. 🟢▲ TP, 🟠▼ SL) must
+    survive transport. JSON encoding handles UTF-8 natively, unlike
+    HTTP headers which are latin-1."""
+    from alerter import NtfyAlerter
+    import json as _json
+    seen = {}
+    class FakeResp:
+        status_code = 200
+    def fake_post(url, data=None, headers=None, timeout=None):
+        seen["payload"] = _json.loads(data.decode("utf-8"))
+        return FakeResp()
+    a = NtfyAlerter(topic="t", suppress_seconds=0, http_post=fake_post)
+    a.send("info", "🟢▲ TP-FILL DEMO @ $12.50", body="Entry: $10.00")
+    assert "🟢▲ TP-FILL" in seen["payload"]["title"]
+    a.send("warn", "🟠▼ SL-FILL DEMO @ $9.50", body="Entry: $10.00",
+            force=True)
+    assert "🟠▼ SL-FILL" in seen["payload"]["title"]
 
 
 def test_ntfy_alerter_swallows_http_failure():

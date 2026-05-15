@@ -99,35 +99,49 @@ class NtfyAlerter(_BaseAlerter):
         self._post = http_post
 
     def _do_send(self, level: str, title: str, body: str) -> bool:
-        url = f"{self.server}/{self.topic}"
-        # ntfy uses headers for title + priority; body is the message text
-        priority = {
-            "info": "default", "warn": "default",
-            "error": "high", "critical": "urgent",
-        }.get(level, "default")
-        tags = {
+        priority_int = {
+            "info": 3, "warn": 3, "error": 4, "critical": 5,
+        }.get(level, 3)
+        tag = {
             "info": "information_source", "warn": "warning",
             "error": "x", "critical": "rotating_light",
         }.get(level, "bell")
-        headers = {
-            "Title": f"[{level.upper()}] {title}"[:200],
-            "Priority": priority,
-            "Tags": tags,
+        title_full = f"[{level.upper()}] {title}"[:200]
+        # Phase-48 (2026-05-15): use ntfy's JSON POST API instead of
+        # HTTP headers. urllib AND requests/urllib3 both encode headers
+        # as latin-1, which rejects emoji codepoints. JSON body is
+        # full UTF-8 → emoji like 🟢▲ TP / 🟠▼ SL survive intact.
+        #
+        # ntfy.sh JSON endpoint: POST https://ntfy.sh/ with body
+        # {"topic": "<topic>", "title": "...", "message": "...",
+        #  "priority": 1..5, "tags": ["x", "y"]}
+        payload = {
+            "topic": self.topic,
+            "title": title_full,
+            "message": body or title,
+            "priority": priority_int,
+            "tags": [tag],
         }
-        data = (body or title).encode("utf-8")
+        import json as _json
+        data = _json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        url = self.server  # POST to root, NOT /<topic>
+        headers = {"Content-Type": "application/json; charset=utf-8"}
         if self._post is not None:
-            r = self._post(url, data=data, headers=headers, timeout=10)
-        else:
-            import urllib.request
-            req = urllib.request.Request(url, data=data, headers=headers,
-                                          method="POST")
             try:
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    return resp.status in (200, 202)
+                r = self._post(url, data=data, headers=headers, timeout=10)
+                return getattr(r, "status_code", 0) in (200, 202)
             except Exception as e:
-                log.warning("ntfy urlopen failed: %s", e)
+                log.warning("ntfy custom-post failed: %s", e)
                 return False
-        return getattr(r, "status_code", 0) in (200, 202)
+        import urllib.request
+        req = urllib.request.Request(url, data=data, headers=headers,
+                                      method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.status in (200, 202)
+        except Exception as e:
+            log.warning("ntfy urlopen failed: %s", e)
+            return False
 
 
 class TelegramAlerter(_BaseAlerter):

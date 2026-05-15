@@ -5,13 +5,13 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 ## Summary
 
 - **Total files**: 72
-- **Total `def test_*` functions**: 760
+- **Total `def test_*` functions**: 761
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 278 |
+| critical | 279 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 575 |
+| not_reviewed | 576 |
 | partially_reviewed | 85 |
 | reviewed | 100 |
 
@@ -76,7 +76,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 
 | File | Tests | Category | Source-grep | Review | Purpose |
 |---|---|---|---|---|---|
-| `test_alerter.py` | 25 | critical | yes | not_reviewed | Phase-25: alerter + health_monitor. |
+| `test_alerter.py` | 26 | critical | yes | not_reviewed | Phase-25: alerter + health_monitor. |
 | `test_audit_bugs.py` | 11 | critical | no | not_reviewed | Audit-Iter 29 (2026-05-13): audit.py health-monitoring bugs. |
 | `test_audit_multi_bot_gate.py` | 9 | critical | yes | reviewed | Phase-18 (ChatGPT-08:49 #5 P0): single-bot-process gate. |
 | `test_backoff_edge_bugs.py` | 18 | unit | no | not_reviewed | Audit-Iter 24 (2026-05-12): ReconnectBackoff edge cases. |
