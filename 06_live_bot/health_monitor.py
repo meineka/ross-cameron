@@ -234,6 +234,23 @@ class HealthMonitor:
                 1 for line in lines
                 if any(sig in line for sig in err_signatures)
             )
+            # Phase-47 (2026-05-15): silence false-positive when bot
+            # daemon is in sleep-mode (waiting until next premarket).
+            # During sleep, the bot does NOT actively maintain a WS
+            # subscription, so old conn-limit errors lingering in the
+            # log tail are expected and not actionable. Detect via the
+            # daemon's "Sleeping… heartbeat every 15 min" line.
+            sleeping_line_seen = any(
+                "Sleeping…" in line or "Sleeping..." in line
+                or "ALIVE — sleeping" in line or "ALIVE -- sleeping" in line
+                for line in lines[-100:]
+            )
+            if sleeping_line_seen:
+                return ProbeResult(
+                    "bot_ws", True,
+                    f"bot in daemon-sleep mode ({err_count} stale WS-errors "
+                    "in tail are expected, no active subscription)"
+                )
             # Determine market-hours-aware threshold
             try:
                 from secrets_loader import get_alpaca_keys
