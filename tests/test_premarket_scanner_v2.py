@@ -15,6 +15,8 @@ from types import SimpleNamespace
 
 import pytest
 
+
+pytestmark = pytest.mark.critical  # Phase-21 (ChatGPT-09:15 #1): live-safety gate
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "06_live_bot"))
 

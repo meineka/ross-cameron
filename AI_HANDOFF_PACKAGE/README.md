@@ -1,11 +1,25 @@
 # Cameron-Bot — AI Handoff Package
 
-**Datum:** 2026-05-15 (post-Phase-20)
+**Datum:** 2026-05-15 (post-Phase-21)
 **Status:** Paper-trading prototype with broker-state-machine + multi-bot
-guard + tiered test gates
-**Quality:** **630 tests collected** / **629 passed, 1 skipped**
-(local-verified, full suite). Per-file inventory + review-status see
-`docs/TEST_MANIFEST.md`.
+guard + tiered test gates + experiment-script separation
+**Quality:** **~630 tests collected** / **passed** (local-verified, full
+suite). Per-file inventory + review-status see `docs/TEST_MANIFEST.md`.
+
+### Export-zip artifact matrix (ChatGPT-09:15 Task 5)
+
+| Artifact | Tests collected | Tests passed | Pilot data | Use case |
+|---|---|---|---|---|
+| Active local repo (`C:\Users\Szymon\ross-cameron`) | 630 | 629 + 1 skipped | ✅ `04_backtest/data_pilot/*.parquet` | Day-to-day development |
+| `*_export_claude.zip` (`AI_HANDOFF_PACKAGE/`) | ~630 | ~629 + 1 skipped | ✅ included | Hand-off to reviewer for full validation |
+| `*_full_repo.zip` (entire repo) | ~630 | ~620 + ~10 skipped | ❌ excluded (parquet > 50 MB cap) | Code-only review; replay/pilot tests skip due to missing data |
+
+**Pilot data decision (ChatGPT-09:15 Task 2):** parquet files are
+deliberately excluded from `*_full_repo.zip` to keep the zip under
+50 MB. Tests gated on `PILOT_DATA.exists()` skip cleanly when run in
+that context; the count drift is real and documented above. Reviewers
+who need full replay coverage should use the `*_export_claude.zip`
+flavor or fetch the parquet via `04_backtest/bootstrap.py`.
 
 ⚠️ **NOT cleared for live trading with real money.**
 

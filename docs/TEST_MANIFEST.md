@@ -4,25 +4,25 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 61
-- **Total `def test_*` functions**: 630
+- **Total files**: 62
+- **Total `def test_*` functions**: 638
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 109 |
-| integration | 90 |
+| critical | 156 |
+| integration | 71 |
 | replay | 25 |
 | slow | 3 |
-| smoke | 2 |
-| unit | 401 |
+| smoke | 10 |
+| unit | 373 |
 
 ### Tests per review-status
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 498 |
+| not_reviewed | 506 |
 | partially_reviewed | 55 |
 | reviewed | 77 |
 
@@ -90,7 +90,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_intraday_rescan_bugs.py` | 8 | unit | no | not_reviewed | Audit-Iter 18 (2026-05-12): intraday_rescan + WS-resubscribe robustness. |
 | `test_logging_bugs.py` | 13 | unit | yes | not_reviewed | Audit-Iter 17 (2026-05-12): TradeLogger + slippage_log robustness. |
 | `test_manage_position_bugs.py` | 6 | unit | yes | not_reviewed | manage_position Audit-Iteration 4 — State-Machine-Bugs. |
-| `test_manage_position_pnl_bugs.py` | 5 | unit | no | not_reviewed | Audit-Iter 11 (2026-05-12): manage_position PnL-Buchhaltungs-Bugs. |
+| `test_manage_position_pnl_bugs.py` | 5 | critical | no | not_reviewed | Audit-Iter 11 (2026-05-12): manage_position PnL-Buchhaltungs-Bugs. |
 | `test_manifest_freshness.py` | 2 | smoke | no | not_reviewed | Phase-20 (ChatGPT-09:02 Task 2): the auto-generated TEST_MANIFEST.md |
 | `test_micro_test_trade_helpers.py` | 7 | unit | yes | not_reviewed | Audit-Iter 32 (2026-05-13): micro_test_trade.py helper bug-fixes. |
 | `test_no_trade_postmortem.py` | 18 | integration | yes | reviewed | Phase-13 (ChatGPT-20:11 P1): no_trade_postmortem produces a |
@@ -103,12 +103,12 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_postmortem_20260512.py` | 9 | unit | yes | not_reviewed | Post-Mortem-Tests für 2026-05-12 Findings. |
 | `test_preflight_bugs.py` | 12 | critical | no | not_reviewed | Audit-Iter 13 (2026-05-12): pre_flight.py robustness. |
 | `test_premarket_scan_bugs.py` | 8 | integration | no | not_reviewed | Audit-Iter 16 (2026-05-12): premarket_scan data-resilienz bugs. |
-| `test_premarket_scanner_v2.py` | 12 | integration | no | reviewed | Phase-16 (ChatGPT-08:11 #1 / P1.1): real premarket scanner. |
+| `test_premarket_scanner_v2.py` | 12 | critical | no | reviewed | Phase-16 (ChatGPT-08:11 #1 / P1.1): real premarket scanner. |
 | `test_protect_position_bugs.py` | 8 | unit | no | not_reviewed | Audit-Iter 7 (2026-05-12): protect_position OCO-vs-separate-orders bug. |
 | `test_pump_dump_filter_bugs.py` | 12 | unit | yes | not_reviewed | Audit-Iter 22 (2026-05-12): pump_dump_filter dead-code bug. |
 | `test_pyramiding_pnl_bugs.py` | 6 | unit | no | not_reviewed | Audit-Iter 12 (2026-05-12): Pyramiding (Add-to-Winner) PnL-Buchhaltung. |
 | `test_replay_executor_parity.py` | 10 | replay | no | partially_reviewed | Review-V2 Phase 8 (ChatGPT 14:36-answer): ReplayBot uses the SAME |
-| `test_replay_p2x_golden_scenarios.py` | 7 | integration | no | reviewed | Phase-17 (ChatGPT-12:52 P2.x + ChatGPT-08:11 #2): FakeBroker/Replay-Live |
+| `test_replay_p2x_golden_scenarios.py` | 7 | critical | no | reviewed | Phase-17 (ChatGPT-12:52 P2.x + ChatGPT-08:11 #2): FakeBroker/Replay-Live |
 | `test_replay_parity_bugs.py` | 12 | replay | no | partially_reviewed | Audit-Iter 19 (2026-05-12): ReplayBot ↔ live Bot PnL-Parität. |
 | `test_replay_regression.py` | 3 | slow | no | partially_reviewed | Regression-Test: Replay 2026-04-15 must produce known-good stats. |
 | `test_review_fixes_p0.py` | 8 | critical | yes | not_reviewed | Tests for P0 fixes from external reviewer (2026-05-13 memo). |
@@ -117,9 +117,10 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_review_v2_phase7.py` | 10 | unit | yes | not_reviewed | Review-V2 Phase 7 behavior tests: |
 | `test_risk_engine.py` | 9 | critical | no | partially_reviewed | Risk-Engine Tests — Position-Sizing, Daily-Caps, Spiral-Detection. |
 | `test_risk_engine_bugs.py` | 9 | critical | no | not_reviewed | Latente Risk-Engine-Bugs aus dem 2. Audit-Pass. |
-| `test_safe_bracket_fix.py` | 12 | unit | no | not_reviewed | Tests für den 2026-05-12 14:00 ET HSPT/ATRA-Bug: |
-| `test_safe_bracket_status_bugs.py` | 11 | unit | no | not_reviewed | Audit-Iter 27 (2026-05-13): safe_bracket_buy status-comparison bugs. |
+| `test_safe_bracket_fix.py` | 12 | critical | no | not_reviewed | Tests für den 2026-05-12 14:00 ET HSPT/ATRA-Bug: |
+| `test_safe_bracket_status_bugs.py` | 11 | critical | no | not_reviewed | Audit-Iter 27 (2026-05-13): safe_bracket_buy status-comparison bugs. |
 | `test_secrets_loader_bugs.py` | 11 | unit | no | not_reviewed | Audit-Iter 35 (2026-05-13): secrets_loader.py edge cases. |
+| `test_smoke_imports.py` | 8 | smoke | no | not_reviewed | Phase-21 (ChatGPT-09:15 Task 1): smoke gate — populates the `smoke` |
 | `test_status_dashboard_bugs.py` | 12 | unit | yes | not_reviewed | Audit-Iter 26 (2026-05-12): status_dashboard.py durability + correctness. |
 | `test_strategy_improvements.py` | 8 | unit | yes | not_reviewed | Tests für die Cameron-Lessons-Verbesserungen vom 2026-05-12. |
 | `test_trade_log_separation.py` | 7 | critical | yes | reviewed | Phase-11 (ChatGPT-18:40 P0.2): live and replay trade logs MUST be |
@@ -133,6 +134,6 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 
 ## Gate semantics (Phase-19 / ChatGPT-08:49 Task 3)
 
-- `tests/run_quality_gates.py --fast`  → `-m critical` (~35 tests, <5 s) — loop-tick safety gate
+- `tests/run_quality_gates.py --fast`  → `-m "smoke or critical"` (~37 tests, <30 s) — loop-tick safety gate
 - `tests/run_quality_gates.py`          → `-m "not slow"` (~624 tests) — default daily check
 - `tests/run_quality_gates.py --full`   → no filter (~630 tests) — release / live-start / refactor gate

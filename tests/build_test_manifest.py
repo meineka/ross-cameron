@@ -259,8 +259,8 @@ def render_markdown(manifest: dict,
         lines.append("")
     lines.append("## Gate semantics (Phase-19 / ChatGPT-08:49 Task 3)")
     lines.append("")
-    lines.append("- `tests/run_quality_gates.py --fast`  → `-m critical` "
-                 "(~35 tests, <5 s) — loop-tick safety gate")
+    lines.append("- `tests/run_quality_gates.py --fast`  → `-m \"smoke or critical\"` "
+                 "(~37 tests, <30 s) — loop-tick safety gate")
     lines.append("- `tests/run_quality_gates.py`          → `-m \"not slow\"` "
                  "(~624 tests) — default daily check")
     lines.append("- `tests/run_quality_gates.py --full`   → no filter "
