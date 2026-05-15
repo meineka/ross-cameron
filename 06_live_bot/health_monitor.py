@@ -153,11 +153,19 @@ class HealthMonitor:
     def probe_alpaca(self) -> ProbeResult:
         try:
             from secrets_loader import get_alpaca_keys
-            from alpaca.trading.client import TradingClient
-            from alpaca.data.historical import StockHistoricalDataClient
             from alpaca.data.requests import StockSnapshotRequest
+            # Phase-57: route through GuardedTradingClient so probe calls
+            # count against the 200/min budget (ChatGPT P0 follow-up).
+            try:
+                from guarded_alpaca import (
+                    GuardedTradingClient as _TC,
+                    GuardedStockHistoricalDataClient as _DC,
+                )
+            except Exception:
+                from alpaca.trading.client import TradingClient as _TC
+                from alpaca.data.historical import StockHistoricalDataClient as _DC
             k, s = get_alpaca_keys()
-            tc = TradingClient(k, s, paper=True)
+            tc = _TC(k, s, paper=True)
             a = tc.get_account()
             if str(a.status) != "AccountStatus.ACTIVE":
                 return ProbeResult("alpaca", False, f"account_status={a.status}")
@@ -170,8 +178,8 @@ class HealthMonitor:
             except Exception:
                 is_open = False
             stale_threshold = 600 if is_open else 24 * 3600  # 10 min RTH / 24 h closed
-            # Quick data ping
-            dc = StockHistoricalDataClient(k, s)
+            # Quick data ping (Phase-57 guarded)
+            dc = _DC(k, s)
             snap = dc.get_stock_snapshot(
                 StockSnapshotRequest(symbol_or_symbols=["SPY"], feed="iex"))
             sp = snap.get("SPY")
@@ -254,9 +262,13 @@ class HealthMonitor:
             # Determine market-hours-aware threshold
             try:
                 from secrets_loader import get_alpaca_keys
-                from alpaca.trading.client import TradingClient
+                # Phase-57: guarded clock check
+                try:
+                    from guarded_alpaca import GuardedTradingClient as _TC
+                except Exception:
+                    from alpaca.trading.client import TradingClient as _TC
                 k, s = get_alpaca_keys()
-                tc = TradingClient(k, s, paper=True)
+                tc = _TC(k, s, paper=True)
                 is_open = bool(getattr(tc.get_clock(), "is_open", False))
             except Exception:
                 is_open = False

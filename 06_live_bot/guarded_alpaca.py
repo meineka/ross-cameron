@@ -69,25 +69,71 @@ def _log_call(*, source: str, method: str, status: str,
         log.debug("alpaca-api-call log write failed: %s", e)
 
 
+class AlpacaRateLimitBlocked(Exception):
+    """Phase-55: raised when the global RateGuard cannot grant a token
+    within the configured timeout. Distinct from network/auth errors so
+    callers can decide policy (retry, drop, escalate alert)."""
+
+
+# Phase-55 (2026-05-15, ChatGPT P0): timeout policy for block_until_allowed.
+# When budget is exhausted and waiting times out, the guard returns False
+# and we MUST refuse the call — not silently bypass like the previous
+# fail-open behavior. The actual wait timeout is parameterised so
+# market-data calls can choose shorter waits than order calls if they want.
+DEFAULT_BLOCK_TIMEOUT_SEC = 30.0
+
+
 def _guarded_invoke(*, guard, source: str, method_name: str,
-                     callable_fn, args, kwargs):
-    """Single chokepoint: rate-block, time, log, propagate."""
+                     callable_fn, args, kwargs,
+                     block_timeout_sec: float = DEFAULT_BLOCK_TIMEOUT_SEC):
+    """Single chokepoint: rate-block, time, log, propagate.
+
+    Phase-55 (fail-closed): if the rate-guard denies access within
+    `block_timeout_sec`, the wrapped Alpaca call is NOT executed.
+    Instead we log `status="blocked"` and raise AlpacaRateLimitBlocked.
+    """
     t_block_start = time.monotonic()
-    guard.block_until_allowed(timeout_sec=30.0)
+    allowed = guard.block_until_allowed(timeout_sec=block_timeout_sec)
     blocked_ms = (time.monotonic() - t_block_start) * 1000
+    # current_rate_per_min may be: (a) int property on RateGuard,
+    # (b) callable function, (c) MagicMock in tests. Resolve safely.
+    raw = getattr(guard, "current_rate_per_min", 0)
+    try:
+        if callable(raw):
+            raw = raw()
+        rate_now = int(raw) if isinstance(raw, (int, float)) else 0
+    except Exception:
+        rate_now = 0
+    if not allowed:
+        # Fail-closed: log + raise, no SDK call.
+        _log_call(source=source, method=method_name, status="blocked",
+                   latency_ms=0.0, blocked_ms=blocked_ms,
+                   error_class="AlpacaRateLimitBlocked",
+                   extra={"rate_per_min": rate_now,
+                          "guard_max_per_min": getattr(guard, "max_per_min", None),
+                          "timeout_sec": block_timeout_sec})
+        log.warning("Alpaca call BLOCKED by rate-guard: %s.%s "
+                     "(waited %.1fs, current rate %d/min, cap %s/min)",
+                     source, method_name, blocked_ms / 1000.0, rate_now,
+                     getattr(guard, "max_per_min", "?"))
+        raise AlpacaRateLimitBlocked(
+            f"{source}.{method_name} blocked: rate-guard budget exhausted "
+            f"(waited {blocked_ms:.0f}ms, current {rate_now}/min)"
+        )
     t_call_start = time.monotonic()
     try:
         result = callable_fn(*args, **kwargs)
         latency_ms = (time.monotonic() - t_call_start) * 1000
         _log_call(source=source, method=method_name, status="ok",
-                   latency_ms=latency_ms, blocked_ms=blocked_ms)
+                   latency_ms=latency_ms, blocked_ms=blocked_ms,
+                   extra={"rate_per_min": rate_now})
         return result
     except Exception as e:
         latency_ms = (time.monotonic() - t_call_start) * 1000
         _log_call(source=source, method=method_name, status="error",
                    latency_ms=latency_ms, blocked_ms=blocked_ms,
                    error_class=type(e).__name__,
-                   extra={"error": str(e)[:200]})
+                   extra={"error": str(e)[:200], "rate_per_min": rate_now})
         raise
 
 

@@ -130,12 +130,15 @@ def main() -> int:
                     help="self-impose this REST rate cap (default 180)")
     args = ap.parse_args()
 
-    # Init Alpaca client
+    # Init Alpaca client (Phase-57: guarded)
     try:
         from secrets_loader import get_alpaca_keys
-        from alpaca.data.historical import StockHistoricalDataClient
+        try:
+            from guarded_alpaca import GuardedStockHistoricalDataClient as _DC
+        except Exception:
+            from alpaca.data.historical import StockHistoricalDataClient as _DC
         k, s = get_alpaca_keys()
-        data_client = StockHistoricalDataClient(k, s)
+        data_client = _DC(k, s)
     except Exception as e:
         log.error("Alpaca init failed: %s", e)
         return 1

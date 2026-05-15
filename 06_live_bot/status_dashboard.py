@@ -41,6 +41,49 @@ def write_status(bot) -> None:
             {"symbol": s, "rank": getattr(t, "rank", -1), "score": getattr(t, "score", 0.0)}
             for s, t in bot.tickers.items()
         ]
+        # Phase-56 (ChatGPT P0 follow-up 2026-05-15): expose live
+        # diagnostics so a no-trade investigation can be answered in
+        # one glance — rate-cap state, last call/block timestamps,
+        # WS abuse counter, last bar timestamp, scanner status.
+        alpaca_rate_per_min = 0
+        ws_abuse_count = 0
+        last_alpaca_call_ts = None
+        last_alpaca_block_ts = None
+        try:
+            from guarded_alpaca import current_rate_per_min
+            alpaca_rate_per_min = current_rate_per_min()
+        except Exception:
+            pass
+        try:
+            from alpaca_ws_patch import get_ws_abuse_count
+            ws_abuse_count = get_ws_abuse_count()
+        except Exception:
+            pass
+        # Pull latest call timestamp from alpaca_api_calls.jsonl tail
+        try:
+            calls_log = Path(__file__).parent / "alpaca_api_calls.jsonl"
+            if calls_log.exists():
+                with open(calls_log, "rb") as f:
+                    f.seek(0, 2)
+                    size = f.tell()
+                    f.seek(max(0, size - 4096))
+                    tail = f.read().decode("utf-8", errors="replace")
+                for line in reversed(tail.splitlines()):
+                    if not line.strip():
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        if last_alpaca_call_ts is None:
+                            last_alpaca_call_ts = rec.get("ts")
+                        if (last_alpaca_block_ts is None and
+                                rec.get("status") == "blocked"):
+                            last_alpaca_block_ts = rec.get("ts")
+                        if last_alpaca_call_ts and last_alpaca_block_ts:
+                            break
+                    except Exception:
+                        pass
+        except Exception:
+            pass
         payload = {
             "ts": datetime.now().isoformat(),
             "account_equity": getattr(bot, "_last_equity", None),
@@ -57,6 +100,13 @@ def write_status(bot) -> None:
             "ws_reconnects": d.ws_reconnects,
             "positions_open": positions,
             "watchlist": watchlist,
+            # Phase-56 diagnostics
+            "alpaca_rate_per_min": alpaca_rate_per_min,
+            "alpaca_rate_cap": 200,
+            "last_alpaca_call_ts": last_alpaca_call_ts,
+            "last_alpaca_block_ts": last_alpaca_block_ts,
+            "ws_abuse_count": ws_abuse_count,
+            "last_no_trade_reason": getattr(d, "last_no_trade_reason", None),
         }
         serialized = json.dumps(payload, indent=2, default=str)
     except Exception as e:

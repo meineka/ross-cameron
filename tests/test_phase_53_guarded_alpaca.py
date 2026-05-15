@@ -50,6 +50,7 @@ def test_guarded_proxy_forwards_callable_attributes(temp_log):
     inner = MagicMock()
     inner.get_account.return_value = MagicMock(equity="100000")
     guard = MagicMock()
+    guard.block_until_allowed.return_value = True  # Phase-55: explicit allow
     proxy = guarded_alpaca._GuardedProxy(inner, source="alpaca-trading",
                                            guard=guard)
     result = proxy.get_account()
@@ -73,6 +74,7 @@ def test_guarded_proxy_calls_block_until_allowed_before_invoke(temp_log):
     inner = MagicMock()
     inner.get_account.return_value = MagicMock()
     guard = MagicMock()
+    guard.block_until_allowed.return_value = True  # Phase-55: explicit allow
     proxy = guarded_alpaca._GuardedProxy(inner, source="alpaca-trading",
                                            guard=guard)
     proxy.get_account()
@@ -85,6 +87,7 @@ def test_guarded_proxy_logs_ok_call(temp_log):
     inner = MagicMock()
     inner.submit_order.return_value = MagicMock(id="abc-123")
     guard = MagicMock()
+    guard.block_until_allowed.return_value = True  # Phase-55: explicit allow
     proxy = guarded_alpaca._GuardedProxy(inner, source="alpaca-trading",
                                            guard=guard)
     proxy.submit_order(symbol="AAPL", qty=1)
@@ -105,6 +108,7 @@ def test_guarded_proxy_logs_and_reraises_on_error(temp_log):
     inner = MagicMock()
     inner.submit_order.side_effect = ValueError("connection limit exceeded")
     guard = MagicMock()
+    guard.block_until_allowed.return_value = True  # Phase-55: explicit allow
     proxy = guarded_alpaca._GuardedProxy(inner, source="alpaca-trading",
                                            guard=guard)
     with pytest.raises(ValueError, match="connection limit"):
@@ -148,6 +152,106 @@ def test_current_rate_per_min_returns_int():
     rate = guarded_alpaca.current_rate_per_min()
     assert isinstance(rate, int)
     assert rate >= 0
+
+
+def test_guarded_invoke_fail_closed_when_budget_exhausted(temp_log):
+    """Phase-55 (ChatGPT P0): when block_until_allowed returns False,
+    the wrapped Alpaca call MUST NOT be invoked. Previous fail-open
+    behavior silently bypassed the rate cap under sustained load."""
+    import guarded_alpaca
+    inner_calls = []
+    def fake_inner_method(*a, **kw):
+        inner_calls.append((a, kw))
+        return "OK"
+    # Mock guard: block_until_allowed returns False (budget exhausted)
+    guard = MagicMock()
+    guard.block_until_allowed.return_value = False
+    guard.max_per_min = 200
+    guard.current_rate_per_min = 250  # over cap
+    with pytest.raises(guarded_alpaca.AlpacaRateLimitBlocked,
+                        match="budget exhausted"):
+        guarded_alpaca._guarded_invoke(
+            guard=guard, source="alpaca-trading",
+            method_name="get_account",
+            callable_fn=fake_inner_method,
+            args=(), kwargs={},
+        )
+    # Critical assertion: inner method NEVER called
+    assert inner_calls == [], (
+        f"fail-closed broken: inner method invoked {len(inner_calls)} times "
+        f"even though guard denied access"
+    )
+    # Logged as status=blocked, not ok/error
+    rows = _read_log(temp_log)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "blocked"
+    assert rows[0]["error_class"] == "AlpacaRateLimitBlocked"
+
+
+def test_guarded_invoke_logs_rate_per_min_in_extra(temp_log):
+    """Phase-56: every JSONL row must include rate_per_min in extra
+    for diagnostics."""
+    import guarded_alpaca
+    guard = MagicMock()
+    guard.block_until_allowed.return_value = True
+    guard.current_rate_per_min = 47
+    guard.max_per_min = 200
+    inner = MagicMock(return_value=MagicMock())
+    guarded_alpaca._guarded_invoke(
+        guard=guard, source="alpaca-trading",
+        method_name="get_account",
+        callable_fn=inner, args=(), kwargs={},
+    )
+    rows = _read_log(temp_log)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "ok"
+    assert rows[0]["extra"]["rate_per_min"] == 47
+
+
+def test_205_rapid_calls_dont_all_hit_inner_sdk():
+    """Phase-59 storm regression: 205 rapid calls within 60s must not
+    produce 205 inner-SDK invocations. Verifies the RateGuard backs up
+    excess calls instead of letting them bypass."""
+    import guarded_alpaca
+    import alpaca_rate_guard
+    alpaca_rate_guard._GLOBAL_GUARD = None  # reset
+    guard = alpaca_rate_guard.RateGuard(max_per_min=200, source="test")
+    inner_calls = [0]
+    def fake_inner():
+        inner_calls[0] += 1
+        return "OK"
+    # Fire 205 calls. The 201st-205th SHOULD either:
+    #   (a) wait (returning True after some delay), or
+    #   (b) timeout & fail-closed (AlpacaRateLimitBlocked)
+    # In either case, we should NOT see all 205 succeed instantly.
+    # Use a 0.01s timeout to force the over-quota calls into the
+    # fail-closed branch quickly without blocking the test for 60s.
+    import time
+    t_start = time.monotonic()
+    n_blocked = 0
+    n_ok = 0
+    for i in range(205):
+        try:
+            guarded_alpaca._guarded_invoke(
+                guard=guard, source="test", method_name=f"call_{i}",
+                callable_fn=fake_inner, args=(), kwargs={},
+                block_timeout_sec=0.01,
+            )
+            n_ok += 1
+        except guarded_alpaca.AlpacaRateLimitBlocked:
+            n_blocked += 1
+    elapsed = time.monotonic() - t_start
+    # Within ~1 second wall clock (with 0.01s timeouts), can fit at most
+    # ~100 ok calls. 205 calls means >=5 should have been blocked.
+    assert n_blocked >= 5, (
+        f"205 rapid calls all bypassed the guard: n_ok={n_ok}, "
+        f"n_blocked={n_blocked}, elapsed={elapsed:.2f}s. Expected guard "
+        f"to fail-closed on at least 5 over-quota calls."
+    )
+    assert inner_calls[0] == n_ok, (
+        f"inner SDK invoked {inner_calls[0]} times but only {n_ok} guarded "
+        f"calls succeeded — inner ran without guard approval"
+    )
 
 
 def test_bot_source_uses_guarded_clients():

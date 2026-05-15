@@ -346,9 +346,13 @@ def get_positions_count() -> int:
     try:
         sys.path.insert(0, str(HERE))
         from secrets_loader import get_alpaca_keys
-        from alpaca.trading.client import TradingClient
+        # Phase-57: guarded audit check (ChatGPT P0 follow-up)
+        try:
+            from guarded_alpaca import GuardedTradingClient as _TC
+        except Exception:
+            from alpaca.trading.client import TradingClient as _TC
         k, s = get_alpaca_keys()
-        client = TradingClient(k, s, paper=True)
+        client = _TC(k, s, paper=True)
         return len(client.get_all_positions())
     except Exception:
         return -1

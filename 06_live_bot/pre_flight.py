@@ -29,8 +29,13 @@ def check_alpaca_auth(api_key: str, api_secret: str,
     if not api_key or not api_secret:
         return False, "Alpaca-Auth FAIL: api_key/api_secret leer (env vars set?)"
     try:
-        from alpaca.trading.client import TradingClient
-        c = TradingClient(api_key, api_secret, paper=True)
+        # Phase-57: guarded preflight so this check counts against the
+        # 200/min budget (ChatGPT P0 follow-up).
+        try:
+            from guarded_alpaca import GuardedTradingClient as _TC
+        except Exception:
+            from alpaca.trading.client import TradingClient as _TC
+        c = _TC(api_key, api_secret, paper=True)
         acc = c.get_account()
     except Exception as e:
         return False, f"Alpaca-Auth FAIL: {e}"
