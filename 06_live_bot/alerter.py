@@ -216,8 +216,19 @@ def make_alerter(*, alerts_log_path: Path | str | None = None,
       3. Neither  → LogAlerter only
 
     The Log alerter is ALWAYS included so you have a disk audit trail.
+
+    Phase-25 ENV resolution: caller may pass env= explicitly. Otherwise
+    we trigger secrets_loader's .env loader first (mirroring how
+    get_alpaca_keys() picks up TELEGRAM_* vars from the same .env file).
     """
     if env is None:
+        # Trigger .env → os.environ population (idempotent, only sets
+        # keys that aren't already there).
+        try:
+            from secrets_loader import _load_env_file
+            _load_env_file()
+        except Exception:
+            pass
         env = os.environ
     if alerts_log_path is None:
         alerts_log_path = Path(__file__).resolve().parent / "alerts.log"
