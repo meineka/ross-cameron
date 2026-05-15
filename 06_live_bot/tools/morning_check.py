@@ -28,7 +28,7 @@ print(f"Pattern-day-trade: {a.pattern_day_trader}")
 print(f"Open-Positions:    {len(c.get_all_positions())}")
 print()
 
-bot_dir = Path(__file__).parent
+bot_dir = Path(__file__).resolve().parent.parent
 files_to_check = [
     ("heartbeat.txt", "<60s alt"),
     (".env", "secrets"),

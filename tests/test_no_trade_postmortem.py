@@ -35,6 +35,7 @@ REQUIRED_FIELDS = {
 def isolate_heartbeat_file(monkeypatch, tmp_path):
     import no_trade_postmortem as ntp
     monkeypatch.setattr(ntp, "HEARTBEAT_FILE", tmp_path / "heartbeat.txt")
+    monkeypatch.setattr(ntp, "BOT_LOG", tmp_path / "bot.log")
 
 
 def test_build_postmortem_returns_required_schema(monkeypatch, tmp_path):
@@ -361,3 +362,33 @@ def test_postmortem_build_includes_pid_pair_classification(monkeypatch, tmp_path
     assert doc["bot_daemon_pid_pairs"]["process_pairs"] == [{"launcher": 100, "child": 200}]
     assert "watchdog_pid_pairs" in doc
     assert doc["watchdog_pid_pairs"]["standalone_pids"] == [300]
+
+
+def test_postmortem_extracts_scan_reasons_from_bot_log(monkeypatch, tmp_path):
+    import no_trade_postmortem as ntp
+    bot_log = tmp_path / "bot.log"
+    bot_log.write_text(
+        "2026-05-15 08:55:38,992 INFO [bot] PREMARKET SCAN START - pulling daily bars\n"
+        "2026-05-15 09:00:03,335 INFO [bot]   Pre-rank candidates: 23 (price/RVOL/%)\n"
+        "2026-05-15 09:00:03,960 INFO [bot]     REJECT LESL (no recent catalyst, mode=soft)\n"
+        "2026-05-15 09:00:04,418 INFO [bot]     REJECT MOBX (no recent catalyst, mode=soft)\n"
+        "2026-05-15 09:00:12,171 INFO [bot] TOP-10 WATCHLIST:\n"
+        "2026-05-15 09:00:12,173 INFO [bot]   #1 QUCY  $3.00  +196.3%  RVOL 6.5x  score=1281\n"
+        "2026-05-15 09:00:12,173 INFO [bot]   #2 QCLS  $5.13  +31.0%  RVOL 6.6x  score=204\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(ntp, "BOT_LOG", bot_log)
+    monkeypatch.setattr(ntp, "STATUS_JSON", tmp_path / "nope.json")
+    monkeypatch.setattr(ntp, "DAEMON_LOG", tmp_path / "nope.log")
+    monkeypatch.setattr(ntp, "WATCHDOG_LOG", tmp_path / "nope.log")
+    monkeypatch.setattr(ntp, "TRADES_LIVE_JSONL", tmp_path / "nope.jsonl")
+    monkeypatch.setattr(ntp, "DAY_SUMMARY_DIR", tmp_path)
+    monkeypatch.setattr(ntp, "_find_bot_daemon_pids", lambda: [123])
+    monkeypatch.setattr(ntp, "_find_watchdog_pids", lambda: [456])
+    monkeypatch.setattr(ntp, "_is_pid_alive", lambda pid: True)
+    monkeypatch.setattr(ntp, "_get_parent_pid_map", lambda: {})
+    doc = ntp.build_postmortem("2026-05-15")
+    assert doc["last_scan_time"].endswith("PREMARKET SCAN START - pulling daily bars")
+    assert doc["pre_rank_candidates"] == 23
+    assert doc["watchlist"] == ["QUCY", "QCLS"]
+    assert doc["reject_counts_by_reason"] == {"no recent catalyst": 2}

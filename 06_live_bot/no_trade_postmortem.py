@@ -31,6 +31,7 @@ HERE = Path(__file__).resolve().parent
 STATUS_JSON = HERE / "status.json"
 HEARTBEAT_FILE = HERE / "heartbeat.txt"
 DAEMON_LOG = HERE / "daemon.log"
+BOT_LOG = HERE / "bot.log"
 WATCHDOG_LOG = HERE / "watchdog.log"
 TRADES_LIVE_JSONL = HERE / "trades_live.jsonl"
 TRADES_REPLAY_JSONL = HERE / "trades_replay.jsonl"
@@ -258,6 +259,62 @@ def _extract_last_match(text: str, needle: str) -> str | None:
     return None
 
 
+def _lines_for_date(text: str, date_str: str) -> list[str]:
+    """Return timestamped log lines for a YYYY-MM-DD date."""
+    if not text:
+        return []
+    return [line for line in text.splitlines() if line.startswith(date_str)]
+
+
+def _extract_last_line(lines: list[str], needle: str) -> str | None:
+    for line in reversed(lines):
+        if needle in line:
+            return line.strip()[:500]
+    return None
+
+
+def _extract_last_pre_rank(lines: list[str]) -> int | None:
+    for line in reversed(lines):
+        m = re.search(r"Pre-rank candidates:\s*(\d+)", line)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _extract_reject_counts_from_log(lines: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for line in lines:
+        if " REJECT " not in line:
+            continue
+        reason = None
+        m = re.search(r"REJECT\s+\S+\s+\((.*?)(?:,\s*mode=.*)?\)", line)
+        if m:
+            reason = m.group(1).strip()
+        if not reason:
+            reason = "unknown"
+        counts[reason] = counts.get(reason, 0) + 1
+    return counts
+
+
+def _extract_last_watchlist(lines: list[str]) -> list[str] | None:
+    """Parse the most recent TOP-10 WATCHLIST block from bot.log."""
+    start = -1
+    for i in range(len(lines) - 1, -1, -1):
+        if "TOP-10 WATCHLIST" in lines[i]:
+            start = i
+            break
+    if start < 0:
+        return None
+    symbols: list[str] = []
+    for line in lines[start + 1:start + 20]:
+        if "====" in line and symbols:
+            break
+        m = re.search(r"#\d+\s+([A-Z][A-Z0-9.\-]{0,8})\s+", line)
+        if m:
+            symbols.append(m.group(1))
+    return symbols if symbols else None
+
+
 def _extract_pattern_counts_from_summary(summary: dict | None) -> dict:
     """Pull pattern-reject counters from a day-summary if present."""
     if not isinstance(summary, dict):
@@ -351,7 +408,9 @@ def build_postmortem(target_date: str | None = None) -> dict:
 
     # 3) Log scrapes
     daemon_text = _tail_text(DAEMON_LOG)
+    bot_text = _tail_text(BOT_LOG)
     watchdog_text = _tail_text(WATCHDOG_LOG)
+    bot_lines_today = _lines_for_date(bot_text, target_date)
     # Phase-15: report only errors AFTER the last successful restart marker
     # so stale errors from a previous run don't masquerade as the current
     # cause. last_watchdog_error_raw kept for backwards compatibility.
@@ -359,10 +418,15 @@ def build_postmortem(target_date: str | None = None) -> dict:
     last_watchdog_error_raw = _extract_last_error(watchdog_text)
     last_bot_start = _extract_last_match(daemon_text, "Started bot.py") \
                      or _extract_last_match(watchdog_text, "Started bot.py")
-    last_ws_subscription = _extract_last_match(daemon_text, "WS subscribed") \
-                            or _extract_last_match(daemon_text, "subscribe")
-    last_scan_time = _extract_last_match(daemon_text, "scan") \
-                      or _extract_last_match(daemon_text, "Scanner")
+    last_ws_subscription = (
+        _extract_last_line(bot_lines_today, "Subscribing to Alpaca-WS")
+        or _extract_last_match(daemon_text, "WS subscribed")
+        or _extract_last_match(daemon_text, "subscribe")
+    )
+    last_scan_time = (
+        _extract_last_line(bot_lines_today, "PREMARKET SCAN START")
+        or _extract_last_match(daemon_text, "PREMARKET TIME")
+    )
 
     # 4) Day-summary (if present)
     summary_paths = [
@@ -383,10 +447,18 @@ def build_postmortem(target_date: str | None = None) -> dict:
             if k in summary:
                 pre_rank_candidates = summary[k]
                 break
+    if pre_rank_candidates is None:
+        pre_rank_candidates = _extract_last_pre_rank(bot_lines_today)
 
     watchlist = None
     if isinstance(status, dict) and isinstance(status.get("watchlist"), list):
         watchlist = status["watchlist"]
+    if not watchlist:
+        watchlist = _extract_last_watchlist(bot_lines_today)
+
+    log_reject_counts = _extract_reject_counts_from_log(bot_lines_today)
+    if not pattern_reject_counts and log_reject_counts:
+        pattern_reject_counts = log_reject_counts
 
     # 5) Orders submitted today (best-effort)
     orders_submitted = _count_orders_in_live_log(target_date)
