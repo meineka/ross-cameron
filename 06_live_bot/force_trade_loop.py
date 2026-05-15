@@ -92,44 +92,94 @@ TAKE_PROFIT_PCT = 10.0    # +10% from entry → take profit (R:R 1:2)
 _pending_exits: dict[str, dict] = {}
 
 
-def buy_one(trading_client, alerter, symbol: str, shares: int,
-            price_hint: float | None) -> None:
-    """Submit BRACKET BUY (entry + SL + TP atomic).
+def get_short_trend(data_client, symbol: str) -> str:
+    """Phase-49: very simple trend probe — last 5 minutes' price action.
+    Returns "long" (uptrend), "short" (downtrend), or "flat" (no clear
+    direction within ±0.2%)."""
+    try:
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+        from datetime import datetime, timezone, timedelta
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(minutes=10)
+        req = StockBarsRequest(
+            symbol_or_symbols=[symbol],
+            timeframe=TimeFrame(1, TimeFrameUnit.Minute),
+            start=start, end=end, feed="iex",
+        )
+        bars = data_client.get_stock_bars(req)
+        rows = bars.data.get(symbol, []) if hasattr(bars, "data") else bars[symbol]
+        if not rows or len(rows) < 3:
+            return "flat"
+        first = float(rows[0].close)
+        last = float(rows[-1].close)
+        pct = (last - first) / first * 100 if first else 0.0
+        if pct > 0.2:
+            return "long"
+        if pct < -0.2:
+            return "short"
+        return "flat"
+    except Exception as e:
+        log.debug("trend probe %s err: %s", symbol, e)
+        return "flat"
 
-    Phase-46c: Alpaca's "use complex orders" error required when you
-    already hold the symbol — submitting plain BUY/SELL alongside an
-    existing position is rejected as wash trade. Bracket orders group
-    entry+stop+TP atomically so wash-trade detection allows them.
-    Bracket orders do NOT support extended_hours; outside RTH they
-    queue for next regular session.
+
+def trade_one(trading_client, alerter, symbol: str, shares: int,
+              price_hint: float | None, direction: str) -> None:
+    """Submit BRACKET order in `direction` (long|short).
+
+    long  → BUY entry, SL below, TP above
+    short → SELL entry, SL above, TP below
+
+    Phase-46c/49: bracket = "complex order" → Alpaca's wash-trade
+    detection allows it even on already-held symbols. Bracket orders
+    don't support extended_hours; outside RTH they queue for next
+    regular session.
     """
     from alpaca.trading.requests import (
         LimitOrderRequest, TakeProfitRequest, StopLossRequest)
     from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
+    if direction == "flat":
+        log.info("SKIP %s — trend=flat (no clear direction)", symbol)
+        return
     try:
         entry = price_hint or 5.0
-        # Limit ~1% above snapshot so it fills quickly (paper is generous)
-        lp = round(entry * 1.01, 2)
-        sl_price = round(entry * (1 - STOP_LOSS_PCT / 100), 2)
-        tp_price = round(entry * (1 + TAKE_PROFIT_PCT / 100), 2)
-        # Alpaca validates: stop_price must be < entry (lp), tp > entry
-        if sl_price >= lp:
-            sl_price = round(lp * 0.99, 2)
-        if tp_price <= lp:
-            tp_price = round(lp * 1.01, 2)
+        if direction == "long":
+            side = OrderSide.BUY
+            # marketable-limit ~1% above for quick fill
+            lp = round(entry * 1.01, 2)
+            sl_price = round(entry * (1 - STOP_LOSS_PCT / 100), 2)
+            tp_price = round(entry * (1 + TAKE_PROFIT_PCT / 100), 2)
+            if sl_price >= lp:
+                sl_price = round(lp * 0.99, 2)
+            if tp_price <= lp:
+                tp_price = round(lp * 1.01, 2)
+            kind_label = "BRACKET-BUY"
+        else:  # short
+            side = OrderSide.SELL
+            # marketable-limit ~1% below for quick fill
+            lp = round(entry * 0.99, 2)
+            # Short bracket: SL ABOVE entry (price rises = bad), TP BELOW
+            sl_price = round(entry * (1 + STOP_LOSS_PCT / 100), 2)
+            tp_price = round(entry * (1 - TAKE_PROFIT_PCT / 100), 2)
+            if sl_price <= lp:
+                sl_price = round(lp * 1.01, 2)
+            if tp_price >= lp:
+                tp_price = round(lp * 0.99, 2)
+            kind_label = "BRACKET-SHORT"
         req = LimitOrderRequest(
-            symbol=symbol, qty=shares, side=OrderSide.BUY,
+            symbol=symbol, qty=shares, side=side,
             time_in_force=TimeInForce.DAY,
             limit_price=lp,
             order_class=OrderClass.BRACKET,
             take_profit=TakeProfitRequest(limit_price=tp_price),
             stop_loss=StopLossRequest(stop_price=sl_price),
         )
-        log.info("BRACKET-BUY %s qty=%d entry≤$%.2f SL=$%.2f TP=$%.2f",
-                  symbol, shares, lp, sl_price, tp_price)
+        log.info("%s %s qty=%d entry≤$%.2f SL=$%.2f TP=$%.2f",
+                  kind_label, symbol, shares, lp, sl_price, tp_price)
         o = trading_client.submit_order(req)
-        log.info("FORCE-BUY %s %d submitted → order_id=%s",
-                  symbol, shares, str(o.id)[:8])
+        log.info("FORCE-TRADE %s %s %d submitted → order_id=%s",
+                  direction.upper(), symbol, shares, str(o.id)[:8])
         # Best-effort fill confirmation
         import time as _t
         deadline = _t.time() + 15
@@ -160,8 +210,13 @@ def buy_one(trading_client, alerter, symbol: str, shares: int,
         # Bracket parent submitted. Refresh to get child leg IDs +
         # track them in _pending_exits for fill notification.
         actual_price = fill_price or lp
-        sl_amount = round((actual_price - sl_price) * shares, 2)
-        tp_amount = round((tp_price - actual_price) * shares, 2)
+        # PnL direction: long → SL below (loss when filled); short → SL above.
+        if direction == "long":
+            sl_amount = round((actual_price - sl_price) * shares, 2)  # >0 when SL below
+            tp_amount = round((tp_price - actual_price) * shares, 2)
+        else:
+            sl_amount = round((sl_price - actual_price) * shares, 2)  # >0 when SL above
+            tp_amount = round((actual_price - tp_price) * shares, 2)
         try:
             parent = trading_client.get_order_by_id(o.id)
             for leg in (getattr(parent, "legs", None) or []):
@@ -171,21 +226,23 @@ def buy_one(trading_client, alerter, symbol: str, shares: int,
                     _pending_exits[leg_id] = {
                         "symbol": symbol, "kind": "TP",
                         "planned_price": tp_price, "entry_price": actual_price,
-                        "shares": shares,
+                        "shares": shares, "direction": direction,
                     }
                 elif "STOP" in leg_type:
                     _pending_exits[leg_id] = {
                         "symbol": symbol, "kind": "SL",
                         "planned_price": sl_price, "entry_price": actual_price,
-                        "shares": shares,
+                        "shares": shares, "direction": direction,
                     }
         except Exception as e:
             log.debug("bracket-leg lookup failed for %s: %s", symbol, e)
-        # Push with full details
+        # Push with full details (direction-aware)
         if alerter is not None:
             try:
                 price_str = f"${actual_price:.2f}"
-                title = f"BUY {symbol} {shares} @ {price_str}"
+                action = "LONG" if direction == "long" else "SHORT"
+                emoji = "🟢▲" if direction == "long" else "🔴▼"
+                title = f"{emoji} {action} {symbol} {shares} @ {price_str}"
                 lines = [
                     f"SL: ${sl_price:.2f} (risk -${sl_amount:.2f})",
                     f"TP: ${tp_price:.2f} (reward +${tp_amount:.2f})",
@@ -198,11 +255,11 @@ def buy_one(trading_client, alerter, symbol: str, shares: int,
             except Exception as e:
                 log.debug("push failed: %s", e)
     except Exception as e:
-        log.error("FORCE-BUY %s err: %s", symbol, e)
+        log.error("FORCE-TRADE %s %s err: %s", direction.upper(), symbol, e)
         if alerter is not None:
             try:
                 alerter.send("error",
-                              f"FORCE-BUY {symbol} ERROR",
+                              f"FORCE-{direction.upper()} {symbol} ERROR",
                               body=str(e)[:200], force=True)
             except Exception:
                 pass
@@ -239,7 +296,12 @@ def check_exit_fills(trading_client, alerter) -> None:
                 fp = meta["planned_price"]
             entry = meta["entry_price"]
             shares = meta["shares"]
-            pnl = (fp - entry) * shares
+            mdir = meta.get("direction", "long")
+            # Long PnL: (exit - entry); short PnL: (entry - exit)
+            if mdir == "long":
+                pnl = (fp - entry) * shares
+            else:
+                pnl = (entry - fp) * shares
             sign = "+" if pnl >= 0 else ""
             kind = meta["kind"]
             symbol = meta["symbol"]
@@ -378,11 +440,17 @@ def main() -> int:
             if not symbols:
                 log.warning("no symbols in watchlist — sleeping")
             else:
-                log.info("buying top-%d (bracket, complex order): %s",
-                         len(symbols), symbols)
+                # Phase-49: per symbol, decide direction via short trend
+                # (1-min bars last 5-10 min). Long if uptrend, short if down.
+                log.info("Phase-49 trend-trade: top-%d → trend-direction",
+                         len(symbols))
                 for sym in symbols:
                     price = get_snapshot_price(data, sym)
-                    buy_one(trading, alerter, sym, args.shares, price)
+                    direction = get_short_trend(data, sym)
+                    log.info("  %s trend=%s price=$%s", sym, direction,
+                              f"{price:.2f}" if price else "?")
+                    trade_one(trading, alerter, sym, args.shares,
+                              price, direction)
             log.info("sleeping %ds until next tick (exit-poll every %ds)",
                      args.interval_sec, EXIT_POLL_SUB_INTERVAL_SEC)
             # Sleep in sub-intervals + poll for exit fills, so SL/TP
