@@ -191,9 +191,29 @@ def start_bot(bot_python: str | None = None):
     if bot_python is None:
         bot_python = resolve_bot_python()
 
+    # Phase-18 (ChatGPT-08:49 #5 P0): refuse to start a new bot when the
+    # audit reports multiple_independent_bots — that would compound the
+    # duplicate-instance hazard. Imported lazily so audit failures don't
+    # block the watchdog at module-load time.
+    sys.path.insert(0, str(HERE))
+    try:
+        from audit import classify_bot_processes
+        cls = classify_bot_processes()
+        if cls.get("classification") == "multiple_independent_bots":
+            log.error("=" * 60)
+            log.error("REFUSING RESTART: multiple_independent_bots detected")
+            log.error("PIDs: %s — %s", cls.get("pids"), cls.get("block_reason"))
+            log.error("Operator action: kill duplicate bot.py --daemon "
+                      "processes and verify only one (or one launcher/child "
+                      "pair) remains before restarting.")
+            log.error("=" * 60)
+            return None
+    except Exception as e:
+        log.warning("classify_bot_processes pre-check failed: %s "
+                    "(continuing — non-blocking)", e)
+
     # Trade-Lock via secrets_loader (still needs to run in *some* Python;
     # secrets_loader is pure-stdlib so the watchdog's own Python is fine)
-    sys.path.insert(0, str(HERE))
     try:
         from secrets_loader import get_alpaca_keys
         key, sec = get_alpaca_keys()

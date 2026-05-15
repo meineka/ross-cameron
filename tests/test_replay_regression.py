@@ -6,6 +6,8 @@ import json, sys, io, subprocess
 from pathlib import Path
 import pytest
 
+
+pytestmark = pytest.mark.slow  # Phase-19 (ChatGPT-08:49 #2): heavy replay/pilot tests
 ROOT = Path(__file__).resolve().parent.parent
 PILOT_DATA = ROOT / "04_backtest" / "data_pilot" / "intraday_5m.parquet"
 

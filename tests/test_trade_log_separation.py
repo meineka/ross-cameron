@@ -13,6 +13,8 @@ import sys, json
 from pathlib import Path
 import pytest
 
+
+pytestmark = pytest.mark.critical  # Phase-19 (ChatGPT-08:49 #1): smoke/critical gate
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "06_live_bot"))
 

@@ -16,12 +16,16 @@ import sys
 from pathlib import Path
 import pytest
 
+
+# Phase-19 (ChatGPT-08:49 #2): only the PILOT_DATA-dependent full-replay
+# tests are slow; the unit-style fixtures below stay fast.
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "06_live_bot"))
 
 PILOT_DATA = ROOT / "04_backtest" / "data_pilot" / "intraday_5m.parquet"
 
 
+@pytest.mark.slow  # Phase-19 (ChatGPT-08:49 #2): runs full ReplayBot day
 @pytest.mark.skipif(not PILOT_DATA.exists(), reason="pilot data missing")
 def test_replay_executor_parity_on_2026_04_15():
     """Legacy ReplayBot and ReplayBot-with-FakeBroker produce identical
@@ -49,6 +53,7 @@ def test_replay_executor_parity_on_2026_04_15():
         f"Trade count diverged: legacy={trades_legacy} vs fakebroker={trades_fake}"
 
 
+@pytest.mark.slow  # Phase-19 (ChatGPT-08:49 #2): runs full ReplayBot day
 @pytest.mark.skipif(not PILOT_DATA.exists(), reason="pilot data missing")
 def test_replay_fakebroker_position_state_matches_bot_state():
     """After 2026-04-15 replay, FakeBroker.positions reflects what Bot
@@ -67,6 +72,7 @@ def test_replay_fakebroker_position_state_matches_bot_state():
                 f"Bot says {sym} flat but FakeBroker holds {broker_qty} shares"
 
 
+@pytest.mark.slow  # Phase-19 (ChatGPT-08:49 #2): runs full ReplayBot day
 @pytest.mark.skipif(not PILOT_DATA.exists(), reason="pilot data missing")
 def test_replay_fakebroker_reject_keeps_position_intact():
     """When FakeBroker rejects all sells, the position state must not be

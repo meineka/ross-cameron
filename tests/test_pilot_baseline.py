@@ -6,6 +6,8 @@ import pandas as pd
 from pathlib import Path
 import pytest
 
+
+# Phase-19: parquet reads are fast; no marker needed at file level.
 D = Path(__file__).resolve().parent.parent / "04_backtest" / "data_pilot"
 
 
