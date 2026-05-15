@@ -493,10 +493,23 @@ def premarket_scan(top_n: int = TOP_N, max_retries: int = 2) -> list[TickerState
 def _try_tradingview_primary(top_n: int) -> list[dict]:
     """Phase-28: ask TradingView for top-N Cameron-conformant candidates.
     Returns [] on any error so caller can fall back to legacy yfinance path.
-    Never raises."""
+    Never raises.
+
+    Phase-62 (ChatGPT 1817 ask): every TradingView call is logged to
+    market_data_calls.jsonl with `source="tradingview"`, `status`,
+    `latency_ms`, `result_count` so postmortem can distinguish
+    "TV-empty" (status=ok n=0), "TV-error" (status=error), and
+    "TV-unavailable" (status=import_error) without grepping bot.log.
+    """
+    import time as _t
+    t_start = _t.monotonic()
     try:
         from scanners.tradingview_scanner import scan_cameron_candidates
     except ImportError as e:
+        latency_ms = (_t.monotonic() - t_start) * 1000
+        _log_tv_scan(status="import_error", latency_ms=latency_ms,
+                      result_count=0, error_class=type(e).__name__,
+                      error=str(e)[:200])
         log.warning("TradingView scanner not importable: %s", e)
         return []
     try:
@@ -511,10 +524,49 @@ def _try_tradingview_primary(top_n: int) -> list[dict]:
             price_max=PRICE_MAX,
             float_max_shares=FLOAT_MAX_SHARES,
         )
+        latency_ms = (_t.monotonic() - t_start) * 1000
+        _log_tv_scan(status="ok", latency_ms=latency_ms,
+                      result_count=len(rows) if rows else 0)
         return rows
     except Exception as e:
+        latency_ms = (_t.monotonic() - t_start) * 1000
+        _log_tv_scan(status="error", latency_ms=latency_ms,
+                      result_count=0, error_class=type(e).__name__,
+                      error=str(e)[:200])
         log.warning("TradingView primary call raised: %s", e)
         return []
+
+
+def _log_tv_scan(*, status: str, latency_ms: float, result_count: int,
+                   error_class: str | None = None,
+                   error: str | None = None) -> None:
+    """Phase-62: write one row to market_data_calls.jsonl describing the
+    outcome of a TradingView premarket scan. Schema is stable with the
+    existing yfinance/alpaca rows so a single grep can surface the full
+    data-provider story for a given session."""
+    try:
+        import json as _j
+        from datetime import datetime as _dt, timezone as _tz
+        rec = {
+            "ts": _dt.now(_tz.utc).isoformat(),
+            "schema_version": 1,
+            "source": "tradingview",
+            "method": "scan_cameron_candidates",
+            "status": status,                # ok | error | import_error
+            "latency_ms": round(latency_ms, 2),
+            "blocked_ms": 0.0,                # no guard on TV
+            "error_class": error_class,
+            "extra": {
+                "result_count": result_count,
+                **({"error": error} if error else {}),
+            },
+        }
+        from pathlib import Path as _P
+        log_path = _P(__file__).resolve().parent / "market_data_calls.jsonl"
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(_j.dumps(rec, ensure_ascii=False) + "\n")
+    except Exception as e:
+        log.debug("tv-scan log write failed: %s", e)
 
 
 def _premarket_scan_inner(top_n: int) -> list[TickerState]:
@@ -3399,6 +3451,10 @@ def main():
     p.add_argument("--check-connection", action="store_true", help="Alpaca-Auth verifizieren")
     p.add_argument("--status", action="store_true", help="Account + Positions anzeigen")
     p.add_argument("--daemon", action="store_true", help="Endlos-Modus: warte auf nächste Session, tradeen, repeat")
+    p.add_argument("--force-lock", action="store_true",
+                    help="Phase-62: steal a stale process lock from a dead "
+                          "prior instance (use only when sure no other bot "
+                          "is running)")
     args = p.parse_args()
 
     if args.check_connection:
@@ -3432,6 +3488,16 @@ def main():
         log.error("Or use --scan-only for pure scanner test")
         log.error("Alpaca paper signup: https://app.alpaca.markets/signup")
         return
+
+    # Phase-62 (ChatGPT 1817/1952/2012/2048 P0/P1 follow-up): refuse to
+    # start a second instance with the same Alpaca credentials so the
+    # account-wide WS connection-limit can't be tripped by two bots
+    # running side-by-side. Lock is process-PID-based, OS-portable,
+    # auto-stolen on prior-death. Released via atexit.
+    from process_lock import enforce_single_instance_or_exit, release_lock
+    import atexit
+    enforce_single_instance_or_exit(force=args.force_lock)
+    atexit.register(release_lock)
 
     if args.daemon:
         asyncio.run(daemon_run(api_key, api_secret, dry_run=args.dry_run))

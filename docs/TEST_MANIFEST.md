@@ -4,14 +4,14 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 75
-- **Total `def test_*` functions**: 793
+- **Total files**: 77
+- **Total `def test_*` functions**: 809
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 311 |
+| critical | 327 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 603 |
+| not_reviewed | 619 |
 | partially_reviewed | 90 |
 | reviewed | 100 |
 
@@ -57,6 +57,8 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 - `test_phase_35_alpaca_rate_guard.py`
 - `test_phase_36_provider_alerts.py`
 - `test_phase_53_guarded_alpaca.py`
+- `test_phase_62_process_lock.py`
+- `test_phase_62_tv_scan_logging.py`
 - `test_postmortem_20260512.py`
 - `test_pump_dump_filter_bugs.py`
 - `test_review_fixes_p0.py`
@@ -116,6 +118,8 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_phase_53_guarded_alpaca.py` | 13 | critical | yes | not_reviewed | Phase-53: GuardedTradingClient + GuardedStockHistoricalDataClient. |
 | `test_phase_60_storm_regression.py` | 8 | critical | no | not_reviewed | Phase-60: explicit WS reconnect-throttle + scan-storm regression |
 | `test_phase_61_state_transition_pushes.py` | 6 | critical | no | not_reviewed | Phase-61 (re-audit follow-up to Phase-60): state-transition push tests |
+| `test_phase_62_process_lock.py` | 11 | critical | yes | not_reviewed | Phase-62: single-instance enforcement via PID lockfile. |
+| `test_phase_62_tv_scan_logging.py` | 5 | critical | yes | not_reviewed | Phase-62: TradingView scan-status structured logging. |
 | `test_pilot_baseline.py` | 3 | replay | no | partially_reviewed | Pilot-Stats Regression: Backtest-Output darf nicht von Baseline abweichen. |
 | `test_position_recovery_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 6 (2026-05-12): position_recovery.recover_or_flatten robustness. |
 | `test_position_size_multipliers.py` | 12 | unit | no | not_reviewed | Audit-Iter 15 (2026-05-12): compute_position_size multiplier stacking. |
