@@ -227,6 +227,33 @@ def start_bot(bot_python: str | None = None):
         return None
     if n_pos > 0:
         log.warning("BLOCKED restart: %d positions open — let them resolve naturally", n_pos)
+        # Phase-54 (user request 2026-05-15): push notification so the
+        # operator knows the watchdog is stuck. Without this the bot
+        # sits dead silently until the user manually checks.
+        # Idempotent: tracked via _blocked_alert_count attribute on
+        # start_bot so we don't spam every 5 min — alert once, then
+        # re-alert every 30 min while still blocked.
+        try:
+            import time as _t
+            now_ts = _t.monotonic()
+            last_alert = getattr(start_bot, "_last_blocked_alert_ts", 0)
+            re_alert_after = 30 * 60  # 30 min
+            if now_ts - last_alert >= re_alert_after:
+                from alerter import make_alerter
+                _a = make_alerter()
+                if _a is not None:
+                    _a.send(
+                        "warn",
+                        "🟡 Watchdog BLOCKED",
+                        body=(f"Bot is down but watchdog cannot auto-restart: "
+                              f"{n_pos} open positions on Alpaca paper. "
+                              f"Manual action: flatten positions OR wait for "
+                              f"SL/TP to fill. Watchdog will retry every 5 min."),
+                        force=True,
+                    )
+                start_bot._last_blocked_alert_ts = now_ts  # type: ignore
+        except Exception as _e:
+            log.debug("blocked-alert push failed: %s", _e)
         return None
 
     env = os.environ.copy()
