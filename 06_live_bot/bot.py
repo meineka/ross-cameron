@@ -373,6 +373,11 @@ class DayState:
     spy_size_multiplier: float = 1.0          # 1.0=normal, 0.5=halved, 0.0=skip
     # #4 daily-goal-stop
     goal_reached: bool = False
+    # Phase-60 (ChatGPT P1 follow-up): expose the most recent "why no
+    # entry?" reason via status.json so operators can answer the
+    # no-trade question in one glance. Updated by pattern-rejection
+    # paths in manage_position + scan logic.
+    last_no_trade_reason: str | None = None
 
 
 # ─── Premarket-Scanner ──────────────────────────────────────────────────────
@@ -2030,6 +2035,29 @@ class Bot:
                     log.info("=" * 60)
                     self.executor.market_close_all()
                     self._log_day_summary()
+                    # Phase-60 (ChatGPT P1 follow-up): auto-generate the
+                    # no-trade postmortem JSON at HARD_FLAT so operators
+                    # don't have to log-archaeology every dead-day.
+                    try:
+                        from no_trade_postmortem import write_postmortem
+                        out = write_postmortem()
+                        log.info("HARD_FLAT postmortem written: %s", out.name)
+                        # Push a summary alert if we had 0 trades today
+                        try:
+                            alerter = getattr(self, "alerter", None)
+                            if alerter is not None and self.day.trades_completed_today == 0:
+                                alerter.send(
+                                    "info",
+                                    "📊 Daily Postmortem (0 trades)",
+                                    body=(f"No trades today. Postmortem written "
+                                          f"to {out.name}. Tomorrow's premarket "
+                                          f"starts ~06:28 ET."),
+                                    force=True,
+                                )
+                        except Exception as _e:
+                            log.debug("postmortem-push failed: %s", _e)
+                    except Exception as _e:
+                        log.warning("HARD_FLAT postmortem failed: %s", _e)
                     await asyncio.sleep(60)
                     return
                 # SLOW Re-Scan (aligned to 5-min boundary, finishes AT round time)
@@ -2412,14 +2440,21 @@ class Bot:
                 veto = (params or {}).get("_veto", "")
                 if veto.startswith("vwap"):
                     self.day.patterns_rejected_vwap = getattr(self.day, "patterns_rejected_vwap", 0) + 1
+                    self.day.last_no_trade_reason = f"{sym}: VWAP-veto"
                 elif veto.startswith("macd"):
                     self.day.patterns_rejected_macd += 1
+                    self.day.last_no_trade_reason = f"{sym}: MACD-veto"
                 elif veto.startswith("fbo"):
                     self.day.patterns_rejected_fbo += 1
+                    self.day.last_no_trade_reason = f"{sym}: False-Breakout veto"
                 elif veto.startswith("risk_"):
                     self.day.patterns_rejected_risk = getattr(self.day, "patterns_rejected_risk", 0) + 1
+                    self.day.last_no_trade_reason = f"{sym}: risk>{MAX_RISK_PCT}%"
                 elif veto.startswith("pole_h"):
                     self.day.patterns_rejected_pole_extension = getattr(self.day, "patterns_rejected_pole_extension", 0) + 1
+                    self.day.last_no_trade_reason = f"{sym}: pole extended"
+                else:
+                    self.day.last_no_trade_reason = f"{sym}: no pattern detected"
                 # else: no pattern detected at all (no _veto reason)
                 return
             # Guard gegen unvollständige params
@@ -2441,6 +2476,7 @@ class Bot:
         ts.pullback_count_today += 1
         if ts.pullback_count_today >= 3:
             self.day.patterns_rejected_pullback_count += 1
+            self.day.last_no_trade_reason = f"{sym}: 3rd-pullback skip"
             log.info("  REJECT %s: 3rd+ pullback today (#%d)", sym, ts.pullback_count_today)
             return
 

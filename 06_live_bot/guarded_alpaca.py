@@ -75,6 +75,51 @@ class AlpacaRateLimitBlocked(Exception):
     callers can decide policy (retry, drop, escalate alert)."""
 
 
+# Phase-60 (ChatGPT P1 follow-up): status-transition push so the user
+# learns about a rate-limit block / recovery via ntfy. Module-global
+# state so transitions are debounced (one push per state change).
+_rate_limit_state = "ok"  # "ok" | "blocked"
+_rate_limit_state_changed_ts = 0.0
+
+
+def _maybe_push_state_transition(new_state: str, source: str,
+                                   method: str, rate_now: int,
+                                   cap: int | None) -> None:
+    """Push ntfy notification only on state TRANSITION (ok→blocked or
+    blocked→ok). No spam during sustained block."""
+    global _rate_limit_state, _rate_limit_state_changed_ts
+    if new_state == _rate_limit_state:
+        return  # no transition
+    prev = _rate_limit_state
+    _rate_limit_state = new_state
+    _rate_limit_state_changed_ts = time.monotonic()
+    try:
+        from alerter import make_alerter
+        a = make_alerter()
+        if a is None:
+            return
+        if new_state == "blocked":
+            a.send(
+                "warn",
+                "🟡 ALPACA RATE-LIMITED",
+                body=(f"Process-global guard rejected an Alpaca call "
+                      f"({source}.{method}). Current rate: {rate_now}/min "
+                      f"vs cap {cap}/min. Bot will retry; if persistent "
+                      f"check live-call frequency."),
+                force=True,
+            )
+        elif new_state == "ok" and prev == "blocked":
+            a.send(
+                "info",
+                "🟢 ALPACA RATE-LIMIT RECOVERED",
+                body=(f"Budget free again. Rate now {rate_now}/min "
+                      f"vs cap {cap}/min."),
+                force=True,
+            )
+    except Exception as e:
+        log.debug("rate-limit transition push failed: %s", e)
+
+
 # Phase-55 (2026-05-15, ChatGPT P0): timeout policy for block_until_allowed.
 # When budget is exhausted and waiting times out, the guard returns False
 # and we MUST refuse the call — not silently bypass like the previous
@@ -106,20 +151,28 @@ def _guarded_invoke(*, guard, source: str, method_name: str,
         rate_now = 0
     if not allowed:
         # Fail-closed: log + raise, no SDK call.
+        cap = getattr(guard, "max_per_min", None)
         _log_call(source=source, method=method_name, status="blocked",
                    latency_ms=0.0, blocked_ms=blocked_ms,
                    error_class="AlpacaRateLimitBlocked",
                    extra={"rate_per_min": rate_now,
-                          "guard_max_per_min": getattr(guard, "max_per_min", None),
+                          "guard_max_per_min": cap,
                           "timeout_sec": block_timeout_sec})
         log.warning("Alpaca call BLOCKED by rate-guard: %s.%s "
                      "(waited %.1fs, current rate %d/min, cap %s/min)",
                      source, method_name, blocked_ms / 1000.0, rate_now,
-                     getattr(guard, "max_per_min", "?"))
+                     cap if cap is not None else "?")
+        # Phase-60: state transition push (ok → blocked)
+        _maybe_push_state_transition("blocked", source, method_name,
+                                       rate_now, cap)
         raise AlpacaRateLimitBlocked(
             f"{source}.{method_name} blocked: rate-guard budget exhausted "
             f"(waited {blocked_ms:.0f}ms, current {rate_now}/min)"
         )
+    # Allowed: if previous state was "blocked", fire recovery push
+    if _rate_limit_state == "blocked":
+        _maybe_push_state_transition("ok", source, method_name, rate_now,
+                                       getattr(guard, "max_per_min", None))
     t_call_start = time.monotonic()
     try:
         result = callable_fn(*args, **kwargs)

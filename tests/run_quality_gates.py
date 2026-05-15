@@ -21,6 +21,42 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def _check_python_environment() -> bool:
+    """Phase-60 (ChatGPT P1 follow-up): warn before running tests if
+    we're on system-Python without project deps installed. Operators
+    have wasted 10+ minutes debugging fake test fails caused by missing
+    alpaca/yfinance/pyarrow on system Python — this preflight short-
+    circuits that. Returns True if env looks OK to proceed.
+    """
+    venv_py = ROOT / ".venv" / "Scripts" / "python.exe"
+    if not venv_py.exists():
+        venv_py = ROOT / ".venv" / "bin" / "python"  # POSIX
+    if venv_py.exists() and Path(sys.executable).resolve() != venv_py.resolve():
+        print("=" * 60)
+        print("⚠️  WARNING: not running in project venv!")
+        print(f"   current: {sys.executable}")
+        print(f"   expected: {venv_py}")
+        print()
+        print("   Project deps (alpaca, yfinance, pyarrow) may be missing.")
+        print(f"   Re-run with: {venv_py} {' '.join(sys.argv)}")
+        print("=" * 60)
+    # Probe critical imports — fail fast if missing
+    missing = []
+    for pkg in ("alpaca", "yfinance", "pandas", "pyarrow"):
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
+    if missing:
+        print("=" * 60)
+        print(f"❌ MISSING DEPENDENCIES: {', '.join(missing)}")
+        print(f"   Install with: pip install {' '.join(missing)}")
+        print(f"   Or use the project venv (see warning above).")
+        print("=" * 60)
+        return False
+    return True
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--fast", action="store_true",
@@ -50,6 +86,10 @@ def main():
     print("CAMERON-BOT QUALITY GATES")
     print(f"Gate: {label}")
     print("=" * 60)
+    # Phase-60 preflight: warn if wrong Python / missing deps before
+    # running 1000 tests that all fail for the same root cause.
+    if not _check_python_environment():
+        sys.exit(2)
     print(f"Cmd: {' '.join(cmd)}")
     print()
 
