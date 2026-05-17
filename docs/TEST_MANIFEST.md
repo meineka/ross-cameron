@@ -4,14 +4,14 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 81
-- **Total `def test_*` functions**: 878
+- **Total files**: 82
+- **Total `def test_*` functions**: 898
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 396 |
+| critical | 416 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 688 |
+| not_reviewed | 708 |
 | partially_reviewed | 90 |
 | reviewed | 100 |
 
@@ -63,6 +63,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 - `test_phase_64_fetch_loop.py`
 - `test_phase_65_atomic_lockfile.py`
 - `test_phase_66_strategy_variant.py`
+- `test_phase_67_supervisor.py`
 - `test_postmortem_20260512.py`
 - `test_pump_dump_filter_bugs.py`
 - `test_review_fixes_p0.py`
@@ -128,6 +129,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_phase_64_fetch_loop.py` | 21 | critical | yes | not_reviewed | Phase-64: periodic backtest-data fetcher loop. |
 | `test_phase_65_atomic_lockfile.py` | 12 | critical | yes | not_reviewed | Phase-65: race-safe atomic lockfile. |
 | `test_phase_66_strategy_variant.py` | 16 | critical | yes | not_reviewed | Phase-66: STRATEGY_VARIANT env var (strict vs relaxed). |
+| `test_phase_67_supervisor.py` | 20 | critical | yes | not_reviewed | Phase-67: 30-min auto-correcting supervisor. |
 | `test_pilot_baseline.py` | 3 | replay | no | partially_reviewed | Pilot-Stats Regression: Backtest-Output darf nicht von Baseline abweichen. |
 | `test_position_recovery_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 6 (2026-05-12): position_recovery.recover_or_flatten robustness. |
 | `test_position_size_multipliers.py` | 12 | unit | no | not_reviewed | Audit-Iter 15 (2026-05-12): compute_position_size multiplier stacking. |

@@ -41,6 +41,7 @@ log = logging.getLogger("process-lock")
 HERE = Path(__file__).resolve().parent
 LOCKFILE = HERE / "bot.pid"             # default lock name — bot.py
 FETCH_LOOP_LOCKFILE = HERE / "fetch_loop.pid"  # Phase-65 named lock
+SUPERVISOR_LOCKFILE = HERE / "supervisor.pid"  # Phase-67 named lock
 EXIT_CODE_ALREADY_RUNNING = 75  # EX_TEMPFAIL convention
 
 
@@ -240,3 +241,14 @@ def enforce_single_fetch_loop_or_exit(*, force: bool = False) -> int:
 def release_fetch_loop_lock() -> bool:
     """Companion release for the fetch_loop named lock."""
     return release_lock(FETCH_LOOP_LOCKFILE)
+
+
+def enforce_single_supervisor_or_exit(*, force: bool = False) -> int:
+    """Phase-67: single-instance enforcement for supervisor.py.
+    The supervisor is itself the auto-corrector — having two would
+    cause them to "fight" over duplicate detection."""
+    return enforce_single_instance_or_exit(SUPERVISOR_LOCKFILE, force=force)
+
+
+def release_supervisor_lock() -> bool:
+    return release_lock(SUPERVISOR_LOCKFILE)
