@@ -162,10 +162,48 @@ FLAG_RETRACE_MAX_PCT = 50.0  # Cameron-strict (was Phase-33 70.0)
 BREAKOUT_VOL_FACTOR = 1.5  # Cameron-strict (was Phase-33 1.2)
 SLIPPAGE_CENTS = 0.01
 
-MAX_LOSS_PER_TRADE_USD = 50.0      # Paper-Modus konservativ
-DAILY_MAX_LOSS_USD = 150.0          # = 3× max-loss-per-trade
-DAILY_GOAL_USD = 150.0              # symmetric (Cameron-Rule)
-INTRADAY_DRAWDOWN_PCT_OF_PROFITS = 50.0
+# Phase-66 (2026-05-17): two-variant strategy support.
+#
+# STRATEGY_VARIANT env var picks the position-sizing risk profile:
+#
+#   "strict"  (default, conservative)  — original Cameron-strict sizing
+#                                          MAX_LOSS_PER_TRADE = $50
+#                                          equity-cap = 1% of account
+#                                          DAILY_MAX_LOSS = $150 = 3× per-trade
+#
+#   "relaxed" (2× volume)               — doubled position sizes
+#                                          MAX_LOSS_PER_TRADE = $100
+#                                          equity-cap = 2% of account
+#                                          DAILY_MAX_LOSS = $300 = 3× per-trade
+#
+# Same Cameron-strict ENTRY criteria (pole/flag/RVOL/float etc) for both;
+# only the position size differs. Use case: A/B compare profit vs drawdown
+# of equal-edge entries at two risk levels.
+#
+# To switch variants:
+#   STRATEGY_VARIANT=relaxed python bot.py --daemon
+#
+# Code is marked with `# strict-algo` and `# relaxed-algo` annotations so
+# a reader can immediately see which path produces which value.
+
+import os as _os_phase66
+STRATEGY_VARIANT = _os_phase66.environ.get("STRATEGY_VARIANT", "strict").lower()
+if STRATEGY_VARIANT not in ("strict", "relaxed"):
+    STRATEGY_VARIANT = "strict"  # safe default
+
+if STRATEGY_VARIANT == "relaxed":
+    # relaxed-algo (Phase-66): 2× position-size envelope
+    MAX_LOSS_PER_TRADE_USD = 100.0     # relaxed-algo: 2× of strict $50
+    DAILY_MAX_LOSS_USD = 300.0          # relaxed-algo: keeps 3× ratio
+    DAILY_GOAL_USD = 300.0              # relaxed-algo: symmetric
+    EQUITY_RISK_CAP_PCT = 2.0           # relaxed-algo: 2% (vs strict 1%)
+else:
+    # strict-algo (default Cameron-strict): conservative paper-mode sizing
+    MAX_LOSS_PER_TRADE_USD = 50.0      # strict-algo
+    DAILY_MAX_LOSS_USD = 150.0          # strict-algo: 3× per-trade
+    DAILY_GOAL_USD = 150.0              # strict-algo: symmetric (Cameron-Rule)
+    EQUITY_RISK_CAP_PCT = 1.0           # strict-algo: Cameron's 1%
+INTRADAY_DRAWDOWN_PCT_OF_PROFITS = 50.0  # same for both
 
 LIQUIDITY_CAP_PCT_OF_AVG_VOL = 1.0
 # Review-fix 2026-05-13 (Reviewer #12): spec sagt "$0.50/share cumulative
@@ -1031,9 +1069,11 @@ def compute_position_size(
     # vermutlich Artefakt — verhindert 50000-Shares-Position
     risk_per_share = max(raw_risk_per_share, 0.05)
     max_shares = int(MAX_LOSS_PER_TRADE_USD / risk_per_share)
-    # Equity-Cap: max 1 % von account_equity riskieren (Cameron-Rule)
+    # Phase-66: Equity-Cap is variant-dependent
+    #   strict-algo:  1% (Cameron's original rule)
+    #   relaxed-algo: 2% (doubled volume profile)
     if account_equity and account_equity > 0:
-        equity_risk_cap = account_equity * 0.01
+        equity_risk_cap = account_equity * (EQUITY_RISK_CAP_PCT / 100.0)
         max_shares = min(max_shares, int(equity_risk_cap / risk_per_share))
     # Quarter-Size-Rule (Iter 23: time-based fallback unlock if cents-rule
     # hasn't triggered yet but we're past the volatile open)
@@ -3333,6 +3373,12 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
     """Endlosschleife: warte bis Premarket, traden, warte bis nächster Tag."""
     log.info("=" * 60)
     log.info("DAEMON MODE — runs until you Ctrl+C or PC sleeps")
+    log.info("STRATEGY_VARIANT = %s (%s)", STRATEGY_VARIANT,
+              "2× volume — relaxed-algo" if STRATEGY_VARIANT == "relaxed"
+              else "Cameron-strict — strict-algo")
+    log.info("  MAX_LOSS_PER_TRADE_USD = $%.0f", MAX_LOSS_PER_TRADE_USD)
+    log.info("  DAILY_MAX_LOSS_USD     = $%.0f", DAILY_MAX_LOSS_USD)
+    log.info("  EQUITY_RISK_CAP_PCT    = %.1f%%", EQUITY_RISK_CAP_PCT)
     log.info("=" * 60)
 
     # Pre-Flight: verify auth, WS-init, yfinance — verhindert 2026-05-11-Geistermodus
