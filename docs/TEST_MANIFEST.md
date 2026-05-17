@@ -4,14 +4,14 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 79
-- **Total `def test_*` functions**: 850
+- **Total files**: 80
+- **Total `def test_*` functions**: 862
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 368 |
+| critical | 380 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 660 |
+| not_reviewed | 672 |
 | partially_reviewed | 90 |
 | reviewed | 100 |
 
@@ -61,6 +61,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 - `test_phase_62_tv_scan_logging.py`
 - `test_phase_63_float_cache.py`
 - `test_phase_64_fetch_loop.py`
+- `test_phase_65_atomic_lockfile.py`
 - `test_postmortem_20260512.py`
 - `test_pump_dump_filter_bugs.py`
 - `test_review_fixes_p0.py`
@@ -124,6 +125,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_phase_62_tv_scan_logging.py` | 5 | critical | yes | not_reviewed | Phase-62: TradingView scan-status structured logging. |
 | `test_phase_63_float_cache.py` | 20 | critical | yes | not_reviewed | Phase-63: float-cache build pipeline. |
 | `test_phase_64_fetch_loop.py` | 21 | critical | yes | not_reviewed | Phase-64: periodic backtest-data fetcher loop. |
+| `test_phase_65_atomic_lockfile.py` | 12 | critical | yes | not_reviewed | Phase-65: race-safe atomic lockfile. |
 | `test_pilot_baseline.py` | 3 | replay | no | partially_reviewed | Pilot-Stats Regression: Backtest-Output darf nicht von Baseline abweichen. |
 | `test_position_recovery_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 6 (2026-05-12): position_recovery.recover_or_flatten robustness. |
 | `test_position_size_multipliers.py` | 12 | unit | no | not_reviewed | Audit-Iter 15 (2026-05-12): compute_position_size multiplier stacking. |

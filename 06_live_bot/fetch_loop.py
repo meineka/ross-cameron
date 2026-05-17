@@ -310,11 +310,26 @@ def main() -> int:
     ap.add_argument("--refresh-days", type=int, default=CYCLE_REFRESH_DAYS,
                      help=f"days after cycle completion before restart "
                           f"(default {CYCLE_REFRESH_DAYS})")
+    ap.add_argument("--force-lock", action="store_true",
+                     help="Phase-65: steal a stale fetch_loop lock from "
+                          "a dead prior instance")
     args = ap.parse_args()
 
     if args.reset_state and STATE_PATH.exists():
         STATE_PATH.unlink()
         log.info("state file reset: %s", STATE_PATH)
+
+    # Phase-65 (post-reboot incident 2026-05-17): refuse to start if
+    # another fetch_loop is already alive. Two loops racing on the same
+    # state file + parquet caused subprocess spawn failures (rc=
+    # 3221225794 / STATUS_DLL_INIT_FAILED) and dataset corruption.
+    import atexit
+    from process_lock import (
+        enforce_single_fetch_loop_or_exit, release_fetch_loop_lock,
+    )
+    enforce_single_fetch_loop_or_exit(force=args.force_lock)
+    atexit.register(release_fetch_loop_lock)
+
     return run_loop(
         interval_min=args.interval_min,
         batch_size=args.batch_size,
