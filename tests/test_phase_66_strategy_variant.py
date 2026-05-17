@@ -103,7 +103,13 @@ def test_relaxed_envelope_is_exactly_2x_strict(monkeypatch):
 
 # ─── 2. Default + invalid handling ───────────────────────────────────────
 
-def test_missing_env_var_defaults_to_strict(monkeypatch):
+def test_missing_env_var_defaults_to_strict(monkeypatch, tmp_path):
+    """No shell env-var AND no .env entry → strict default.
+    Phase-66.1 update: must also block .env (which now lives in the real
+    repo with STRATEGY_VARIANT=relaxed) by pointing ENV_FILE at a
+    deliberately-empty tmp file."""
+    import secrets_loader
+    monkeypatch.setattr(secrets_loader, "ENV_FILE", tmp_path / "absent.env")
     bot = _reimport_bot_with_variant(None, monkeypatch)
     assert bot.STRATEGY_VARIANT == "strict"
     assert bot.MAX_LOSS_PER_TRADE_USD == 50.0
@@ -242,3 +248,59 @@ def test_startup_log_mentions_variant():
     assert "STRATEGY_VARIANT = %s" in src
     assert "MAX_LOSS_PER_TRADE_USD" in src
     assert "EQUITY_RISK_CAP_PCT" in src
+
+
+# ─── 5. .env loading at module-load (Phase-66.1) ────────────────────────
+
+def test_env_file_propagates_strategy_variant_to_module_load(
+        tmp_path, monkeypatch):
+    """Operator can pin STRATEGY_VARIANT in 06_live_bot/.env and bot.py
+    will pick it up at module-load (NOT just from shell env-var).
+
+    Without this wiring, the variant only worked via shell env-var and
+    a Windows-reboot/watchdog-respawn would silently revert to strict.
+    """
+    import secrets_loader
+    fake_env = tmp_path / ".env"
+    fake_env.write_text(
+        "APCA_API_KEY_ID=fake\n"
+        "APCA_API_SECRET_KEY=fake\n"
+        "STRATEGY_VARIANT=relaxed\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(secrets_loader, "ENV_FILE", fake_env)
+    monkeypatch.delenv("STRATEGY_VARIANT", raising=False)
+    if "bot" in sys.modules:
+        del sys.modules["bot"]
+    import bot
+    assert bot.STRATEGY_VARIANT == "relaxed"
+    assert bot.MAX_LOSS_PER_TRADE_USD == 100.0
+
+
+def test_shell_env_still_works_when_no_dotenv(monkeypatch):
+    """Backward-compat: setting STRATEGY_VARIANT in shell env still
+    takes effect."""
+    monkeypatch.setenv("STRATEGY_VARIANT", "relaxed")
+    if "bot" in sys.modules:
+        del sys.modules["bot"]
+    import bot
+    assert bot.STRATEGY_VARIANT == "relaxed"
+
+
+def test_shell_env_wins_over_dotenv_when_both_set(tmp_path, monkeypatch):
+    """If both shell env-var and .env specify STRATEGY_VARIANT, shell
+    wins (secrets_loader._load_env_file skips keys already in env)."""
+    import secrets_loader
+    fake_env = tmp_path / ".env"
+    fake_env.write_text(
+        "APCA_API_KEY_ID=fake\n"
+        "APCA_API_SECRET_KEY=fake\n"
+        "STRATEGY_VARIANT=strict\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(secrets_loader, "ENV_FILE", fake_env)
+    monkeypatch.setenv("STRATEGY_VARIANT", "relaxed")
+    if "bot" in sys.modules:
+        del sys.modules["bot"]
+    import bot
+    assert bot.STRATEGY_VARIANT == "relaxed"

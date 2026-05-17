@@ -187,6 +187,18 @@ SLIPPAGE_CENTS = 0.01
 # a reader can immediately see which path produces which value.
 
 import os as _os_phase66
+
+# Phase-66.1 (2026-05-17 follow-up): load .env into os.environ BEFORE
+# reading STRATEGY_VARIANT so an operator can pin the variant in
+# 06_live_bot/.env without setting a shell var. Without this, secrets_loader
+# only runs later in main() — too late for module-level constants.
+try:
+    from secrets_loader import _load_env_file as _phase66_load_env
+    _phase66_load_env()
+except Exception as _phase66_e:
+    # Fail-silently: env-vars from the shell still work without .env.
+    pass
+
 STRATEGY_VARIANT = _os_phase66.environ.get("STRATEGY_VARIANT", "strict").lower()
 if STRATEGY_VARIANT not in ("strict", "relaxed"):
     STRATEGY_VARIANT = "strict"  # safe default
