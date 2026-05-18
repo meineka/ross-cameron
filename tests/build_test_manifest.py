@@ -321,6 +321,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"MANIFEST STALE: rerun `python {Path(__file__).name}` "
                   f"and commit {out_path.relative_to(ROOT)}",
                   file=sys.stderr)
+            # Phase-70.1: dump first diff lines for CI debugging.
+            # Without this, stale-manifest failures on Linux CI were
+            # opaque — no way to tell whether file-discovery, line-
+            # endings, or content was the actual diff.
+            import difflib
+            diff = list(difflib.unified_diff(
+                _normalize(existing).splitlines(),
+                _normalize(rendered).splitlines(),
+                fromfile="committed", tofile="rendered",
+                lineterm="", n=2,
+            ))
+            print("--- first 40 diff lines ---", file=sys.stderr)
+            for line in diff[:40]:
+                print(line, file=sys.stderr)
             return 1
         print(f"manifest ok: {out_path}")
         return 0
