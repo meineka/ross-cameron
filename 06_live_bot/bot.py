@@ -108,8 +108,28 @@ log = logging.getLogger("bot")
 # sie haben heute 1000+ Logs/Audit-Alarme verursacht.
 logging.getLogger("yfinance").setLevel(logging.CRITICAL)
 
+# Phase-66/69: STRATEGY_VARIANT init must come BEFORE Cameron-Constants
+# because the `loose` variant overrides some of them.
+import os as _os_phase66
+
+# Phase-66.1 load .env so STRATEGY_VARIANT can be pinned in 06_live_bot/.env
+try:
+    from secrets_loader import _load_env_file as _phase66_load_env
+    _phase66_load_env()
+except Exception:
+    pass
+
+# Phase-69: add "loose" variant for emergency "no trade today" sessions
+STRATEGY_VARIANT = _os_phase66.environ.get("STRATEGY_VARIANT", "strict").lower()
+if STRATEGY_VARIANT not in ("strict", "relaxed", "loose"):
+    STRATEGY_VARIANT = "strict"  # safe default
+
 # ─── Cameron-Constants (mirror constraints.yaml) ────────────────────────────
+# Phase-69: PRICE/FLOAT range stays same in all variants — Cameron only
+# trades small-cap penny-to-low-dollar. Only DAILY_GAIN, RVOL and the
+# pattern-detection thresholds loosen in `loose` variant.
 PRICE_MIN, PRICE_MAX = 2.0, 20.0  # Phase-51 revert: Cameron-strict (2-20)
+# DAILY_GAIN + RVOL initialized to strict here; overridden below for `loose`.
 DAILY_GAIN_MIN_PCT = 10.0  # Phase-51 revert: Cameron-strict (≥10% daily gain)
 RVOL_MIN_PROXY = 5.0  # Phase-51 revert: Cameron-strict (≥5x relative volume)
 FLOAT_MAX_SHARES = 10_000_000  # Phase-51 revert: Cameron-strict (<10M float)
@@ -162,6 +182,21 @@ FLAG_RETRACE_MAX_PCT = 50.0  # Cameron-strict (was Phase-33 70.0)
 BREAKOUT_VOL_FACTOR = 1.5  # Cameron-strict (was Phase-33 1.2)
 SLIPPAGE_CENTS = 0.01
 
+# Phase-69 (loose-mode override): if STRATEGY_VARIANT=loose, swap the
+# strict thresholds for the Phase-33 "see-some-trades" values that
+# actually produce entries on quiet days. Emergency mode — pilot
+# backtest showed these have lower edge but more trades.
+if STRATEGY_VARIANT == "loose":
+    DAILY_GAIN_MIN_PCT = 5.0   # loose-algo: was strict 10.0
+    RVOL_MIN_PROXY = 3.0       # loose-algo: was strict 5.0
+    POLE_MIN_CANDLES, POLE_MAX_CANDLES = 2, 10  # loose-algo: was 3,7
+    POLE_MIN_MOVE_PCT = 2.5    # loose-algo: was 4.0
+    POLE_TOPPING_TAIL_MAX = 0.7  # loose-algo: was 0.5
+    FLAG_MIN_CANDLES, FLAG_MAX_CANDLES = 1, 4  # loose-algo: was 1,3
+    FLAG_RETRACE_MAX_PCT = 70.0  # loose-algo: was 50.0
+    BREAKOUT_VOL_FACTOR = 1.2    # loose-algo: was 1.5
+    CATALYST_MODE = "off"         # loose-algo: no 8-K filter (was "soft")
+
 # Phase-66 (2026-05-17): two-variant strategy support.
 #
 # STRATEGY_VARIANT env var picks the position-sizing risk profile:
@@ -186,29 +221,26 @@ SLIPPAGE_CENTS = 0.01
 # Code is marked with `# strict-algo` and `# relaxed-algo` annotations so
 # a reader can immediately see which path produces which value.
 
-import os as _os_phase66
-
-# Phase-66.1 (2026-05-17 follow-up): load .env into os.environ BEFORE
-# reading STRATEGY_VARIANT so an operator can pin the variant in
-# 06_live_bot/.env without setting a shell var. Without this, secrets_loader
-# only runs later in main() — too late for module-level constants.
-try:
-    from secrets_loader import _load_env_file as _phase66_load_env
-    _phase66_load_env()
-except Exception as _phase66_e:
-    # Fail-silently: env-vars from the shell still work without .env.
-    pass
-
-STRATEGY_VARIANT = _os_phase66.environ.get("STRATEGY_VARIANT", "strict").lower()
-if STRATEGY_VARIANT not in ("strict", "relaxed"):
-    STRATEGY_VARIANT = "strict"  # safe default
+# Phase-66/69: STRATEGY_VARIANT is initialized ABOVE the Cameron-Constants
+# (see top of module). Here we just use it to pick the position-size
+# envelope. Entry-threshold overrides for `loose` live with the
+# constants block above.
 
 if STRATEGY_VARIANT == "relaxed":
-    # relaxed-algo (Phase-66): 2× position-size envelope
+    # relaxed-algo (Phase-66): 2× position-size envelope, strict entries
     MAX_LOSS_PER_TRADE_USD = 100.0     # relaxed-algo: 2× of strict $50
     DAILY_MAX_LOSS_USD = 300.0          # relaxed-algo: keeps 3× ratio
     DAILY_GOAL_USD = 300.0              # relaxed-algo: symmetric
     EQUITY_RISK_CAP_PCT = 2.0           # relaxed-algo: 2% (vs strict 1%)
+elif STRATEGY_VARIANT == "loose":
+    # loose-algo (Phase-69): 2× sizing AND loosened entry criteria.
+    # Emergency mode for sessions where strict thresholds reject every
+    # candidate. Same envelope as relaxed; entry thresholds are
+    # explicitly opened below (POLE_*, RVOL, gain, etc).
+    MAX_LOSS_PER_TRADE_USD = 100.0     # loose-algo: 2× of strict
+    DAILY_MAX_LOSS_USD = 300.0          # loose-algo
+    DAILY_GOAL_USD = 300.0              # loose-algo
+    EQUITY_RISK_CAP_PCT = 2.0           # loose-algo
 else:
     # strict-algo (default Cameron-strict): conservative paper-mode sizing
     MAX_LOSS_PER_TRADE_USD = 50.0      # strict-algo
@@ -3413,12 +3445,23 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
     """Endlosschleife: warte bis Premarket, traden, warte bis nächster Tag."""
     log.info("=" * 60)
     log.info("DAEMON MODE — runs until you Ctrl+C or PC sleeps")
+    _label_map = {
+        "relaxed": "2x volume, Cameron-strict entries — relaxed-algo",
+        "loose": "2x volume + Phase-33 loose entries + catalyst OFF — loose-algo",
+        "strict": "Cameron-strict — strict-algo",
+    }
     log.info("STRATEGY_VARIANT = %s (%s)", STRATEGY_VARIANT,
-              "2× volume — relaxed-algo" if STRATEGY_VARIANT == "relaxed"
-              else "Cameron-strict — strict-algo")
+              _label_map.get(STRATEGY_VARIANT, "unknown"))
     log.info("  MAX_LOSS_PER_TRADE_USD = $%.0f", MAX_LOSS_PER_TRADE_USD)
     log.info("  DAILY_MAX_LOSS_USD     = $%.0f", DAILY_MAX_LOSS_USD)
     log.info("  EQUITY_RISK_CAP_PCT    = %.1f%%", EQUITY_RISK_CAP_PCT)
+    log.info("  DAILY_GAIN_MIN_PCT     = %.1f%%", DAILY_GAIN_MIN_PCT)
+    log.info("  RVOL_MIN_PROXY         = %.1fx", RVOL_MIN_PROXY)
+    log.info("  POLE_MIN_MOVE_PCT      = %.1f%%", POLE_MIN_MOVE_PCT)
+    log.info("  POLE_TOPPING_TAIL_MAX  = %.2f", POLE_TOPPING_TAIL_MAX)
+    log.info("  FLAG_RETRACE_MAX_PCT   = %.1f%%", FLAG_RETRACE_MAX_PCT)
+    log.info("  BREAKOUT_VOL_FACTOR    = %.2f", BREAKOUT_VOL_FACTOR)
+    log.info("  CATALYST_MODE          = %s", CATALYST_MODE)
     log.info("=" * 60)
 
     # Pre-Flight: verify auth, WS-init, yfinance — verhindert 2026-05-11-Geistermodus

@@ -29,17 +29,20 @@ sys.path.insert(0, str(ROOT / "06_live_bot"))
 
 
 @pytest.fixture(autouse=True)
-def _restore_strict_default_after_test(monkeypatch):
+def _restore_strict_default_after_test():
     """Phase-66 tests reimport bot.py with different STRATEGY_VARIANT
     values. Without explicit teardown, the LAST-loaded variant leaks
     into subsequent tests in the suite that just do `import bot` and
-    depend on the strict defaults (e.g. test_equity_cap_limits_position).
+    depend on the strict defaults.
 
-    This fixture runs after EVERY Phase-66 test and forces a re-import
-    with the env var clean so bot.py reverts to STRATEGY_VARIANT='strict'.
+    Phase-69 update: use os.environ direct (NOT monkeypatch), because
+    monkeypatch.setenv reverts during its own teardown which can leave
+    a stale 'loose'/'relaxed' value if a prior test's monkeypatch is
+    being unwound in parallel.
     """
+    import os
     yield
-    monkeypatch.delenv("STRATEGY_VARIANT", raising=False)
+    os.environ["STRATEGY_VARIANT"] = "strict"
     if "bot" in sys.modules:
         del sys.modules["bot"]
     importlib.import_module("bot")
