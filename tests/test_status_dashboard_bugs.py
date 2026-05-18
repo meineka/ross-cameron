@@ -27,6 +27,8 @@ def _isolated_status_file(tmp_path, monkeypatch):
     import status_dashboard
     sf = tmp_path / "status.json"
     monkeypatch.setattr(status_dashboard, "STATUS_FILE", sf)
+    monkeypatch.setattr(status_dashboard, "ALPACA_API_CALLS_LOG",
+                        tmp_path / "alpaca_api_calls.jsonl")
     # Reset failure counter for isolation
     monkeypatch.setattr(status_dashboard, "_write_fail_count", 0)
     yield
@@ -158,6 +160,42 @@ def test_status_includes_all_critical_fields():
                   "trades_today", "consecutive_losses", "spiral_locked",
                   "ws_reconnects", "positions_open", "watchlist"]:
         assert field in data, f"missing field: {field}"
+
+
+def test_status_includes_operator_diagnostics():
+    """Operator status must explain rate, feed, scanner and no-trade state."""
+    import status_dashboard
+    bot = _make_bot()
+    bot.day.last_ws_bar_ts = "2026-05-17T20:02:00Z"
+    bot.day.last_tradingview_scan_status = "failed"
+    bot.day.last_no_trade_reason = "quote_safety:wide_spread"
+    bot.day.scanner_source = "alpaca_fallback"
+    bot.day.fallback_used = True
+
+    status_dashboard.write_status(bot)
+    data = json.loads(status_dashboard.STATUS_FILE.read_text(encoding="utf-8"))
+
+    assert "alpaca_rate_per_min" in data
+    assert "last_alpaca_call_ts" in data
+    assert "last_alpaca_block_ts" in data
+    assert "alpaca_blocked_count" in data
+    assert "ws_abuse_count" in data
+    assert data["last_ws_bar_ts"] == "2026-05-17T20:02:00Z"
+    assert data["last_tradingview_scan_status"] == "failed"
+    assert data["last_no_trade_reason"] == "quote_safety:wide_spread"
+    assert data["scanner_source"] == "alpaca_fallback"
+    assert data["fallback_used"] is True
+
+
+def test_status_operator_diagnostics_have_safe_defaults():
+    import status_dashboard
+    bot = _make_bot()
+    status_dashboard.write_status(bot)
+    data = json.loads(status_dashboard.STATUS_FILE.read_text(encoding="utf-8"))
+    assert data["alpaca_blocked_count"] == 0
+    assert data["fallback_used"] is False
+    assert data["last_ws_bar_ts"] is None
+    assert data["last_no_trade_reason"] is None
 
 
 def test_status_with_open_positions():
