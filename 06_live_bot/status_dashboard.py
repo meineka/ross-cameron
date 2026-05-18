@@ -20,6 +20,7 @@ from pathlib import Path
 log = logging.getLogger("status")
 
 STATUS_FILE = Path(__file__).parent / "status.json"
+ALPACA_API_CALLS_LOG = Path(__file__).parent / "alpaca_api_calls.jsonl"
 _write_fail_count = 0
 
 
@@ -49,6 +50,7 @@ def write_status(bot) -> None:
         ws_abuse_count = 0
         last_alpaca_call_ts = None
         last_alpaca_block_ts = None
+        alpaca_blocked_count = 0
         try:
             from guarded_alpaca import current_rate_per_min
             alpaca_rate_per_min = current_rate_per_min()
@@ -61,7 +63,7 @@ def write_status(bot) -> None:
             pass
         # Pull latest call timestamp from alpaca_api_calls.jsonl tail
         try:
-            calls_log = Path(__file__).parent / "alpaca_api_calls.jsonl"
+            calls_log = ALPACA_API_CALLS_LOG
             if calls_log.exists():
                 with open(calls_log, "rb") as f:
                     f.seek(0, 2)
@@ -75,11 +77,10 @@ def write_status(bot) -> None:
                         rec = json.loads(line)
                         if last_alpaca_call_ts is None:
                             last_alpaca_call_ts = rec.get("ts")
-                        if (last_alpaca_block_ts is None and
-                                rec.get("status") == "blocked"):
-                            last_alpaca_block_ts = rec.get("ts")
-                        if last_alpaca_call_ts and last_alpaca_block_ts:
-                            break
+                        if rec.get("status") == "blocked":
+                            alpaca_blocked_count += 1
+                            if last_alpaca_block_ts is None:
+                                last_alpaca_block_ts = rec.get("ts")
                     except Exception:
                         pass
         except Exception:
@@ -105,8 +106,14 @@ def write_status(bot) -> None:
             "alpaca_rate_cap": 200,
             "last_alpaca_call_ts": last_alpaca_call_ts,
             "last_alpaca_block_ts": last_alpaca_block_ts,
+            "alpaca_blocked_count": alpaca_blocked_count,
             "ws_abuse_count": ws_abuse_count,
+            "last_ws_bar_ts": getattr(d, "last_ws_bar_ts", None),
+            "last_tradingview_scan_status": getattr(
+                d, "last_tradingview_scan_status", None),
             "last_no_trade_reason": getattr(d, "last_no_trade_reason", None),
+            "scanner_source": getattr(d, "scanner_source", None),
+            "fallback_used": getattr(d, "fallback_used", False),
         }
         serialized = json.dumps(payload, indent=2, default=str)
     except Exception as e:
