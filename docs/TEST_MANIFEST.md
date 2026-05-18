@@ -4,14 +4,14 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 86
-- **Total `def test_*` functions**: 944
+- **Total files**: 87
+- **Total `def test_*` functions**: 956
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 460 |
+| critical | 472 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 754 |
+| not_reviewed | 766 |
 | partially_reviewed | 90 |
 | reviewed | 100 |
 
@@ -68,6 +68,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 - `test_phase_69_loose_variant.py`
 - `test_phase_70_skip_hard_flat.py`
 - `test_phase_72_ultra_variant.py`
+- `test_phase_73_chatgpt_20260518_2040.py`
 - `test_postmortem_20260512.py`
 - `test_pump_dump_filter_bugs.py`
 - `test_review_fixes_p0.py`
@@ -138,6 +139,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_phase_69_loose_variant.py` | 12 | critical | yes | not_reviewed | Phase-69: STRATEGY_VARIANT=loose for emergency "no trade today" sessions. |
 | `test_phase_70_skip_hard_flat.py` | 10 | critical | yes | not_reviewed | Phase-70: SKIP_HARD_FLAT_TODAY env-var override. |
 | `test_phase_72_ultra_variant.py` | 16 | critical | yes | not_reviewed | Phase-72: STRATEGY_VARIANT=ultra — looser than loose + skip entry vetos. |
+| `test_phase_73_chatgpt_20260518_2040.py` | 12 | critical | yes | not_reviewed | Phase-73 (ChatGPT 20260518_2040 P0/P1/P2): three fixes in one commit. |
 | `test_pilot_baseline.py` | 3 | replay | no | partially_reviewed | Pilot-Stats Regression: Backtest-Output darf nicht von Baseline abweichen. |
 | `test_position_recovery_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 6 (2026-05-12): position_recovery.recover_or_flatten robustness. |
 | `test_position_size_multipliers.py` | 12 | unit | no | not_reviewed | Audit-Iter 15 (2026-05-12): compute_position_size multiplier stacking. |

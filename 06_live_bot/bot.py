@@ -623,6 +623,18 @@ def premarket_scan(top_n: int = TOP_N, max_retries: int = 2) -> list[TickerState
     return []
 
 
+# Phase-73 (ChatGPT 20260518_2040 P1): module-level state that TV-scan
+# writes on every call so the caller can surface it via day.scanner_source
+# / day.last_tradingview_scan_status / day.fallback_used. Avoids the
+# alternative refactor of plumbing `day` through the scan call chain.
+_LAST_TV_SCAN_STATE: dict = {
+    "status": None,        # "ok" | "error" | "import_error" | None
+    "result_count": 0,
+    "error_class": None,
+    "ts": None,
+}
+
+
 def _try_tradingview_primary(top_n: int) -> list[dict]:
     """Phase-28: ask TradingView for top-N Cameron-conformant candidates.
     Returns [] on any error so caller can fall back to legacy yfinance path.
@@ -635,6 +647,7 @@ def _try_tradingview_primary(top_n: int) -> list[dict]:
     "TV-unavailable" (status=import_error) without grepping bot.log.
     """
     import time as _t
+    from datetime import datetime as _dt, timezone as _tz
     t_start = _t.monotonic()
     try:
         from scanners.tradingview_scanner import scan_cameron_candidates
@@ -643,6 +656,12 @@ def _try_tradingview_primary(top_n: int) -> list[dict]:
         _log_tv_scan(status="import_error", latency_ms=latency_ms,
                       result_count=0, error_class=type(e).__name__,
                       error=str(e)[:200])
+        # Phase-73: update module state so caller can set day.fields
+        _LAST_TV_SCAN_STATE.update({
+            "status": "import_error", "result_count": 0,
+            "error_class": type(e).__name__,
+            "ts": _dt.now(_tz.utc).isoformat(),
+        })
         log.warning("TradingView scanner not importable: %s", e)
         return []
     try:
@@ -658,8 +677,15 @@ def _try_tradingview_primary(top_n: int) -> list[dict]:
             float_max_shares=FLOAT_MAX_SHARES,
         )
         latency_ms = (_t.monotonic() - t_start) * 1000
+        n_rows = len(rows) if rows else 0
         _log_tv_scan(status="ok", latency_ms=latency_ms,
-                      result_count=len(rows) if rows else 0)
+                      result_count=n_rows)
+        # Phase-73: ok status (n=0 means "TV up but no candidates")
+        _LAST_TV_SCAN_STATE.update({
+            "status": "ok", "result_count": n_rows,
+            "error_class": None,
+            "ts": _dt.now(_tz.utc).isoformat(),
+        })
         return rows
     except Exception as e:
         latency_ms = (_t.monotonic() - t_start) * 1000
@@ -667,6 +693,12 @@ def _try_tradingview_primary(top_n: int) -> list[dict]:
                       result_count=0, error_class=type(e).__name__,
                       error=str(e)[:200])
         log.warning("TradingView primary call raised: %s", e)
+        # Phase-73: error status
+        _LAST_TV_SCAN_STATE.update({
+            "status": "error", "result_count": 0,
+            "error_class": type(e).__name__,
+            "ts": _dt.now(_tz.utc).isoformat(),
+        })
         return []
 
 
@@ -2161,9 +2193,22 @@ class Bot:
             ]
         if not candidates:
             candidates = await asyncio.to_thread(premarket_scan, TOP_N)
+        # Phase-73 (ChatGPT 20260518_2040 P1): write TV scan status into
+        # DayState so status.json answers "did TV work?" without log-grep.
+        tv_state = _LAST_TV_SCAN_STATE
+        self.day.last_tradingview_scan_status = tv_state.get("status")
+        if tv_state.get("status") == "ok" and tv_state.get("result_count", 0) > 0:
+            self.day.scanner_source = "tradingview"
+            self.day.fallback_used = False
+        elif candidates:
+            # TV failed/empty but yfinance produced rows
+            self.day.scanner_source = "yfinance_fallback"
+            self.day.fallback_used = True
+        else:
+            self.day.scanner_source = "none"
+            self.day.fallback_used = False
         if not candidates:
             self.day.last_no_trade_reason = "no_watchlist"
-            self.day.scanner_source = "premarket_scan"
             log.warning("=" * 60)
             log.warning("KEINE WATCHLIST heute — wahrscheinlich Markt-Holiday oder Filter zu streng")
             log.warning("Bot beendet diesen Trading-Tag, schlaeft bis morgen")

@@ -60,21 +60,27 @@ def load_top_symbols(n: int = 3) -> list[str]:
 
 
 def get_clients():
-    """Phase-53: guarded clients (RateGuard + alpaca_api_calls.jsonl)
-    instead of raw SDK clients. Falls back to raw if guarded module
-    not available."""
+    """Phase-53: guarded clients (RateGuard + alpaca_api_calls.jsonl).
+    Phase-73 (ChatGPT 20260518_2040 P1/P2): fail-CLOSED — REMOVED the
+    raw-client fallback. A tool that fires many bracket orders MUST go
+    through the rate-guard. If the guarded module won't import, refuse
+    to start rather than silently bypassing 200/min protection.
+    """
     from secrets_loader import get_alpaca_keys
     k, s = get_alpaca_keys()
     try:
         from guarded_alpaca import (
             GuardedTradingClient, GuardedStockHistoricalDataClient)
-        return (GuardedTradingClient(k, s, paper=True),
-                GuardedStockHistoricalDataClient(k, s))
-    except Exception:
-        from alpaca.trading.client import TradingClient
-        from alpaca.data.historical import StockHistoricalDataClient
-        return (TradingClient(k, s, paper=True),
-                StockHistoricalDataClient(k, s))
+    except Exception as e:
+        # Fail-closed: NO raw fallback. Surface the import error.
+        raise RuntimeError(
+            f"REFUSING TO START: guarded_alpaca import failed ({e}). "
+            f"force_trade_loop MUST run through the rate-guard — there "
+            f"is no raw-client fallback. Fix the import error and "
+            f"retry."
+        )
+    return (GuardedTradingClient(k, s, paper=True),
+            GuardedStockHistoricalDataClient(k, s))
 
 
 def get_snapshot_price(data_client, symbol: str) -> float | None:
