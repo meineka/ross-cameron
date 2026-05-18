@@ -27,8 +27,13 @@ def _isolated_status_file(tmp_path, monkeypatch):
     import status_dashboard
     sf = tmp_path / "status.json"
     monkeypatch.setattr(status_dashboard, "STATUS_FILE", sf)
+    # raising=False: ALPACA_API_CALLS_LOG attribute may not exist on
+    # all status_dashboard versions (Phase-56+ adds it). Without this
+    # flag, CI on Linux failed with AttributeError because the module
+    # there doesn't have the attribute yet.
     monkeypatch.setattr(status_dashboard, "ALPACA_API_CALLS_LOG",
-                        tmp_path / "alpaca_api_calls.jsonl")
+                        tmp_path / "alpaca_api_calls.jsonl",
+                        raising=False)
     # Reset failure counter for isolation
     monkeypatch.setattr(status_dashboard, "_write_fail_count", 0)
     yield
