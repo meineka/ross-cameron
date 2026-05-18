@@ -428,6 +428,11 @@ class DayState:
     # no-trade question in one glance. Updated by pattern-rejection
     # paths in manage_position + scan logic.
     last_no_trade_reason: str | None = None
+    last_ws_bar_ts: str | None = None
+    last_tradingview_scan_status: str | None = None
+    scanner_source: str | None = None
+    fallback_used: bool = False
+    alpaca_blocked_count: int = 0
 
 
 # ─── Premarket-Scanner ──────────────────────────────────────────────────────
@@ -2076,6 +2081,8 @@ class Bot:
         if not candidates:
             candidates = await asyncio.to_thread(premarket_scan, TOP_N)
         if not candidates:
+            self.day.last_no_trade_reason = "no_watchlist"
+            self.day.scanner_source = "premarket_scan"
             log.warning("=" * 60)
             log.warning("KEINE WATCHLIST heute — wahrscheinlich Markt-Holiday oder Filter zu streng")
             log.warning("Bot beendet diesen Trading-Tag, schlaeft bis morgen")
@@ -2100,6 +2107,7 @@ class Bot:
             """1-Min-WS-Bar → Aggregator → ggf. 5-Min-Bar → handle_bar."""
             self.day.bars_received += 1
             try:
+                self.day.last_ws_bar_ts = str(getattr(bar, "timestamp", None))
                 sym = bar.symbol
                 if sym not in self.tickers:
                     return  # früh raus für deleted symbols
@@ -2242,8 +2250,21 @@ class Bot:
                         await asyncio.sleep(5)
                         if self._pending_ws_resubscribe:
                             log.info("  WS re-subscribe triggered — restarting connection")
+                            # Phase-68 (2026-05-18 live-fix): in current
+                            # alpaca-py, stop_ws is `async def` — calling
+                            # it without await leaves the stop-flag never
+                            # set, so ws.run() keeps consuming forever,
+                            # and the next StockDataStream + subscribe +
+                            # run creates a SECOND auth on the same
+                            # Alpaca account → "connection limit
+                            # exceeded" cascade. Today (2026-05-18, NY
+                            # 09:58 SBFM/GOVX scan) this prevented every
+                            # trade. Defensive: works for both sync and
+                            # async SDK shapes.
                             try:
-                                ws.stop_ws()
+                                _stop_result = ws.stop_ws()
+                                if asyncio.iscoroutine(_stop_result):
+                                    await _stop_result
                             except Exception as e:
                                 log.warning("ws.stop_ws() raised: %s", e)
                             break
@@ -2533,6 +2554,7 @@ class Bot:
             # Check if can enter new
             ok, reason = can_enter_new(self.day, ny_time)
             if not ok:
+                self.day.last_no_trade_reason = reason
                 return
 
             # Detect bull-flag
@@ -2564,6 +2586,7 @@ class Bot:
             # Guard gegen unvollständige params
             required = ("pole_candles", "flag_candles", "pole_height", "entry_price", "stop_price")
             if not all(k in params for k in required):
+                self.day.last_no_trade_reason = f"{sym}: incomplete pattern params"
                 log.warning("PATTERN %s: incomplete params, skip", sym)
                 return
             self.day.patterns_detected += 1
@@ -2601,6 +2624,7 @@ class Bot:
         )
         if shares < 1:
             self.day.patterns_rejected_size_zero += 1
+            self.day.last_no_trade_reason = f"{sym}: position size zero"
             log.info("  REJECT %s: size=0 (entry $%.2f stop $%.2f risk-per-share $%.2f → max-shares 0)",
                      sym, params["entry_price"], params["stop_price"],
                      params["entry_price"] - params["stop_price"])
@@ -2623,6 +2647,7 @@ class Bot:
         if not ok2:
             self.day.patterns_rejected_risk_budget = getattr(
                 self.day, "patterns_rejected_risk_budget", 0) + 1
+            self.day.last_no_trade_reason = reason2
             log.warning("  REJECT %s: %s", sym, reason2)
             return
 
@@ -2639,6 +2664,7 @@ class Bot:
                         sym, ts.score, ts.intraday_pct, ts.rvol_proxy, pd_mult)
         if shares < 1:
             self.day.patterns_rejected_size_zero += 1
+            self.day.last_no_trade_reason = f"{sym}: position size zero after multiplier"
             log.info("  REJECT %s: shares=0 nach SPY-multiplier %.2fx",
                      sym, self.day.spy_size_multiplier)
             return
@@ -2651,6 +2677,7 @@ class Bot:
         if not quote_ok:
             self.day.patterns_rejected_quote_safety = getattr(
                 self.day, "patterns_rejected_quote_safety", 0) + 1
+            self.day.last_no_trade_reason = f"{sym}: quote-safety {quote_reason}"
             log.warning("  REJECT %s: quote-safety failed (%s)", sym, quote_reason)
             return
 
@@ -2666,6 +2693,7 @@ class Bot:
         )
         if result["status"] != "filled":
             self.day.orders_failed += 1
+            self.day.last_no_trade_reason = f"{sym}: entry not filled {result.get('status')}"
             log.warning("ENTRY %s NOT-FILLED (%s) — keeping in_position=False",
                         sym, result.get("status"))
             return

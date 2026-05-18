@@ -4,25 +4,25 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 82
-- **Total `def test_*` functions**: 898
+- **Total files**: 83
+- **Total `def test_*` functions**: 906
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 416 |
+| critical | 422 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
 | smoke | 10 |
-| unit | 373 |
+| unit | 375 |
 
 ### Tests per review-status
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 708 |
+| not_reviewed | 716 |
 | partially_reviewed | 90 |
 | reviewed | 100 |
 
@@ -64,6 +64,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 - `test_phase_65_atomic_lockfile.py`
 - `test_phase_66_strategy_variant.py`
 - `test_phase_67_supervisor.py`
+- `test_phase_68_ws_stop_await.py`
 - `test_postmortem_20260512.py`
 - `test_pump_dump_filter_bugs.py`
 - `test_review_fixes_p0.py`
@@ -130,6 +131,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_phase_65_atomic_lockfile.py` | 12 | critical | yes | not_reviewed | Phase-65: race-safe atomic lockfile. |
 | `test_phase_66_strategy_variant.py` | 16 | critical | yes | not_reviewed | Phase-66: STRATEGY_VARIANT env var (strict vs relaxed). |
 | `test_phase_67_supervisor.py` | 20 | critical | yes | not_reviewed | Phase-67: 30-min auto-correcting supervisor. |
+| `test_phase_68_ws_stop_await.py` | 6 | critical | yes | not_reviewed | Phase-68: regression test for ws.stop_ws() coroutine-never-awaited. |
 | `test_pilot_baseline.py` | 3 | replay | no | partially_reviewed | Pilot-Stats Regression: Backtest-Output darf nicht von Baseline abweichen. |
 | `test_position_recovery_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 6 (2026-05-12): position_recovery.recover_or_flatten robustness. |
 | `test_position_size_multipliers.py` | 12 | unit | no | not_reviewed | Audit-Iter 15 (2026-05-12): compute_position_size multiplier stacking. |
@@ -154,7 +156,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_safe_bracket_status_bugs.py` | 11 | critical | no | partially_reviewed | Audit-Iter 27 (2026-05-13): safe_bracket_buy status-comparison bugs. |
 | `test_secrets_loader_bugs.py` | 11 | unit | no | not_reviewed | Audit-Iter 35 (2026-05-13): secrets_loader.py edge cases. |
 | `test_smoke_imports.py` | 8 | smoke | no | reviewed | Phase-21 (ChatGPT-09:15 Task 1): smoke gate — populates the `smoke` |
-| `test_status_dashboard_bugs.py` | 12 | unit | yes | not_reviewed | Audit-Iter 26 (2026-05-12): status_dashboard.py durability + correctness. |
+| `test_status_dashboard_bugs.py` | 14 | unit | yes | not_reviewed | Audit-Iter 26 (2026-05-12): status_dashboard.py durability + correctness. |
 | `test_strategy_improvements.py` | 8 | unit | yes | not_reviewed | Tests für die Cameron-Lessons-Verbesserungen vom 2026-05-12. |
 | `test_structured_logger.py` | 13 | critical | yes | reviewed | Phase-22 (ChatGPT-09:27 Task 4 / ChatGPT-08:49 #3+#4): structured |
 | `test_trade_log_separation.py` | 7 | critical | yes | reviewed | Phase-11 (ChatGPT-18:40 P0.2): live and replay trade logs MUST be |
