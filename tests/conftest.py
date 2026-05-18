@@ -17,3 +17,9 @@ sys.path.insert(0, str(ROOT / "04_backtest"))
 # `import bot` runs. Individual tests that need to test variant
 # behaviour (test_phase_66_*) still monkeypatch+reimport explicitly.
 os.environ["STRATEGY_VARIANT"] = "strict"
+
+# Phase-70 (2026-05-18): same defense for SKIP_HARD_FLAT_TODAY.
+# The real .env may have SKIP_HARD_FLAT_TODAY=1 for live afternoon
+# trading sessions, but tests universally assume the Cameron-strict
+# 12:00 NY cut-off.
+os.environ["SKIP_HARD_FLAT_TODAY"] = "0"

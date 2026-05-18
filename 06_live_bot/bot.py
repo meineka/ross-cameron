@@ -356,6 +356,24 @@ TIME_HARD_FLAT = dtime(12, 0)
 TIME_RTH_START = dtime(9, 30)
 TIME_NEW_ENTRIES_START = dtime(9, 35)
 
+# Phase-70 (2026-05-18 user-request): operator override for HARD_FLAT.
+# Cameron's strict rule is "stop trading at 12:00 NY" — captures the
+# morning-session edge and avoids afternoon chop. But for sessions where
+# the operator wants the bot to keep trading until market close (e.g.
+# loose-mode exploration runs), SKIP_HARD_FLAT_TODAY=1 in .env / shell
+# env pushes the cut-off to TIME_NEW_ENTRIES_END_OVERRIDE (default 15:55
+# NY, 5min before close) and TIME_HARD_FLAT_OVERRIDE (16:00 NY).
+#
+# This is NOT for live money — afternoon trading is HISTORICALLY worse
+# in Cameron-strategy backtests (afternoon chop vs morning trend).
+# Use only for end-to-end execution validation on quiet days.
+SKIP_HARD_FLAT_TODAY = _os_phase66.environ.get(
+    "SKIP_HARD_FLAT_TODAY", "0"
+).strip().lower() in ("1", "true", "yes", "on")
+if SKIP_HARD_FLAT_TODAY:
+    TIME_NEW_ENTRIES_END = dtime(15, 30)  # phase-70: 3:30pm NY new entries cut
+    TIME_HARD_FLAT = dtime(15, 55)         # phase-70: 3:55pm NY hard flat (5min pre-close)
+
 # Re-Scan-Strategie: zwei Schichten, ALIGNED zu round-5-Min boundaries
 # SLOW: yfinance Universe-Pull, ~3 Min Laufzeit → 180 Sek Head-Start
 # FAST: Alpaca Snapshot, <1 Sek → 5 Sek Head-Start
@@ -3462,6 +3480,15 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
     log.info("  FLAG_RETRACE_MAX_PCT   = %.1f%%", FLAG_RETRACE_MAX_PCT)
     log.info("  BREAKOUT_VOL_FACTOR    = %.2f", BREAKOUT_VOL_FACTOR)
     log.info("  CATALYST_MODE          = %s", CATALYST_MODE)
+    if SKIP_HARD_FLAT_TODAY:
+        log.warning("  SKIP_HARD_FLAT_TODAY=1 — afternoon trading enabled")
+        log.warning("    TIME_NEW_ENTRIES_END = %s NY  (was 11:30)",
+                     TIME_NEW_ENTRIES_END.strftime("%H:%M"))
+        log.warning("    TIME_HARD_FLAT       = %s NY  (was 12:00)",
+                     TIME_HARD_FLAT.strftime("%H:%M"))
+    else:
+        log.info("  TIME_HARD_FLAT         = %s NY (Cameron-strict)",
+                  TIME_HARD_FLAT.strftime("%H:%M"))
     log.info("=" * 60)
 
     # Pre-Flight: verify auth, WS-init, yfinance — verhindert 2026-05-11-Geistermodus
