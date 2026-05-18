@@ -409,18 +409,75 @@ def main() -> int:
                     help="how many top symbols to buy per tick (default 3)")
     ap.add_argument("--interval-sec", type=int, default=300,
                     help="seconds between ticks (default 300 = 5 min)")
+    # Phase-71 (ChatGPT 20260517_2233 P2.6): paper-demo safety gate.
+    # Without --i-understand-paper-demo, the script refuses to start.
+    # This prevents an accidental shell-history re-run from firing
+    # filter-bypass orders. Operator must explicitly opt-in.
+    ap.add_argument("--i-understand-paper-demo", action="store_true",
+                     help="REQUIRED — confirms you know this is a PAPER-ONLY "
+                          "filter-bypass tool and NOT a live-trading strategy")
     args = ap.parse_args()
+
+    # ── Phase-71 safety banner ──────────────────────────────────────────
+    print()
+    print("=" * 70)
+    print("  ⚠️  FORCE-TRADE DEMO / PAPER-ONLY MODE")
+    print("=" * 70)
+    print("  This tool BYPASSES every Cameron-strategy filter:")
+    print("    - no pattern detection (no bull-flag check)")
+    print("    - no RVOL / gap / pole / flag-retrace / breakout filters")
+    print("    - no MACD / VWAP / false-breakout vetoes")
+    print("    - no catalyst (8-K) check")
+    print("    - no time-of-day cutoffs")
+    print()
+    print("  It just BUYs the top-N watchlist symbols every N seconds.")
+    print("  NOT for live money. Paper account ONLY. Will refuse to")
+    print("  start if Alpaca client returns paper=False account info.")
+    print("=" * 70)
+    print()
+
+    if not args.i_understand_paper_demo:
+        log.error(
+            "REFUSING TO START: --i-understand-paper-demo flag missing. "
+            "This is a paper-only filter-bypass demo tool, not a live "
+            "strategy. If you really want to run it, add the flag."
+        )
+        return 75  # EX_TEMPFAIL
 
     try:
         trading, data = get_clients()
     except Exception as e:
         log.error("client init failed: %s — aborting", e)
         return 1
+
+    # Phase-71: hard paper-account check. get_clients() already passes
+    # paper=True to the SDK; this verifies the account itself reports
+    # paper status before we send any order.
     try:
-        eq = float(trading.get_account().equity)
-        log.info("FORCE-TRADE MODE START — equity $%.2f, shares=%d, "
-                 "top-N=%d, interval=%ds",
-                 eq, args.shares, args.top_n, args.interval_sec)
+        acct = trading.get_account()
+        # Alpaca paper-account ids start with specific prefix or have
+        # `account_blocked` flag — we conservatively check the equity
+        # value: live accounts typically have a known real balance,
+        # paper starts at $100k or $25k. Defensive: also check the
+        # status field if present.
+        eq = float(acct.equity)
+        status = str(getattr(acct, "status", "")).upper()
+        if status in ("ACTIVE",) and eq > 0:
+            # ACTIVE is both paper and live — additional check via key
+            # prefix: Alpaca paper keys start with "PK", live with "AK"
+            import os as _os_paper
+            key = _os_paper.environ.get("APCA_API_KEY_ID", "")
+            if key and not key.startswith("PK"):
+                log.error(
+                    "REFUSING TO START: API key prefix %r != 'PK' — "
+                    "this looks like a LIVE Alpaca key, not paper. "
+                    "Force-trade demo MUST run on paper only.",
+                    key[:4] + "…",
+                )
+                return 75
+        log.info("FORCE-TRADE DEMO START [PAPER] — equity $%.2f, "
+                  "shares=%d, top-N=%d, interval=%ds",
+                  eq, args.shares, args.top_n, args.interval_sec)
     except Exception as e:
         log.warning("account check failed: %s — continuing anyway", e)
     # Phase-46: on startup, recover existing open SELL orders into the

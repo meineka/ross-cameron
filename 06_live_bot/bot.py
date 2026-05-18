@@ -3130,15 +3130,27 @@ class ReplayBot:
                 self._manage(ts, bar, ny_t); continue
 
             ok, reason = can_enter_new(self.day, ny_t)
-            if not ok: continue
+            if not ok:
+                # Phase-71 (ChatGPT 20260517_2233 P4): replay path was missing
+                # the last_no_trade_reason set that the live on_bar path
+                # already has at line 2607. Now both surface the can_enter
+                # veto reason to the operator status.
+                self.day.last_no_trade_reason = reason
+                continue
             signal, params = detect_bull_flag(list(ts.bars))
-            if not signal: continue
+            if not signal:
+                self.day.last_no_trade_reason = f"{sym}: no pattern detected"
+                continue
             ts.pullback_count_today += 1
-            if ts.pullback_count_today >= 3: continue
+            if ts.pullback_count_today >= 3:
+                self.day.last_no_trade_reason = f"{sym}: 3rd-pullback skip"
+                continue
             shares = compute_position_size(
                 params["entry_price"], params["stop_price"], self.equity, self.day,
                 ny_time=ny_t)  # Iter 23: needed for time-based quarter-unlock
-            if shares < 1: continue
+            if shares < 1:
+                self.day.last_no_trade_reason = f"{sym}: position size zero"
+                continue
             # Phase-8: route entry through executor if injected, else legacy
             if self.executor is not None:
                 res = self.executor.submit_bracket_buy(
