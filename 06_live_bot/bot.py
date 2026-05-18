@@ -120,8 +120,9 @@ except Exception:
     pass
 
 # Phase-69: add "loose" variant for emergency "no trade today" sessions
+# Phase-72: add "ultra" variant — looser than loose + skips entry vetos
 STRATEGY_VARIANT = _os_phase66.environ.get("STRATEGY_VARIANT", "strict").lower()
-if STRATEGY_VARIANT not in ("strict", "relaxed", "loose"):
+if STRATEGY_VARIANT not in ("strict", "relaxed", "loose", "ultra"):
     STRATEGY_VARIANT = "strict"  # safe default
 
 # ─── Cameron-Constants (mirror constraints.yaml) ────────────────────────────
@@ -186,7 +187,9 @@ SLIPPAGE_CENTS = 0.01
 # strict thresholds for the Phase-33 "see-some-trades" values that
 # actually produce entries on quiet days. Emergency mode — pilot
 # backtest showed these have lower edge but more trades.
-if STRATEGY_VARIANT == "loose":
+# Phase-72: "ultra" overlay applies ON TOP of loose values.
+DISABLE_ENTRY_VETOS = False  # phase-72 flag; ultra sets True
+if STRATEGY_VARIANT in ("loose", "ultra"):
     DAILY_GAIN_MIN_PCT = 5.0   # loose-algo: was strict 10.0
     RVOL_MIN_PROXY = 3.0       # loose-algo: was strict 5.0
     POLE_MIN_CANDLES, POLE_MAX_CANDLES = 2, 10  # loose-algo: was 3,7
@@ -196,6 +199,20 @@ if STRATEGY_VARIANT == "loose":
     FLAG_RETRACE_MAX_PCT = 70.0  # loose-algo: was 50.0
     BREAKOUT_VOL_FACTOR = 1.2    # loose-algo: was 1.5
     CATALYST_MODE = "off"         # loose-algo: no 8-K filter (was "soft")
+
+if STRATEGY_VARIANT == "ultra":
+    # ultra-algo (Phase-72): even looser than loose. Goal: produce a
+    # trade even on quiet days for end-to-end execution validation.
+    # NOT for live money.
+    DAILY_GAIN_MIN_PCT = 3.0   # ultra-algo: tiny premarket move OK
+    RVOL_MIN_PROXY = 2.0       # ultra-algo: 2x volume is enough
+    POLE_MIN_CANDLES, POLE_MAX_CANDLES = 1, 15  # ultra-algo: huge window
+    POLE_MIN_MOVE_PCT = 1.0    # ultra-algo: 1% pole accepted
+    POLE_TOPPING_TAIL_MAX = 0.9  # ultra-algo: nearly disabled
+    FLAG_MIN_CANDLES, FLAG_MAX_CANDLES = 1, 8  # ultra-algo: long flag OK
+    FLAG_RETRACE_MAX_PCT = 90.0  # ultra-algo: deep retraces OK
+    BREAKOUT_VOL_FACTOR = 1.0    # ultra-algo: any breakout volume
+    DISABLE_ENTRY_VETOS = True   # ultra-algo: skip VWAP/MACD/FBO checks
 
 # Phase-66 (2026-05-17): two-variant strategy support.
 #
@@ -241,6 +258,17 @@ elif STRATEGY_VARIANT == "loose":
     DAILY_MAX_LOSS_USD = 300.0          # loose-algo
     DAILY_GOAL_USD = 300.0              # loose-algo
     EQUITY_RISK_CAP_PCT = 2.0           # loose-algo
+elif STRATEGY_VARIANT == "ultra":
+    # ultra-algo (Phase-72): MAXIMUM looseness. Same sizing as loose,
+    # plus EVEN LOOSER entry thresholds (pole 1%, breakout 1.0x,
+    # retrace 90%) AND skip the VWAP/MACD/FBO entry-vetos entirely.
+    # User-request 2026-05-18: "hätte gerne dass er sehr locker heute
+    # noch trades machen kann" — when loose still produces zero trades.
+    # NOT for live money — pure demo / Paper end-to-end validation.
+    MAX_LOSS_PER_TRADE_USD = 100.0     # ultra-algo: same as loose
+    DAILY_MAX_LOSS_USD = 300.0          # ultra-algo
+    DAILY_GOAL_USD = 300.0              # ultra-algo
+    EQUITY_RISK_CAP_PCT = 2.0           # ultra-algo
 else:
     # strict-algo (default Cameron-strict): conservative paper-mode sizing
     MAX_LOSS_PER_TRADE_USD = 50.0      # strict-algo
@@ -1083,16 +1111,19 @@ def detect_bull_flag(bars: list) -> tuple[bool, dict]:
             else:
                 t2 = t2_R
             # ─── Cameron-Vetos (heute gefixt) ─────────────────────────────
-            # VWAP: Cameron tradet nur über Session-VWAP
-            if not is_above_vwap(bars, c[i]):
-                return False, {"_veto": "vwap"}
-            # MACD 12/26/9: bullish + over zero-line
-            if not macd_is_bullish(c.tolist()):
-                return False, {"_veto": "macd"}
-            # FBO-5-Indicator
-            vetoed, why = false_breakout_veto(bars)
-            if vetoed:
-                return False, {"_veto": f"fbo_{why}"}
+            # Phase-72: ultra-mode skips all three entry vetos so even
+            # weak setups produce a trade for execution validation.
+            if not DISABLE_ENTRY_VETOS:
+                # VWAP: Cameron tradet nur über Session-VWAP
+                if not is_above_vwap(bars, c[i]):
+                    return False, {"_veto": "vwap"}
+                # MACD 12/26/9: bullish + over zero-line
+                if not macd_is_bullish(c.tolist()):
+                    return False, {"_veto": "macd"}
+                # FBO-5-Indicator
+                vetoed, why = false_breakout_veto(bars)
+                if vetoed:
+                    return False, {"_veto": f"fbo_{why}"}
 
             return True, {
                 "entry_price": float(ep),
@@ -3478,6 +3509,7 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
     _label_map = {
         "relaxed": "2x volume, Cameron-strict entries — relaxed-algo",
         "loose": "2x volume + Phase-33 loose entries + catalyst OFF — loose-algo",
+        "ultra": "2x volume + ULTRA-loose entries + VWAP/MACD/FBO disabled — ultra-algo",
         "strict": "Cameron-strict — strict-algo",
     }
     log.info("STRATEGY_VARIANT = %s (%s)", STRATEGY_VARIANT,
@@ -3492,6 +3524,8 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
     log.info("  FLAG_RETRACE_MAX_PCT   = %.1f%%", FLAG_RETRACE_MAX_PCT)
     log.info("  BREAKOUT_VOL_FACTOR    = %.2f", BREAKOUT_VOL_FACTOR)
     log.info("  CATALYST_MODE          = %s", CATALYST_MODE)
+    if DISABLE_ENTRY_VETOS:
+        log.warning("  DISABLE_ENTRY_VETOS = True (ultra-algo skips VWAP/MACD/FBO)")
     if SKIP_HARD_FLAT_TODAY:
         log.warning("  SKIP_HARD_FLAT_TODAY=1 — afternoon trading enabled")
         log.warning("    TIME_NEW_ENTRIES_END = %s NY  (was 11:30)",
