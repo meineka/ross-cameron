@@ -2330,6 +2330,14 @@ class Bot:
                     "timestamp": bar.timestamp,
                 }
                 aggregated = self.aggregator.add(sym, bar_dict)
+                # Phase-79.6: force-mode fires on EVERY 1-min bar (user
+                # asked "jede minute gucken, selber entscheiden und
+                # kaufen"). Pass the 1-min bar synthesized as a "fake"
+                # 5-min bucket — handle_bar_5min's force path doesn't
+                # care about bucket boundaries.
+                if FORCE_ENTRY_ON_BAR and aggregated is None:
+                    await self.handle_bar_5min(sym, bar_dict)
+                    return
                 if aggregated is None:
                     return  # 5-min-Bucket noch nicht komplett
                 await self.handle_bar_5min(sym, aggregated)
@@ -2810,7 +2818,7 @@ class Bot:
             # with a 1% stop / 2% target. Position-size envelope (force-
             # algo: $20 max loss / 0.5% equity) keeps the paper account
             # safe even if every trade loses.
-            if FORCE_ENTRY_ON_BAR and len(ts.bars) >= 2 and not ts.in_position:
+            if FORCE_ENTRY_ON_BAR and len(ts.bars) >= 1 and not ts.in_position:
                 _entry = float(bar_dict["close"])
                 _stop = round(_entry * 0.99, 2)   # 1% stop
                 _target1 = round(_entry * 1.01, 2)  # 1% target (T1, +1R)
