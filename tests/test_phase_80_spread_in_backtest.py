@@ -148,3 +148,40 @@ def test_legacy_slippage_constants_still_exist():
     src = _src()
     assert "SLIPPAGE_ENTRY_CENTS" in src
     assert "SLIPPAGE_STOP_CENTS" in src
+
+
+# ─── v3 backtest must also have the spread model ────────────────────────
+
+def _v3_src() -> str:
+    return (ROOT / "04_backtest" / "backtest_bull_flag_v3.py").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_v3_has_spread_constants():
+    src = _v3_src()
+    assert "SPREAD_BPS" in src
+    assert "HALF_SPREAD" in src
+
+
+def test_v3_has_spread_helper_functions():
+    src = _v3_src()
+    assert "def entry_with_spread(" in src
+    assert "def exit_with_spread(" in src
+
+
+def test_v3_entry_uses_spread_function():
+    src = _v3_src()
+    assert "entry_with_spread(prh)" in src
+
+
+def test_v3_stop_uses_spread_function():
+    src = _v3_src()
+    assert "exit_with_spread(fl_low)" in src
+    assert "exit_with_spread(stop)" in src
+
+
+def test_v3_target_fills_use_spread_function():
+    src = _v3_src()
+    assert "exit_with_spread(t.target1_price)" in src
+    assert "exit_with_spread(t.target2_price)" in src

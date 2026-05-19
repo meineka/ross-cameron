@@ -2554,22 +2554,94 @@ class Bot:
                 else:
                     await asyncio.sleep(1)  # short pause vor reconnect
 
+        # Phase-81 (2026-05-19, user request "hat tp eingegriffen, hat sl
+        # eingegriffen — wenn nötig log erweitern"): position monitor.
+        # Bracket child legs (TP-limit, SL-stop) fire SERVER-SIDE on
+        # Alpaca — the bot is never notified. Result: bot.log shows
+        # entries but is silent on exits. This task polls Alpaca every
+        # 30s, compares against last-known position state, and emits
+        # explicit "POS-OPEN" / "POS-CLOSE" / "POS-PNL" log lines so the
+        # operator can grep bot.log for trade lifecycle.
+        async def position_monitor():
+            log.info("Phase-81 position_monitor started (poll every 30s)")
+            prev: dict[str, dict] = {}  # symbol -> {qty, entry, last_price}
+            tick = 0
+            while True:
+                try:
+                    pos_list = await asyncio.to_thread(self._safe_get_positions)
+                    curr: dict[str, dict] = {}
+                    for p in (pos_list or []):
+                        sym = p.symbol
+                        curr[sym] = {
+                            "qty": int(float(p.qty)),
+                            "entry": float(p.avg_entry_price),
+                            "current": float(p.current_price),
+                            "pnl": float(p.unrealized_pl),
+                            "pnl_pct": float(p.unrealized_plpc) * 100,
+                        }
+                    # New positions
+                    for sym in curr.keys() - prev.keys():
+                        c = curr[sym]
+                        log.info("POS-OPEN %s: %d sh @ $%.2f (live)",
+                                 sym, c["qty"], c["entry"])
+                    # Closed positions — most useful! infer SL vs TP
+                    for sym in prev.keys() - curr.keys():
+                        p = prev[sym]
+                        # Heuristic: if last-seen current was BELOW entry → SL,
+                        # if ABOVE → TP. Real exit price unknown without
+                        # querying orders, but this gets operator started.
+                        if p["current"] < p["entry"]:
+                            reason = "SL-HIT (price below entry at close)"
+                        elif p["current"] > p["entry"]:
+                            reason = "TP-HIT (price above entry at close)"
+                        else:
+                            reason = "FLAT-CLOSE (manual or even)"
+                        log.info("POS-CLOSE %s: %d sh entry=$%.2f last=$%.2f "
+                                 "P/L=$%+.2f (%+.2f%%) → %s",
+                                 sym, p["qty"], p["entry"], p["current"],
+                                 p["pnl"], p["pnl_pct"], reason)
+                    # Existing positions: every 10 ticks (~5 min) snapshot
+                    tick += 1
+                    if tick % 10 == 0 and curr:
+                        for sym, c in curr.items():
+                            log.info("POS-PNL %s: %d sh @ $%.2f -> $%.2f "
+                                     "P/L=$%+.2f (%+.2f%%)",
+                                     sym, c["qty"], c["entry"], c["current"],
+                                     c["pnl"], c["pnl_pct"])
+                    prev = curr
+                except asyncio.CancelledError:
+                    log.info("position_monitor cancelled")
+                    return
+                except Exception as e:
+                    log.warning("position_monitor tick failed: %s", e)
+                try:
+                    await asyncio.sleep(30)
+                except asyncio.CancelledError:
+                    return
+
         # Review-fix 2026-05-13: explicit task management statt asyncio.gather.
         # Vorher: time_and_health_loop returnt nach HARD_FLAT, aber ws_loop
         # läuft weiter → bot blockt bis WS-disconnect oder externe Kill.
         # Jetzt: FIRST_COMPLETED + cancel pending → sauber raus.
         ws_task = asyncio.create_task(ws_loop(), name="ws_loop")
         time_task = asyncio.create_task(time_and_health_loop(), name="time_loop")
+        pos_task = asyncio.create_task(position_monitor(), name="pos_monitor")
         try:
             done, pending = await asyncio.wait(
                 {ws_task, time_task}, return_when=asyncio.FIRST_COMPLETED,
             )
+            # Always cancel position monitor on shutdown
+            pos_task.cancel()
             for t in pending:
                 t.cancel()
                 try:
                     await asyncio.wait_for(t, timeout=5.0)
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
+            try:
+                await asyncio.wait_for(pos_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
             # If ws_task finished first (=critical exit), trigger flatten
             if ws_task in done and not (time_task in done):
                 log.warning("ws_loop ended first — emergency flatten")
@@ -2577,13 +2649,13 @@ class Bot:
                 self._log_day_summary()
         except KeyboardInterrupt:
             log.info("KeyboardInterrupt — closing all positions")
-            for t in (ws_task, time_task):
+            for t in (ws_task, time_task, pos_task):
                 t.cancel()
             self.executor.market_close_all()
             self._log_day_summary()
         except Exception as e:
             log.error("Bot.run unhandled error: %s", e, exc_info=True)
-            for t in (ws_task, time_task):
+            for t in (ws_task, time_task, pos_task):
                 t.cancel()
             self.executor.market_close_all()
             self._log_day_summary()
@@ -2741,6 +2813,16 @@ class Bot:
                          sym, t.shares, t.entry_price, t.stop_price,
                          t.target1_price, t.target2_price, t.half_filled)
         log.info("─" * 60)
+
+    def _safe_get_positions(self):
+        """Phase-81: synchronous wrapper for Alpaca get_all_positions
+        used by the async position_monitor task. Returns [] on error so
+        the monitor doesn't crash on transient API failures."""
+        try:
+            return list(self.executor.client.get_all_positions() or [])
+        except Exception as e:
+            log.debug("_safe_get_positions failed: %s", e)
+            return []
 
     def _log_day_summary(self):
         d = self.day

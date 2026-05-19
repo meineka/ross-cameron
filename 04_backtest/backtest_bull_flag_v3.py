@@ -37,6 +37,25 @@ FLAG_CANDLES_MIN, FLAG_CANDLES_MAX = 1, 3
 FLAG_RETRACE_MAX_PCT = 50.0
 BREAKOUT_VOL_FACTOR_MIN = 1.5
 SLIPPAGE_CENTS = 0.01
+
+# Phase-80 (2026-05-19): realistic bid/ask spread model — replaces the
+# unrealistic flat-1¢ slippage for small-cap penny stocks. 50bps total
+# spread = 0.5% round-trip cost. See backtest_bull_flag_v2.py for the
+# rationale (Phase-80 commit msg).
+SPREAD_BPS = 50
+HALF_SPREAD = SPREAD_BPS / 20000.0
+
+
+def entry_with_spread(planned_entry: float) -> float:
+    """Pay the ask: planned_entry * (1 + half_spread) + 1¢."""
+    return planned_entry * (1.0 + HALF_SPREAD) + SLIPPAGE_CENTS
+
+
+def exit_with_spread(planned_exit: float) -> float:
+    """Hit the bid: planned_exit * (1 - half_spread) - 1¢."""
+    return planned_exit * (1.0 - HALF_SPREAD) - SLIPPAGE_CENTS
+
+
 RTH_START_H, RTH_START_M, RTH_END_H = 9, 30, 16
 
 FBO_LOOKBACK_BARS = 10
@@ -153,8 +172,9 @@ def detect(bars, max_fbo, pole_pct_min, ticker_meta):
                 if (c[fs:fe] < vw[fs:fe]).any(): continue
                 prh = h[fs:fe].max()
                 if h[i] <= prh: continue
-                ep = prh + SLIPPAGE_CENTS
-                sp = fl_low - SLIPPAGE_CENTS
+                # Phase-80: bid/ask spread on entry + stop
+                ep = entry_with_spread(prh)
+                sp = exit_with_spread(fl_low)
                 if ep <= sp: continue
                 trades.append(Trade(
                     ticker=ticker, date=str(times[i].date()), entry_time=str(times[i]),
@@ -185,11 +205,13 @@ def simulate_exit(t, bars):
     stop = t.stop_price
     for ts, row in after.iterrows():
         if row["low"] <= stop:
-            ep = stop - SLIPPAGE_CENTS
+            # Phase-80: stop-hit fill hits the bid
+            ep = exit_with_spread(stop)
             if half_filled:
                 t.exit_price = round(t.entry_price, 4)
                 t.exit_reason = "stop_hit_after_T1_BE"
-                t.pnl_per_share = round((t.target1_price - t.entry_price) * 0.5, 4)
+                t1_fill = exit_with_spread(t.target1_price)
+                t.pnl_per_share = round((t1_fill - t.entry_price) * 0.5, 4)
             else:
                 t.exit_price = round(ep, 4)
                 t.exit_reason = "stop_hit"
@@ -200,24 +222,32 @@ def simulate_exit(t, bars):
         if not half_filled and row["high"] >= t.target1_price:
             half_filled = True; stop = t.entry_price; continue
         if half_filled and row["high"] >= t.target2_price:
-            r1 = (t.target1_price - t.entry_price) * 0.5
-            r2 = (t.target2_price - t.entry_price) * 0.5
-            t.exit_price = t.target2_price; t.exit_time = str(ts)
+            # Phase-80: T1+T2 fills hit the bid
+            t1_fill = exit_with_spread(t.target1_price)
+            t2_fill = exit_with_spread(t.target2_price)
+            r1 = (t1_fill - t.entry_price) * 0.5
+            r2 = (t2_fill - t.entry_price) * 0.5
+            t.exit_price = round(t2_fill, 4); t.exit_time = str(ts)
             t.exit_reason = "target2_hit"
             t.pnl_per_share = round(r1 + r2, 4)
             t.rr_realized = round(t.pnl_per_share / max(t.entry_price - t.stop_price, 1e-9), 3)
             return t
         if half_filled and bars_md.get(ts, 0) < 0 and row["close"] > t.entry_price:
-            r1 = (t.target1_price - t.entry_price) * 0.5
-            rc = (row["close"] - t.entry_price) * 0.5
-            t.exit_price = round(float(row["close"]), 4); t.exit_time = str(ts)
+            # Phase-80: MACD-exit market-sell hits the bid
+            t1_fill = exit_with_spread(t.target1_price)
+            close_fill = exit_with_spread(float(row["close"]))
+            r1 = (t1_fill - t.entry_price) * 0.5
+            rc = (close_fill - t.entry_price) * 0.5
+            t.exit_price = round(close_fill, 4); t.exit_time = str(ts)
             t.exit_reason = "macd_cross_down"
             t.pnl_per_share = round(r1 + rc, 4)
             t.rr_realized = round(t.pnl_per_share / max(t.entry_price - t.stop_price, 1e-9), 3)
             return t
-    last = after["close"].iloc[-1]
+    # Phase-80: EOD market-exit hits the bid
+    last = exit_with_spread(float(after["close"].iloc[-1]))
     if half_filled:
-        r1 = (t.target1_price - t.entry_price) * 0.5
+        t1_fill = exit_with_spread(t.target1_price)
+        r1 = (t1_fill - t.entry_price) * 0.5
         r2 = (last - t.entry_price) * 0.5
         t.pnl_per_share = round(r1 + r2, 4)
     else:
