@@ -42,9 +42,32 @@ FLAG_CANDLES_MAX = 3
 FLAG_RETRACE_MAX_PCT = 50.0
 BREAKOUT_VOL_FACTOR_MIN = 1.5
 
-# Slippage
+# Slippage (legacy — kept for backward-compat where used standalone)
 SLIPPAGE_ENTRY_CENTS = 0.01
 SLIPPAGE_STOP_CENTS = 0.01
+
+# Phase-80 (2026-05-19, user request "auch im backtest spread annehmen"):
+# Realistic bid/ask spread model for small-cap penny stocks. Real spread
+# observed on Alpaca paper for $2-20 small-caps: 30-80 bps (0.30%-0.80%)
+# during RTH, 100-200 bps in pre/post-market. We use a CONSERVATIVE 50 bps
+# (0.5%) average to avoid back-test over-optimism. Entry pays the ask
+# (+half-spread), exit hits the bid (-half-spread).
+SPREAD_BPS = 50              # 50 basis points = 0.50% total bid-ask spread
+HALF_SPREAD = SPREAD_BPS / 20000.0   # 0.0025 = 0.25% added to entry price
+
+
+def entry_with_spread(planned_entry: float) -> float:
+    """Add half-spread + cent-slippage to a planned long entry (limit/
+    breakout). The bot pays the ask, which is higher than the planned
+    breakout price."""
+    return planned_entry * (1.0 + HALF_SPREAD) + SLIPPAGE_ENTRY_CENTS
+
+
+def exit_with_spread(planned_exit: float) -> float:
+    """Subtract half-spread + cent-slippage from a planned long exit
+    (stop or take-profit). The bot hits the bid, which is lower than
+    the planned price."""
+    return planned_exit * (1.0 - HALF_SPREAD) - SLIPPAGE_STOP_CENTS
 
 # RTH window (NY-time)
 RTH_START_HOUR = 9
@@ -271,9 +294,11 @@ def detect_bull_flag(bars: pd.DataFrame, max_fbo_score: int = 1, debug: bool = F
                 if h[i] <= prev_red_high:
                     continue
 
-                # NEW: Slippage on entry
-                entry_price = prev_red_high + SLIPPAGE_ENTRY_CENTS
-                stop_price = flag_low - SLIPPAGE_STOP_CENTS
+                # Phase-80: bid/ask spread on entry (pay the ask)
+                # and on stop (hit the bid). Replaces the 1¢ slippage
+                # which was unrealistically tight for penny stocks.
+                entry_price = entry_with_spread(prev_red_high)
+                stop_price = exit_with_spread(flag_low)
                 if entry_price <= stop_price:
                     continue
                 target1 = entry_price + (entry_price - stop_price)
@@ -321,9 +346,9 @@ def simulate_exit(trade: Trade, bars: pd.DataFrame) -> Trade:
     half_filled = False
     stop = trade.stop_price
     for ts, row in after.iterrows():
-        # Stop-Hit (slippage on fill)
+        # Stop-Hit (Phase-80: spread on fill = hit the bid)
         if row["low"] <= stop:
-            exit_price = stop - SLIPPAGE_STOP_CENTS
+            exit_price = exit_with_spread(stop)
             if half_filled:
                 trade.exit_price = round(trade.entry_price, 4)
                 trade.exit_reason = "stop_hit_after_T1_BE"
@@ -344,11 +369,13 @@ def simulate_exit(trade: Trade, bars: pd.DataFrame) -> Trade:
             stop = trade.entry_price
             continue
 
-        # T2-Hit
+        # T2-Hit (Phase-80: hit-bid for both T1 + T2 fills)
         if half_filled and row["high"] >= trade.target2_price:
-            r1 = (trade.target1_price - trade.entry_price) * 0.5
-            r2 = (trade.target2_price - trade.entry_price) * 0.5
-            trade.exit_price = trade.target2_price
+            t1_fill = exit_with_spread(trade.target1_price)
+            t2_fill = exit_with_spread(trade.target2_price)
+            r1 = (t1_fill - trade.entry_price) * 0.5
+            r2 = (t2_fill - trade.entry_price) * 0.5
+            trade.exit_price = round(t2_fill, 4)
             trade.exit_time = str(ts)
             trade.exit_reason = "target2_hit"
             trade.pnl_per_share = round(r1 + r2, 4)
@@ -359,10 +386,13 @@ def simulate_exit(trade: Trade, bars: pd.DataFrame) -> Trade:
 
         # FIX: MACD-Cross-Down nur als Hard-Exit, wenn Position bereits in Profit (T1 reached)
         # UND Close ist über Entry (= still net positive). Sonst wartet man auf Stop.
+        # Phase-80: spread on the MACD exit too (market-sell hits bid).
         if half_filled and bars_macd.get(ts, 0) < 0 and row["close"] > trade.entry_price:
-            r1 = (trade.target1_price - trade.entry_price) * 0.5
-            r_close = (row["close"] - trade.entry_price) * 0.5
-            trade.exit_price = round(float(row["close"]), 4)
+            t1_fill = exit_with_spread(trade.target1_price)
+            close_fill = exit_with_spread(float(row["close"]))
+            r1 = (t1_fill - trade.entry_price) * 0.5
+            r_close = (close_fill - trade.entry_price) * 0.5
+            trade.exit_price = round(close_fill, 4)
             trade.exit_time = str(ts)
             trade.exit_reason = "macd_cross_down"
             trade.pnl_per_share = round(r1 + r_close, 4)
@@ -371,9 +401,11 @@ def simulate_exit(trade: Trade, bars: pd.DataFrame) -> Trade:
             )
             return trade
 
-    last_close = after["close"].iloc[-1]
+    # Phase-80: EOD-exit also hits the bid
+    last_close = exit_with_spread(float(after["close"].iloc[-1]))
     if half_filled:
-        r1 = (trade.target1_price - trade.entry_price) * 0.5
+        t1_fill = exit_with_spread(trade.target1_price)
+        r1 = (t1_fill - trade.entry_price) * 0.5
         r2 = (last_close - trade.entry_price) * 0.5
         trade.pnl_per_share = round(r1 + r2, 4)
     else:

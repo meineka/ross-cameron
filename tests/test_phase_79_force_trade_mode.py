@@ -114,12 +114,15 @@ def test_handle_bar_5min_force_path_synthesizes_signal():
 
 
 def test_force_entry_uses_close_as_entry_price():
-    """Force-entry takes current bar close as entry. Stop = close*0.99
-    (1% stop), target = close*1.02 (2% target = 2R)."""
+    """Force-entry takes current bar close as entry. Phase-79.7 widened
+    stops to 5% / target 12% so paper trades don't insta-stop on the
+    bid/ask spread. The synthetic-params block must use these
+    multipliers."""
     src = _bot_src()
-    # Synthetic params block must reference close-based pricing
-    assert "0.99" in src or "* 0.99" in src
-    assert "1.02" in src or "* 1.02" in src
+    # Stop multiplier 0.95 (5% stop)
+    assert "0.95" in src, "force-entry must use 0.95 (5% stop)"
+    # Target multiplier 1.12 (12% T2)
+    assert "1.12" in src, "force-entry must use 1.12 (12% T2)"
 
 
 def test_force_entry_only_when_not_in_position():

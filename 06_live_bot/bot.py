@@ -2820,9 +2820,13 @@ class Bot:
             # safe even if every trade loses.
             if FORCE_ENTRY_ON_BAR and len(ts.bars) >= 1 and not ts.in_position:
                 _entry = float(bar_dict["close"])
-                _stop = round(_entry * 0.99, 2)   # 1% stop
-                _target1 = round(_entry * 1.01, 2)  # 1% target (T1, +1R)
-                _target2 = round(_entry * 1.02, 2)  # 2% target (T2, +2R)
+                # Phase-79.7: WIDER stops/targets so paper trades don't
+                # instant-stop on bid/ask spread. 1% stop on a $2 stock
+                # = $0.02 distance = within bid/ask of any small-cap.
+                # Now: 5% stop, 8% T1, 12% T2 = real breathing room.
+                _stop = round(_entry * 0.95, 2)   # 5% stop
+                _target1 = round(_entry * 1.08, 2)  # 8% target (T1)
+                _target2 = round(_entry * 1.12, 2)  # 12% target (T2)
                 signal = True
                 params = {
                     "pole_candles": 1,
