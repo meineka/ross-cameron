@@ -88,7 +88,14 @@ class AlpacaRateLimitBlocked(Exception):
 # postmortem run when 50+ snapshots fire simultaneously).
 _rate_limit_state = "ok"  # "ok" | "blocked"
 _rate_limit_state_changed_ts = 0.0
-STATE_TRANSITION_DEBOUNCE_SEC = 60.0
+# Phase-82 (2026-05-19): bump debounce from 60s to 30min. The 60s
+# threshold was too tight — supervisor + watchdog + position_monitor
+# combined produce a steady 250/min vs 200/min cap, with each cap-hit
+# producing a new "blocked→ok→blocked" transition every few minutes.
+# Result: 30+ ALPACA RATE-LIMITED ntfy pushes per day. 30min debounce
+# collapses the spam to ≤2 pushes/hour while still alerting on real
+# sustained problems.
+STATE_TRANSITION_DEBOUNCE_SEC = 1800.0  # 30 min
 
 
 def _maybe_push_state_transition(new_state: str, source: str,

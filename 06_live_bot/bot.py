@@ -2168,12 +2168,18 @@ class Bot:
             self.alerter = None
 
     def _push_trade(self, kind: str, symbol: str, shares: int,
-                     price: float, pnl: float | None = None) -> None:
+                     price: float, pnl: float | None = None,
+                     stop: float | None = None,
+                     target: float | None = None) -> None:
         """Best-effort push notification for a trade event. Never raises.
 
         kind: short tag like "BUY", "T1", "T2", "QUICK", "MACD", "STOP".
               Used in the alert title.
         pnl:  realized P&L in $ for this fill (None for entries).
+        stop / target: Phase-82 — when present (on BUY events), the
+              ntfy body includes Stop, Target, and Risk:Reward ratio
+              so the operator's phone shows the full trade-plan
+              without opening the dashboard.
         """
         alerter = getattr(self, "alerter", None)
         if alerter is None:
@@ -2182,9 +2188,22 @@ class Bot:
             level = "info"
             day_pnl = self.day.realized_pnl
             if pnl is None:
-                # Entry — no P&L yet
+                # Entry — Phase-82: rich body with Stop/Target/R:R
                 title = f"BUY {symbol} {shares} @ ${price:.2f}"
-                body = f"day PnL ${day_pnl:+.2f}"
+                if stop is not None and target is not None and stop < price < target:
+                    risk = price - stop
+                    reward = target - price
+                    rr = reward / risk if risk > 0 else 0.0
+                    risk_usd = risk * shares
+                    reward_usd = reward * shares
+                    body = (
+                        f"Stop ${stop:.2f} (-{risk:.2f}/sh = -${risk_usd:.0f})\n"
+                        f"Target ${target:.2f} (+{reward:.2f}/sh = +${reward_usd:.0f})\n"
+                        f"R:R 1:{rr:.2f}\n"
+                        f"day PnL ${day_pnl:+.2f}"
+                    )
+                else:
+                    body = f"day PnL ${day_pnl:+.2f}"
             else:
                 arrow = "+" if pnl >= 0 else ""
                 title = f"{kind} {symbol} {shares} @ ${price:.2f} PnL {arrow}${pnl:.2f}"
@@ -2370,20 +2389,47 @@ class Bot:
                     # Phase-60 (ChatGPT P1 follow-up): auto-generate the
                     # no-trade postmortem JSON at HARD_FLAT so operators
                     # don't have to log-archaeology every dead-day.
+                    # Phase-82 fix: trades_completed_today is only
+                    # incremented when a SELL completes (T1/T2/Stop) in
+                    # the bot's manage_position path — but in force-mode
+                    # bracket SELL legs fire server-side and bot state
+                    # never updates. Result: postmortem-zero-trades was
+                    # sent yesterday despite 6 filled BUYs. Use
+                    # orders_submitted as the "did we trade at all?"
+                    # signal instead.
                     try:
                         from no_trade_postmortem import write_postmortem
                         out = write_postmortem()
                         log.info("HARD_FLAT postmortem written: %s", out.name)
-                        # Push a summary alert if we had 0 trades today
+                        # Phase-82: real "no-trade" signal = no orders
+                        # submitted at all. Force-mode bracket SELLs may
+                        # not update trades_completed_today.
+                        had_activity = (
+                            self.day.orders_submitted > 0 or
+                            self.day.trades_completed_today > 0 or
+                            self.day.bars_received > 100  # WS bar flow seen
+                        )
                         try:
                             alerter = getattr(self, "alerter", None)
-                            if alerter is not None and self.day.trades_completed_today == 0:
+                            if alerter is not None and not had_activity:
                                 alerter.send(
                                     "info",
                                     "📊 Daily Postmortem (0 trades)",
                                     body=(f"No trades today. Postmortem written "
                                           f"to {out.name}. Tomorrow's premarket "
                                           f"starts ~06:28 ET."),
+                                    force=True,
+                                )
+                            elif alerter is not None:
+                                # We DID trade — send the real summary
+                                alerter.send(
+                                    "info",
+                                    f"📊 EOD: {self.day.orders_submitted} orders, "
+                                    f"PnL ${self.day.realized_pnl:+.2f}",
+                                    body=(f"orders submitted={self.day.orders_submitted}, "
+                                          f"completed={self.day.trades_completed_today}, "
+                                          f"bars_received={self.day.bars_received}\n"
+                                          f"see {out.name} for details"),
                                     force=True,
                                 )
                         except Exception as _e:
@@ -3153,8 +3199,10 @@ class Bot:
             "actual_stop": actual_stop, "actual_t1": actual_t1, "actual_t2": actual_t2,
             "spy_mult": self.day.spy_size_multiplier,
         })
-        # Phase-30: push entry-fill to phone
-        self._push_trade("BUY", sym, actual_shares, actual_fill_price)
+        # Phase-30 + Phase-82: push entry-fill to phone with Stop, Target,
+        # and R:R so the operator's notification has the full trade plan.
+        self._push_trade("BUY", sym, actual_shares, actual_fill_price,
+                          stop=actual_stop, target=actual_t2)
         # Review-V2 P0.3 fix: ACTIVELY verify broker-side protection matches
         # our recomputed stop/TP. Before this was dead code. If actual_stop
         # diverges from planned stop (HSPT-style fill below stop), the

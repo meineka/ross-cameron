@@ -57,6 +57,11 @@ sys.path.insert(0, str(HERE))
 LOG_FILE = HERE / "supervisor.log"
 JSONL_FILE = HERE / "supervisor.jsonl"
 
+# Phase-82: streak counter for routine cleanup actions — quiet by
+# default, push only after 4+ consecutive routine cycles (signals real
+# instability, not just normal post-restart cleanup).
+_ROUTINE_STREAK = 0
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
@@ -464,14 +469,46 @@ def reconcile(issues: list[Issue], procs: list[ProcInfo],
                     dry_run, lambda lp=lp: _kill_pid(lp.interpreter_pid),
                 ))
 
-    # Push summary alert if we took actions
+    # Push summary alert if we took actions.
+    # Phase-82 (2026-05-19): user reported supervisor was pushing
+    # "delete_stale_bot_pid + spawn_fetch_loop" every cycle (~30 min)
+    # because those are ROUTINE post-restart cleanup that happens after
+    # every bot/watchdog respawn. Filter them out of the push criteria;
+    # they're still logged to alerts.log for postmortem, but the phone
+    # only buzzes for actions the operator actually needs to know about
+    # (kill_dup_bot, kill_dup_watchdog, etc).
     real_actions = [a for a in actions if a.success and not dry_run]
-    if real_actions:
+    ROUTINE_ACTIONS = {
+        "delete_stale_bot_pid",
+        "delete_stale_fetch_loop_pid",
+        "delete_stale_supervisor_pid",
+        "spawn_fetch_loop",     # fetch_loop dies sometimes; supervisor respawns
+        "spawn_supervisor",
+    }
+    notable = [a for a in real_actions if a.type not in ROUTINE_ACTIONS]
+    if notable:
         _push_alert(
             "warn", "🛠️ Supervisor auto-correction",
-            f"{len(real_actions)} action(s): " +
-            "; ".join(a.type for a in real_actions[:5]),
+            f"{len(notable)} notable action(s): " +
+            "; ".join(a.type for a in notable[:5]) +
+            (f" (+{len(real_actions) - len(notable)} routine)"
+             if len(real_actions) > len(notable) else ""),
         )
+    elif real_actions:
+        # All actions were routine — silent unless this is the 4th+ in a row
+        # (which indicates a real instability). Use a module-level counter.
+        global _ROUTINE_STREAK
+        _ROUTINE_STREAK = globals().get("_ROUTINE_STREAK", 0) + 1
+        if _ROUTINE_STREAK >= 4:
+            _push_alert(
+                "warn", "🛠️ Supervisor routine-loop",
+                f"{_ROUTINE_STREAK} consecutive cycles of routine cleanup: "
+                + ", ".join(sorted({a.type for a in real_actions})) +
+                " — check bot stability",
+            )
+            _ROUTINE_STREAK = 0  # reset after pushing
+    else:
+        _ROUTINE_STREAK = 0  # clean cycle, reset streak
     return actions
 
 

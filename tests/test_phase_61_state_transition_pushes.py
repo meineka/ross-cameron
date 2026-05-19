@@ -183,7 +183,12 @@ def test_no_push_when_state_unchanged(reset_guarded_state, fake_alerter):
 
 def test_debounce_constant_is_sane():
     """Spec: STATE_TRANSITION_DEBOUNCE_SEC must be >=30s (less and
-    flaps still get through) and <=300s (more and operator never gets
-    realtime feedback during a real outage)."""
+    flaps still get through) and <=3600s (1h max — Phase-82 bumped to
+    1800s/30min after rate-limit-spam day).
+
+    Phase-82 amendment: bumped upper bound 300s → 3600s because the
+    60s threshold was too tight under sustained 250/min vs 200 cap
+    flap, producing ~15 pushes/day. 1800s = 30min collapses spam to
+    ≤2/hr while still alerting on real sustained outages."""
     import guarded_alpaca
-    assert 30.0 <= guarded_alpaca.STATE_TRANSITION_DEBOUNCE_SEC <= 300.0
+    assert 30.0 <= guarded_alpaca.STATE_TRANSITION_DEBOUNCE_SEC <= 3600.0

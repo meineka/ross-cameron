@@ -1,26 +1,26 @@
 name: Daily Cameron-Bot Trading
 
-# 100% kostenlose Cloud-Lösung via GitHub Actions.
-# Läuft Mo–Fr automatisch von 12:00 CEST bis ~18:05 CEST (~6h).
-# Deckt das komplette Cameron-Trading-Window: Premarket-Scan 12:27,
-# Market-Open 15:30, HARD_FLAT 18:00.
-#
-# Limits:
-#   - Free Tier: 2000 min/Monat für private Repos, UNLIMITED für public.
-#   - Job-Timeout: max 6h pro Run.
-#   - Position-State zwischen Days: nicht persistent (container ephemeral).
-#     Aber das ist OK — Bot startet jeden Tag clean, HARD_FLAT schließt
-#     alle Positions am Vortag.
+# Phase-83 (2026-05-19): cloud deployment with force-mode + ntfy.
+# User requested cloud trading because home internet may go down.
+# Workflow runs Mo-Fr automatically, force-mode = max trades, all logs
+# uploaded as artifacts, ntfy pushes to user's phone.
 
 on:
   schedule:
-    # 09:47 UTC = 11:47 CEST (Sommerzeit) = 10:47 CET (Winterzeit)
-    # WICHTIG: NICHT top-of-hour (0 10) — GitHub-Schedule-Trigger werden bei
-    # Top-of-Hour wegen Server-Last-Spike oft delayed oder komplett skipped
-    # (siehe https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#schedule).
-    # 09:47 UTC = 40min Buffer vor 12:27 CEST Pre-Market-Scan, off-hour minute.
-    - cron: '47 9 * * 1-5'
-  workflow_dispatch:    # erlaubt manuellen Trigger via UI
+    # 13:25 UTC = 15:25 CEST = 09:25 ET = 5 min before NY market open.
+    # Avoid 0/30 minute marks (GitHub-Schedule-Trigger gets delayed at
+    # top-of-hour from server-load spikes — see GitHub docs).
+    - cron: '23 13 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      strategy_variant:
+        description: "Strategy variant (strict|relaxed|loose|ultra|force)"
+        required: false
+        default: "force"
+      skip_hard_flat:
+        description: "Skip HARD_FLAT (allow afternoon trading) — 0 or 1"
+        required: false
+        default: "1"
 
 jobs:
   trade:
@@ -44,10 +44,6 @@ jobs:
 
       - name: Quick tests (smoke)
         run: |
-          # Tests-only run; exclude pilot-data-dependent tests + the OLD
-          # REVIEW_PACKAGE mirror dir + flaky-on-CI deploy_safe test
-          # (passes locally on Win but Linux psutil-mock interaction
-          # differs — not a live-bot concern).
           python -m pytest tests/ -q \
             --ignore=tests/test_replay_regression.py \
             --ignore=tests/test_pilot_baseline.py \
@@ -56,33 +52,44 @@ jobs:
           APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
 
-      - name: Run bot in daemon mode (timeout-bounded)
-        timeout-minutes: 340     # bot läuft 5h40min, dann clean exit
-        continue-on-error: true   # damit artifacts trotzdem uploaded werden
+      - name: Run bot in daemon mode (force-mode VOLLGAS)
+        timeout-minutes: 340
+        continue-on-error: true
         run: |
           cd 06_live_bot
-          # Bot startet, schläft bis Pre-Market (12:27 CEST = ~27min),
-          # tradet bis HARD_FLAT 12:00 ET = 18:00 CEST, dann loop to sleep
-          # → wird durch timeout-minutes oben sauber gekillt
+          # Phase-83: VOLLGAS mode for the cloud — force entries on every
+          # 1-min bar, wide 5%/12% bracket SL/TP, all vetos disabled.
           python -u bot.py --daemon
         env:
           APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+          # Phase-83: deploy force-mode by default, with HARD_FLAT moved
+          # to 15:55 NY = 19:55 UTC so the bot trades the full session.
+          STRATEGY_VARIANT: ${{ github.event.inputs.strategy_variant || 'force' }}
+          SKIP_HARD_FLAT_TODAY: ${{ github.event.inputs.skip_hard_flat || '1' }}
+          # ntfy push — user-controlled topic via GitHub Secret
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           TZ: UTC
 
-      - name: Upload bot logs + results
-        if: always()    # auch bei timeout
+      - name: Upload bot logs + results (ALL artifacts)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bot-run-${{ github.run_id }}
           path: |
             06_live_bot/daemon.log
             06_live_bot/bot.log
+            06_live_bot/bot.log.*
+            06_live_bot/alerts.log
             06_live_bot/results/
             06_live_bot/trades_live.jsonl
             06_live_bot/slippage.jsonl
             06_live_bot/status.json
             06_live_bot/watchlist_today.json
+            06_live_bot/order_lifecycle.jsonl
+            06_live_bot/market_data_calls.jsonl
+            06_live_bot/alpaca_api_calls.jsonl
+            06_live_bot/no_trade_postmortem_*.json
           retention-days: 30
           if-no-files-found: warn
 
@@ -91,15 +98,32 @@ jobs:
         run: |
           echo "## Trading-Day Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f 06_live_bot/daemon.log ]; then
-            echo "### Day-Summary aus daemon.log" >> $GITHUB_STEP_SUMMARY
+          echo "**Strategy:** ${{ github.event.inputs.strategy_variant || 'force' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**SKIP_HARD_FLAT:** ${{ github.event.inputs.skip_hard_flat || '1' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          # Phase-83: trade summary from bot.log
+          if [ -f 06_live_bot/bot.log ]; then
+            echo "### Trade Activity (BUYs / FILLs / POS-*)" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -A 15 "DAY SUMMARY" 06_live_bot/daemon.log | tail -20 >> $GITHUB_STEP_SUMMARY || echo "(no summary)" >> $GITHUB_STEP_SUMMARY
+            grep -E "(FORCE-ENTRY|BRACKET-BUY .*FILLED|POS-OPEN|POS-CLOSE|TP-TRIGGER|STOP-TRIGGER|HARD FLAT|EOD:)" 06_live_bot/bot.log | tail -50 >> $GITHUB_STEP_SUMMARY || echo "(no trade events)" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Trade-event counts" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "FORCE-ENTRY: $(grep -c FORCE-ENTRY 06_live_bot/bot.log)" >> $GITHUB_STEP_SUMMARY
+            echo "FILLED:      $(grep -c 'FILLED @' 06_live_bot/bot.log)" >> $GITHUB_STEP_SUMMARY
+            echo "POS-OPEN:    $(grep -c POS-OPEN 06_live_bot/bot.log)" >> $GITHUB_STEP_SUMMARY
+            echo "POS-CLOSE:   $(grep -c POS-CLOSE 06_live_bot/bot.log)" >> $GITHUB_STEP_SUMMARY
+            echo "ERRORS:      $(grep -c ' ERROR ' 06_live_bot/bot.log)" >> $GITHUB_STEP_SUMMARY
+            echo "CRITICAL:    $(grep -c CRITICAL 06_live_bot/bot.log)" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
-          if [ -f 06_live_bot/results/*.json ]; then
-            echo "### Results JSON" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            cat 06_live_bot/results/*.json >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+          # ntfy push the summary to user's phone (Phase-83)
+          if [ -n "${{ secrets.NTFY_TOPIC }}" ]; then
+            FORCE_COUNT=$(grep -c FORCE-ENTRY 06_live_bot/bot.log 2>/dev/null || echo 0)
+            FILLED_COUNT=$(grep -c 'FILLED @' 06_live_bot/bot.log 2>/dev/null || echo 0)
+            ERR_COUNT=$(grep -c ' ERROR ' 06_live_bot/bot.log 2>/dev/null || echo 0)
+            curl -s -H "Title: GitHub Cloud Day Summary" \
+                 -d "force_entries=$FORCE_COUNT filled=$FILLED_COUNT errors=$ERR_COUNT — see workflow run for full log" \
+                 "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}" || true
           fi
