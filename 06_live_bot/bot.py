@@ -2370,8 +2370,42 @@ class Bot:
                     self._pending_ws_resubscribe = False
                     backoff.reset()  # successful subscribe → reset Backoff
 
-                    # Run WS in thread + monitor for re-subscribe-flag
-                    ws_task = asyncio.create_task(asyncio.to_thread(ws.run))
+                    # Phase-76 (WS-storm fix 2026-05-19): if a PREVIOUS
+                    # ws.run() thread is still alive (ws_task got cancelled
+                    # but the OS thread didn't actually die — asyncio.cancel
+                    # can't terminate threads), skip this iteration.
+                    # Otherwise we'd add a SECOND ws.run() thread on top
+                    # of the still-running first one. The Phase-43 singleton
+                    # returns the same StockDataStream instance for both
+                    # threads, but each thread spins its OWN event loop
+                    # and BOTH call _run_forever → 2x WS connections to
+                    # Alpaca → "connection limit exceeded" cascade.
+                    #
+                    # Today's incident (2026-05-19 17:39): 991 WS connection
+                    # attempts in 60min, all hitting TimeoutError because
+                    # multiple zombie threads were each trying to connect.
+                    prev_thread = getattr(self, "_ws_run_thread", None)
+                    if prev_thread is not None and prev_thread.is_alive():
+                        log.warning("prev ws.run() thread still alive — "
+                                     "skipping new spawn (avoid zombie-stack)")
+                        await asyncio.sleep(5)
+                        continue
+
+                    # Run ws.run() in a thread WE OWN (not asyncio.to_thread)
+                    # so we can check is_alive() on next iteration.
+                    import threading as _th
+                    self._ws_run_thread = _th.Thread(
+                        target=ws.run, name="ws-run", daemon=True,
+                    )
+                    self._ws_run_thread.start()
+                    # ws_task wraps the join-wait so we can asyncio.wait_for
+                    # it in the resubscribe-flag-check loop below. If the
+                    # join-wait task gets cancelled, the underlying ws.run
+                    # thread keeps running — that's the leak we now CATCH
+                    # via the is_alive() check at the top of the next iter.
+                    ws_task = asyncio.create_task(
+                        asyncio.to_thread(self._ws_run_thread.join)
+                    )
                     while not ws_task.done():
                         await asyncio.sleep(5)
                         if self._pending_ws_resubscribe:
