@@ -2908,11 +2908,26 @@ class Bot:
             avg_vol = sum(b.get("volume", 0) for b in list(ts.bars)[-20:]) / 20
         except Exception:
             avg_vol = None
+        # Phase-79.1: in force-mode the liquidity-cap (1% of avg-vol over
+        # the rolling 20-bar window) drives shares to 0 when force-entry
+        # fires on bars=2 because the rolling window is mostly zeros.
+        # Bypass the volume signal entirely in force-mode — paper account
+        # doesn't care about real liquidity, this is an execution-path
+        # stress test.
+        if FORCE_ENTRY_ON_BAR:
+            avg_vol = None
         shares = compute_position_size(
             params["entry_price"], params["stop_price"], equity, self.day,
             avg_volume=avg_vol if avg_vol and avg_vol > 0 else None,
             ny_time=ny_time,
         )
+        # Phase-79.2: force-mode floor — even when compute_position_size
+        # returns 0 (e.g. quarter-size during pre-10am ET, or other
+        # multipliers compound to <1), inject 5 shares so the trade
+        # actually fires.
+        if FORCE_ENTRY_ON_BAR and shares < 1:
+            shares = 5
+            log.info("  FORCE-SIZE %s: applying 5-share floor (compute returned 0)", sym)
         if shares < 1:
             self.day.patterns_rejected_size_zero += 1
             self.day.last_no_trade_reason = f"{sym}: position size zero"
