@@ -3300,6 +3300,14 @@ class Bot:
                 return
 
         # T1 — Review-V2 P0.1: confirm-variant
+        # Phase-81.1: force-mode bracket TP-limit-sell at T2 is server-side.
+        # Skip manual T1 in force-mode (we only set 1 take-profit = T2).
+        if FORCE_ENTRY_ON_BAR and bar["high"] >= ts.target2_price:
+            log.info("TP-TRIGGER %s: bar high=$%.2f hit T2=$%.2f "
+                     "(bracket TP fires server-side)",
+                     ts.symbol, float(bar["high"]), ts.target2_price)
+            ts.in_position = False
+            return
         if not ts.half_filled and bar["high"] >= ts.target1_price and ts.shares >= 2:
             half = ts.shares // 2
             res = self.executor.submit_sell_with_confirm(
@@ -3362,8 +3370,26 @@ class Bot:
             ts.in_position = False
             return
         # Stop / BE — Review-V2 P0.1: confirm-variant with market-fallback
+        # Phase-81.1: When the position was opened via BRACKET (force-mode
+        # AND normal Cameron-mode both use bracket-buy), Alpaca has the
+        # SL leg armed server-side. A manual STOP submit here gets
+        # REJECTED ("wash_trade" or "no_shares_available") because the
+        # contingent OCO already owns the shares. Result: 100% of stop-
+        # hit attempts log CRITICAL "STOP NOT-FILLED" noise even though
+        # the bracket WILL fire correctly. Fix: trust the bracket — when
+        # bar["low"] hits the stop level, mark the position as closing
+        # and rely on Phase-81 position_monitor to log the actual exit
+        # once Alpaca's bracket SL leg fills server-side.
         stop = ts.stop_price if not ts.half_filled else ts.entry_price
         if bar["low"] <= stop:
+            if FORCE_ENTRY_ON_BAR:
+                # Force-mode: bracket SL is the single source of truth.
+                # Don't submit a duplicate sell; just note the trigger.
+                log.info("STOP-TRIGGER %s: bar low=$%.2f hit stop=$%.2f "
+                         "(bracket SL fires server-side)",
+                         ts.symbol, float(bar["low"]), stop)
+                ts.in_position = False  # let position_monitor confirm
+                return
             res = self.executor.submit_sell_with_confirm(
                 ts.symbol, ts.shares, stop - SLIPPAGE_CENTS, "stop_or_BE",
                 market_fallback=True,  # critical: must exit on stop-hit
