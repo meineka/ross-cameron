@@ -93,7 +93,9 @@ Compress-Archive -Path $items.FullName -DestinationPath $tempZip -CompressionLev
 # or any secret-like content slipped through.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $z = [System.IO.Compression.ZipFile]::OpenRead($tempZip)
-$names = $z.Entries | ForEach-Object { $_.FullName }
+# Phase-77.1: Compress-Archive on Windows stores entries with backslashes
+# in FullName. Normalize to forward-slash for cross-platform matching.
+$names = $z.Entries | ForEach-Object { $_.FullName -replace '\\', '/' }
 
 # 5a: required-file presence check (Phase-77 ChatGPT 4x ask)
 $required = @(
