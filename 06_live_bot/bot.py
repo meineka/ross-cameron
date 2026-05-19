@@ -2060,6 +2060,13 @@ class Bot:
         self.executor = AlpacaExecutor(api_key, api_secret, paper=True, dry_run=dry_run)
         self.tickers: dict[str, TickerState] = {}
         self.day = DayState(date=str(datetime.now(timezone.utc).date()))
+        # Phase-77 (ChatGPT 20260518_2103 ask #3): initialize TV-scan
+        # fields to "pending" so status.json never reports None — the
+        # operator's "did TV work?" question now has a real answer from
+        # the very first status.json write, even before the scan runs.
+        self.day.last_tradingview_scan_status = "pending"
+        self.day.scanner_source = "pending"
+        self.day.fallback_used = False
         self.logger = TradeLogger()
         self.api_key = api_key
         self.api_secret = api_secret
@@ -2182,7 +2189,12 @@ class Bot:
         # 1. Premarket-Scan — Audit-Iter 30 (Bug WP-6): bei Mid-Day-Resume
         # erst load_watchlist_with_scores versuchen statt fresh re-scan.
         # Spart 60-90s scan-time bei Cloud-Restart innerhalb Trading-Window.
+        # Phase-77 (ChatGPT 20260518_2103 ask #3): track WHICH path produced
+        # the watchlist so status.json answers operator's "where did this
+        # watchlist come from?" without grepping logs.
         candidates = None
+        used_disk_resume = False
+        ran_fresh_scan = False
         loaded = load_watchlist_with_scores()
         if loaded is not None and loaded[0]:
             syms, scores = loaded
@@ -2191,22 +2203,36 @@ class Bot:
                 TickerState(symbol=s, rank=i+1, score=float(scores.get(s, 0.0)))
                 for i, s in enumerate(syms)
             ]
+            used_disk_resume = True
         if not candidates:
             candidates = await asyncio.to_thread(premarket_scan, TOP_N)
-        # Phase-73 (ChatGPT 20260518_2040 P1): write TV scan status into
-        # DayState so status.json answers "did TV work?" without log-grep.
+            ran_fresh_scan = True
+        # Phase-77 (ChatGPT 20260518_2103 ask #3): distinguish 3 sources.
+        # The old Phase-73 logic confused MID-DAY-RESUME with yfinance-
+        # fallback because it only read _LAST_TV_SCAN_STATE (which stays
+        # at init values when no scan ran). Now we look at WHO produced
+        # the candidates list, not at the stale TV-state dict.
         tv_state = _LAST_TV_SCAN_STATE
-        self.day.last_tradingview_scan_status = tv_state.get("status")
-        if tv_state.get("status") == "ok" and tv_state.get("result_count", 0) > 0:
-            self.day.scanner_source = "tradingview"
+        if used_disk_resume:
+            # Watchlist came from a previous scan persisted to disk.
+            # The disk file doesn't track what produced it originally,
+            # so we can't say tradingview vs yfinance — but we CAN say
+            # this run did not call any scanner.
+            self.day.last_tradingview_scan_status = "skipped_disk_resume"
+            self.day.scanner_source = "disk_cache_resume"
             self.day.fallback_used = False
-        elif candidates:
-            # TV failed/empty but yfinance produced rows
-            self.day.scanner_source = "yfinance_fallback"
-            self.day.fallback_used = True
-        else:
-            self.day.scanner_source = "none"
-            self.day.fallback_used = False
+        elif ran_fresh_scan:
+            self.day.last_tradingview_scan_status = tv_state.get("status")
+            if tv_state.get("status") == "ok" and tv_state.get("result_count", 0) > 0:
+                self.day.scanner_source = "tradingview"
+                self.day.fallback_used = False
+            elif candidates:
+                # TV failed/empty but yfinance produced rows
+                self.day.scanner_source = "yfinance_fallback"
+                self.day.fallback_used = True
+            else:
+                self.day.scanner_source = "none"
+                self.day.fallback_used = False
         if not candidates:
             self.day.last_no_trade_reason = "no_watchlist"
             log.warning("=" * 60)

@@ -46,6 +46,13 @@ Konsolidiert aus 42 Answer-Files in `99_Claude_Chatgpt/`. Letzte verarbeitet:
 | WS `await stop_ws()` fix (Linux-CI never-awaited bug) | 68 | 17ca2db |
 | SKIP_HARD_FLAT_TODAY env-var (afternoon-trading override) | 70 | f23ecb9 |
 | **Operator-diagnostic fields in status.json** (alpaca_blocked_count, scanner_source, fallback_used) | **(today)** | **8b23923** |
+| STRATEGY_VARIANT=ultra (looser entries + skip VWAP/MACD/FBO vetos) | 72 | 3300f15 |
+| `.env`-export-leak P0 + TV-status fields + force-trade fail-closed | 73 | 434fdea |
+| PowerShell-native healthcheck (30-min Windows Scheduled Task) | 74 | b2c325f |
+| Backtest universe-mismatch fix — TOP-10 per day matches live bot | 75 | 740e25c |
+| WS-storm zombie-thread fix — owned threading.Thread for ws.run | 76 | 1e9cbe4 |
+| **Atomic export-write (temp → validate → rename)** | **77** | **(this commit)** |
+| **TV-status mid-day-resume bug — `disk_cache_resume` source label** | **77** | **(this commit)** |
 
 ## ⚠️ Noch offen — verbleibende P1 aus 20260517_2233
 
