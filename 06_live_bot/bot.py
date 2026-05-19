@@ -2813,7 +2813,8 @@ class Bot:
             if FORCE_ENTRY_ON_BAR and len(ts.bars) >= 2 and not ts.in_position:
                 _entry = float(bar_dict["close"])
                 _stop = round(_entry * 0.99, 2)   # 1% stop
-                _target = round(_entry * 1.02, 2)  # 2% target = 2R
+                _target1 = round(_entry * 1.01, 2)  # 1% target (T1, +1R)
+                _target2 = round(_entry * 1.02, 2)  # 2% target (T2, +2R)
                 signal = True
                 params = {
                     "pole_candles": 1,
@@ -2821,12 +2822,13 @@ class Bot:
                     "pole_height": _entry - _stop,
                     "entry_price": _entry,
                     "stop_price": _stop,
-                    "target_price": _target,
+                    "target1": _target1,
+                    "target2": _target2,
                     "_force_mode": True,
                 }
                 log.info("FORCE-ENTRY %s: synthetic signal close=$%.2f "
-                         "stop=$%.2f target=$%.2f (Phase-79)",
-                         sym, _entry, _stop, _target)
+                         "stop=$%.2f T1=$%.2f T2=$%.2f (Phase-79)",
+                         sym, _entry, _stop, _target1, _target2)
             else:
                 # Detect bull-flag (normal path)
                 signal, params = detect_bull_flag(list(ts.bars))
@@ -2979,13 +2981,18 @@ class Bot:
         # module sitting dead — now WIRED into the live entry path).
         # Validates two-sided quote exists and spread is reasonable BEFORE
         # we submit, preventing the HSPT-style stale-trade-price disaster.
-        quote_ok, quote_reason = self._pre_entry_quote_safety(sym)
-        if not quote_ok:
-            self.day.patterns_rejected_quote_safety = getattr(
-                self.day, "patterns_rejected_quote_safety", 0) + 1
-            self.day.last_no_trade_reason = f"{sym}: quote-safety {quote_reason}"
-            log.warning("  REJECT %s: quote-safety failed (%s)", sym, quote_reason)
-            return
+        # Phase-79.3: force-mode bypasses quote-safety. Paper trades don't
+        # have the stale-quote disaster risk and the 5-min-bar entry
+        # naturally has bar-age ~20-60s (>10s gate). Force-mode is for
+        # execution-path stress testing — accept stale quotes.
+        if not FORCE_ENTRY_ON_BAR:
+            quote_ok, quote_reason = self._pre_entry_quote_safety(sym)
+            if not quote_ok:
+                self.day.patterns_rejected_quote_safety = getattr(
+                    self.day, "patterns_rejected_quote_safety", 0) + 1
+                self.day.last_no_trade_reason = f"{sym}: quote-safety {quote_reason}"
+                log.warning("  REJECT %s: quote-safety failed (%s)", sym, quote_reason)
+                return
 
         # Submit als BRACKET — Stop+TP broker-seitig, Position nie 'nackt'
         log.info("  SUBMITTING BRACKET-BUY %s %d shares  entry=$%.2f STOP=$%.2f TP2=$%.2f (rank=%d, spy_mult=%.1f)",
