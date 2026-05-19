@@ -214,8 +214,26 @@ def install_patch() -> bool:
                     sleep_for = min(CAP_SLEEP_SEC,
                                      BASE_SLEEP_SEC * (2 ** consec_value_errors))
                 consec_value_errors = min(consec_value_errors + 1, 6)
-                log.warning("ws backoff %.1fs after %s (consec=%d)",
-                             sleep_for, type(e).__name__, consec_value_errors)
+                # Phase-78 (2026-05-19): reduce WS-storm log noise. In a
+                # 1622×-event day, the same "ws backoff … TimeoutError
+                # (consec=6)" line repeated 1622 times — operator can't
+                # see useful events through the spam. Now: WARNING only
+                # on (a) first occurrence in a consec sequence (consec=1)
+                # AND (b) the cap-out boundary (consec=6). All others
+                # demoted to DEBUG. This preserves the storm-signal but
+                # caps cost at ~2 lines per cycle instead of 1 per retry.
+                err_cls = type(e).__name__
+                last_err_cls = getattr(self, "_phase78_last_err_cls", None)
+                err_cls_changed = err_cls != last_err_cls
+                if (consec_value_errors == 1 or
+                        consec_value_errors == 6 or
+                        err_cls_changed):
+                    log.warning("ws backoff %.1fs after %s (consec=%d)",
+                                 sleep_for, err_cls, consec_value_errors)
+                else:
+                    log.debug("ws backoff %.1fs after %s (consec=%d)",
+                               sleep_for, err_cls, consec_value_errors)
+                self._phase78_last_err_cls = err_cls
                 try:
                     await asyncio.sleep(sleep_for)
                 except asyncio.CancelledError:

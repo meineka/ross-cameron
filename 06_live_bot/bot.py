@@ -95,12 +95,24 @@ from catalyst_filter import passes_catalyst_filter
 from delisted_cache import filter_known_delisted, mark_batch_delisted
 from pump_dump_filter import size_multiplier as pd_size_multiplier, is_pump_dump_risk
 
+# Phase-78 (2026-05-19): rotation on bot.log. Old plain FileHandler grew
+# to 15.3 MB / 194K lines / 10 days unchecked. RotatingFileHandler caps
+# at 5 MB per file × 5 backups = max 30 MB on disk. Operator's tail of
+# bot.log always shows recent activity; older windows are bot.log.1..5.
+from logging.handlers import RotatingFileHandler as _RotatingFileHandler
+_BOT_LOG_PATH = Path(__file__).parent / "bot.log"
+_bot_file_handler = _RotatingFileHandler(
+    _BOT_LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8"
+)
+_bot_file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s %(levelname)s [%(name)s] %(message)s"
+))
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(Path(__file__).parent / "bot.log", encoding="utf-8"),
+        _bot_file_handler,
     ],
 )
 log = logging.getLogger("bot")
@@ -2256,8 +2268,18 @@ class Bot:
         log.info("Subscribing to Alpaca-WS for %d symbols (IEX-Feed)…", len(self.tickers))
 
         async def on_bar(bar):
-            """1-Min-WS-Bar → Aggregator → ggf. 5-Min-Bar → handle_bar."""
+            """1-Min-WS-Bar → Aggregator → ggf. 5-Min-Bar → handle_bar.
+
+            Phase-78: emit visibility log at structured thresholds
+            (bars_received == 1, 10, 100, then every 100). Operator can
+            see whether bars are flowing without grepping for handle_bar
+            calls or watching status.json."""
             self.day.bars_received += 1
+            br = self.day.bars_received
+            if br == 1 or br == 10 or br == 100 or (br > 0 and br % 100 == 0):
+                log.info("BARS-FLOW: %d 1-min bars received (last=%s @ %s)",
+                         br, getattr(bar, "symbol", "?"),
+                         getattr(bar, "timestamp", "?"))
             try:
                 self.day.last_ws_bar_ts = str(getattr(bar, "timestamp", None))
                 sym = bar.symbol
@@ -2767,7 +2789,26 @@ class Bot:
                     self.day.last_no_trade_reason = f"{sym}: pole extended"
                 else:
                     self.day.last_no_trade_reason = f"{sym}: no pattern detected"
-                # else: no pattern detected at all (no _veto reason)
+                # Phase-78: emit structured DEBUG (not INFO — fires per
+                # bar × symbol so high volume) but ALSO emit INFO once
+                # per minute summarizing the latest reject across all
+                # symbols. The summary is what the operator actually
+                # needs in bot.log; the per-bar DEBUG line is for
+                # postmortem grep.
+                bars_n = len(ts.bars)
+                log.debug("BAR-5M %s bars=%d veto=%s reason=%s",
+                          sym, bars_n, veto or "no_pattern",
+                          self.day.last_no_trade_reason)
+                # Time-thrifty summary: only once per ~5 min per symbol
+                last_summary = getattr(ts, "_last_no_pattern_summary_ts", None)
+                now_ts = bar_dict.get("timestamp")
+                if last_summary is None or (
+                    now_ts is not None and
+                    (now_ts - last_summary).total_seconds() >= 300
+                ):
+                    log.info("BAR-5M %s bars=%d veto=%s",
+                             sym, bars_n, veto or "no_pattern")
+                    ts._last_no_pattern_summary_ts = now_ts
                 return
             # Guard gegen unvollständige params
             required = ("pole_candles", "flag_candles", "pole_height", "entry_price", "stop_price")
