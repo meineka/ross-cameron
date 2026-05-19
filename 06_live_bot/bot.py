@@ -2959,23 +2959,32 @@ class Bot:
             log.warning("  REJECT %s: %s", sym, reason2)
             return
 
-        # #6 SPY-Size-Multiplier anwenden
-        shares = int(shares * self.day.spy_size_multiplier)
-        # Pump-Dump-Risiko: extremer Score ODER extreme Pct+RVOL-Kombi →
-        # Position drastisch reduzieren. Audit-Iter 22 (Bug PD-1):
-        # vorher nur Score gepasst, secondary-Filter (>100% + >50x RVOL)
-        # war dead code. Jetzt voller Filter.
-        pd_mult = pd_size_multiplier(ts.score, ts.intraday_pct, ts.rvol_proxy)
-        if pd_mult < 1.0:
-            shares = int(shares * pd_mult)
-            log.warning("  PUMP-DUMP-RISK %s (score=%.0f pct=%.1f rvol=%.1f) → size %.0fx",
-                        sym, ts.score, ts.intraday_pct, ts.rvol_proxy, pd_mult)
-        if shares < 1:
-            self.day.patterns_rejected_size_zero += 1
-            self.day.last_no_trade_reason = f"{sym}: position size zero after multiplier"
-            log.info("  REJECT %s: shares=0 nach SPY-multiplier %.2fx",
-                     sym, self.day.spy_size_multiplier)
-            return
+        # Phase-79.5: in force-mode, bypass SPY-multiplier and pump-dump
+        # filter entirely. They legitimately zero shares for the
+        # ultra-runner symbols (WNW +70% gap with 405x RVOL is exactly
+        # the "pump-dump" pattern those filters were designed to refuse)
+        # but force-mode is specifically a stress-test of the execution
+        # path, not the strategy.
+        if not FORCE_ENTRY_ON_BAR:
+            # #6 SPY-Size-Multiplier anwenden
+            shares = int(shares * self.day.spy_size_multiplier)
+            # Pump-Dump-Risiko: extremer Score ODER extreme Pct+RVOL-Kombi →
+            # Position drastisch reduzieren.
+            pd_mult = pd_size_multiplier(ts.score, ts.intraday_pct, ts.rvol_proxy)
+            if pd_mult < 1.0:
+                shares = int(shares * pd_mult)
+                log.warning("  PUMP-DUMP-RISK %s (score=%.0f pct=%.1f rvol=%.1f) → size %.0fx",
+                            sym, ts.score, ts.intraday_pct, ts.rvol_proxy, pd_mult)
+            if shares < 1:
+                self.day.patterns_rejected_size_zero += 1
+                self.day.last_no_trade_reason = f"{sym}: position size zero after multiplier"
+                log.info("  REJECT %s: shares=0 nach SPY-multiplier %.2fx",
+                         sym, self.day.spy_size_multiplier)
+                return
+        else:
+            # Force-mode floor — multipliers bypassed, just guarantee >=5
+            if shares < 5:
+                shares = 5
 
         # Review-V2 P0.4: pre-entry quote-safety-check (was the safe_bracket
         # module sitting dead — now WIRED into the live entry path).
