@@ -133,8 +133,10 @@ except Exception:
 
 # Phase-69: add "loose" variant for emergency "no trade today" sessions
 # Phase-72: add "ultra" variant — looser than loose + skips entry vetos
+# Phase-79: add "force" variant — bypasses pattern detector entirely,
+#           paper-only stress test ("alle constraints weg, alle 5 min").
 STRATEGY_VARIANT = _os_phase66.environ.get("STRATEGY_VARIANT", "strict").lower()
-if STRATEGY_VARIANT not in ("strict", "relaxed", "loose", "ultra"):
+if STRATEGY_VARIANT not in ("strict", "relaxed", "loose", "ultra", "force"):
     STRATEGY_VARIANT = "strict"  # safe default
 
 # ─── Cameron-Constants (mirror constraints.yaml) ────────────────────────────
@@ -226,6 +228,33 @@ if STRATEGY_VARIANT == "ultra":
     BREAKOUT_VOL_FACTOR = 1.0    # ultra-algo: any breakout volume
     DISABLE_ENTRY_VETOS = True   # ultra-algo: skip VWAP/MACD/FBO checks
 
+# Phase-79 (2026-05-19, user request "mach mal alle constraints weg dass
+# er free traden kann und lass ihn alle 5 minuten was prüfen"): bypass
+# the pattern detector entirely. Every 5-min bar check forces a synthetic
+# BUY signal at the current close with tight 1% stop / 2% target.
+#
+# This is a PAPER-ONLY end-to-end stress test of the trade-execution
+# path — NOT a strategy. Position size is tiny (fixed-shares) to keep
+# from burning the paper $100k on garbage. The detector / vetos / 3rd-
+# pullback / pump-dump filter are ALL bypassed when the "force" variant
+# is active.
+FORCE_ENTRY_ON_BAR = False  # phase-79 flag; force-variant sets True
+if STRATEGY_VARIANT == "force":
+    # force-algo (Phase-79): unconditional entry on each 5-min bar.
+    # Inherits ultra-loose thresholds (in case detector still gets
+    # called for any reason) but the real entry path is the synthetic
+    # signal in handle_bar_5min.
+    DAILY_GAIN_MIN_PCT = 0.0   # force-algo: scan keeps anything
+    RVOL_MIN_PROXY = 1.0       # force-algo: any RVOL
+    POLE_MIN_CANDLES, POLE_MAX_CANDLES = 1, 30  # force-algo
+    POLE_MIN_MOVE_PCT = 0.0    # force-algo: any pole shape
+    POLE_TOPPING_TAIL_MAX = 1.0  # force-algo: ignored
+    FLAG_MIN_CANDLES, FLAG_MAX_CANDLES = 1, 30  # force-algo
+    FLAG_RETRACE_MAX_PCT = 100.0
+    BREAKOUT_VOL_FACTOR = 0.0    # force-algo: any volume
+    DISABLE_ENTRY_VETOS = True
+    FORCE_ENTRY_ON_BAR = True
+
 # Phase-66 (2026-05-17): two-variant strategy support.
 #
 # STRATEGY_VARIANT env var picks the position-sizing risk profile:
@@ -281,6 +310,15 @@ elif STRATEGY_VARIANT == "ultra":
     DAILY_MAX_LOSS_USD = 300.0          # ultra-algo
     DAILY_GOAL_USD = 300.0              # ultra-algo
     EQUITY_RISK_CAP_PCT = 2.0           # ultra-algo
+elif STRATEGY_VARIANT == "force":
+    # force-algo (Phase-79): PAPER-ONLY stress test. Position size is
+    # tiny ($20 max loss/trade) so 100 garbage trades = $2000 max loss
+    # — survivable on $100k paper. Daily cap stays at $300 to fail-stop
+    # if force-mode becomes chronically losing.
+    MAX_LOSS_PER_TRADE_USD = 20.0      # force-algo: small bets
+    DAILY_MAX_LOSS_USD = 300.0          # force-algo: same fail-stop
+    DAILY_GOAL_USD = 300.0              # force-algo
+    EQUITY_RISK_CAP_PCT = 0.5           # force-algo: half of strict (tiny shares)
 else:
     # strict-algo (default Cameron-strict): conservative paper-mode sizing
     MAX_LOSS_PER_TRADE_USD = 50.0      # strict-algo
@@ -2765,8 +2803,33 @@ class Bot:
                 self.day.last_no_trade_reason = reason
                 return
 
-            # Detect bull-flag
-            signal, params = detect_bull_flag(list(ts.bars))
+            # Phase-79 (2026-05-19): FORCE_ENTRY_ON_BAR bypasses the
+            # pattern detector entirely. On every 5-min bar where the
+            # symbol has at least 2 bars AND we're not already in a
+            # position, fabricate an entry signal at the current close
+            # with a 1% stop / 2% target. Position-size envelope (force-
+            # algo: $20 max loss / 0.5% equity) keeps the paper account
+            # safe even if every trade loses.
+            if FORCE_ENTRY_ON_BAR and len(ts.bars) >= 2 and not ts.in_position:
+                _entry = float(bar_dict["close"])
+                _stop = round(_entry * 0.99, 2)   # 1% stop
+                _target = round(_entry * 1.02, 2)  # 2% target = 2R
+                signal = True
+                params = {
+                    "pole_candles": 1,
+                    "flag_candles": 1,
+                    "pole_height": _entry - _stop,
+                    "entry_price": _entry,
+                    "stop_price": _stop,
+                    "target_price": _target,
+                    "_force_mode": True,
+                }
+                log.info("FORCE-ENTRY %s: synthetic signal close=$%.2f "
+                         "stop=$%.2f target=$%.2f (Phase-79)",
+                         sym, _entry, _stop, _target)
+            else:
+                # Detect bull-flag (normal path)
+                signal, params = detect_bull_flag(list(ts.bars))
             if not signal:
                 # Review-V2 P1.8: increment per-veto-reason counters.
                 # detect_bull_flag now returns {"_veto": "<reason>"} when a
@@ -2827,8 +2890,9 @@ class Bot:
                  params["pole_height"], params["entry_price"], params["stop_price"])
 
         # Pullback-count check (3rd+ pullback skip)
+        # Phase-79: force-algo bypasses this — unlimited entries per symbol
         ts.pullback_count_today += 1
-        if ts.pullback_count_today >= 3:
+        if ts.pullback_count_today >= 3 and not FORCE_ENTRY_ON_BAR:
             self.day.patterns_rejected_pullback_count += 1
             self.day.last_no_trade_reason = f"{sym}: 3rd-pullback skip"
             log.info("  REJECT %s: 3rd+ pullback today (#%d)", sym, ts.pullback_count_today)

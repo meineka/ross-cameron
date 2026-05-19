@@ -129,7 +129,7 @@ def test_handle_bar_5min_logs_no_pattern_at_info_level():
     import re
     # Look for a log.info BAR-5M somewhere in handle_bar_5min
     block = re.search(
-        r"async def handle_bar_5min[\s\S]{0,4000}?log\.info\([^\)]*BAR-5M",
+        r"async def handle_bar_5min[\s\S]{0,8000}?log\.info\([^\)]*BAR-5M",
         src,
     )
     assert block, (
