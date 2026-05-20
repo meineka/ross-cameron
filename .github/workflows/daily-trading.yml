@@ -16,7 +16,7 @@ on:
       strategy_variant:
         description: "Strategy variant (strict|relaxed|loose|ultra|force)"
         required: false
-        default: "force"
+        default: "loose"
       skip_hard_flat:
         description: "Skip HARD_FLAT (allow afternoon trading) — 0 or 1"
         required: false
@@ -52,20 +52,40 @@ jobs:
           APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
 
-      - name: Run bot in daemon mode (force-mode VOLLGAS)
+      - name: Startup ntfy — confirm cloud bot armed
+        if: ${{ env.NTFY_TOPIC != '' }}
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          # Phase-85: push at workflow-start so user sees the cloud-bot
+          # is alive BEFORE the 8h sleep until market open. If no push
+          # arrives now, the topic / secret is misconfigured — easier
+          # to debug than waiting for first trade.
+          STRATEGY="${{ github.event.inputs.strategy_variant || 'loose' }}"
+          SKIP="${{ github.event.inputs.skip_hard_flat || '1' }}"
+          curl -s -H "Title: GitHub Cloud — bot starting" \
+               -H "Priority: default" \
+               -d "Run ${{ github.run_id }} armed. Mode=$STRATEGY skip_hard_flat=$SKIP. Bot wakes at NY-open. EOD ntfy at 21:55 Berlin." \
+               "https://ntfy.sh/$NTFY_TOPIC" || true
+
+      - name: Run bot in daemon mode (loose-mode full-day trading)
         timeout-minutes: 340
         continue-on-error: true
         run: |
           cd 06_live_bot
-          # Phase-83: VOLLGAS mode for the cloud — force entries on every
-          # 1-min bar, wide 5%/12% bracket SL/TP, all vetos disabled.
+          # Phase-85: loose mode = real Cameron pattern with relaxed
+          # thresholds. Full day trading via SKIP_HARD_FLAT_TODAY=1.
           python -u bot.py --daemon
         env:
           APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
-          # Phase-83: deploy force-mode by default, with HARD_FLAT moved
-          # to 15:55 NY = 19:55 UTC so the bot trades the full session.
-          STRATEGY_VARIANT: ${{ github.event.inputs.strategy_variant || 'force' }}
+          # Phase-83: default LOOSE-mode (user request: "loose modus,
+          # ganzen tag traden, wenig schranken, gutes log").
+          # loose = real Cameron pattern detector with relaxed
+          # thresholds (2.5% pole vs strict 4%, 70% retrace vs 50%,
+          # 1.2x breakout-vol vs 1.5x). SKIP_HARD_FLAT moves cutoff
+          # to 15:55 NY = 19:55 UTC = full trading day.
+          STRATEGY_VARIANT: ${{ github.event.inputs.strategy_variant || 'loose' }}
           SKIP_HARD_FLAT_TODAY: ${{ github.event.inputs.skip_hard_flat || '1' }}
           # ntfy push — user-controlled topic via GitHub Secret
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
