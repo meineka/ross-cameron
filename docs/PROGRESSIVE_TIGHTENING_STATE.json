@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "_doc": "Phase-84 progressive tightening state. The 5-min cron loop reads this, evaluates the latest GitHub Actions run, and tightens STRATEGY_VARIANT when thresholds are met. STAGES go from MOST OPEN to MOST RESTRICTIVE.",
+  "current_stage": "force",
+  "current_stage_started_at": "2026-05-20T00:00:00Z",
+  "cumulative_clean_trades": 0,
+  "stage_clean_trades": 0,
+  "stage_history": [],
+  "last_check_run_id": null,
+  "last_check_at": null,
+  "_stages": {
+    "force": {
+      "order": 1,
+      "min_trades_to_advance": 2,
+      "trades_at_this_stage": 20,
+      "description": "Phase-79: bypass pattern detector entirely, every 1-min bar fires synthetic BUY, 5%/12% bracket. Goal: validate execution path."
+    },
+    "ultra": {
+      "order": 2,
+      "min_trades_to_advance": 2,
+      "trades_at_this_stage": 20,
+      "description": "Phase-72: ultra-loose entry thresholds (pole_min_move 1%, no vetos). Still uses real pattern detector but VERY permissive."
+    },
+    "loose": {
+      "order": 3,
+      "min_trades_to_advance": 2,
+      "trades_at_this_stage": 15,
+      "description": "Phase-69: pole_min_move 2.5%, VWAP/MACD vetos active, 2x position sizing."
+    },
+    "relaxed": {
+      "order": 4,
+      "min_trades_to_advance": 2,
+      "trades_at_this_stage": 15,
+      "description": "Phase-66: Cameron-strict entries, 2x position sizing."
+    },
+    "strict": {
+      "order": 5,
+      "min_trades_to_advance": 2,
+      "trades_at_this_stage": null,
+      "description": "Cameron-original (terminal stage). Most restrictive, highest edge per trade."
+    }
+  },
+  "_thresholds_explained": "From force to ultra: need >=2 clean trades AND stage trade count >=20. Once both hit, advance. Same pattern through stages. min_trades_to_advance prevents premature jump when only 1-2 trades fired by chance. trades_at_this_stage is the cumulative count needed for transition."
+}
