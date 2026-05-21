@@ -173,28 +173,44 @@ def test_workflow_has_startup_ntfy_step():
     )
 
 
-def test_workflow_ntfy_if_condition_uses_secrets_directly():
-    """Phase-88 BUG FIX: the `if: env.NTFY_TOPIC != ''` pattern is
-    BROKEN in GitHub Actions because step-level env is NOT available
-    to step-level if-expressions. Result: every ntfy step was ALWAYS
-    SKIPPED. Must reference secrets directly in the `if:` condition,
-    NOT via env indirection.
+def test_workflow_ntfy_no_invalid_secret_in_if():
+    """Phase-90 BUG FIX: Phase-88's `if: ${{ secrets.NTFY_TOPIC != '' }}`
+    was REJECTED by GitHub workflow VALIDATOR. Every push triggered a
+    failing validation-run (event=push, 0 jobs, conclusion=failure).
+    GitHub Actions forbids `secrets` context in step-level `if:`
+    expressions. Allowed contexts in `if:`: env, github, inputs, vars.
+    NOT: secrets, runner, job.
 
-    The bug cost 3 days of no notifications. Test pins the fix
-    so it can never regress."""
+    Allowed patterns:
+      env:
+        NTFY: ${{ secrets.NTFY_TOPIC }}
+      run: |
+        if [ -n "$NTFY" ]; then ...
+
+    Forbidden patterns:
+      if: ${{ secrets.NTFY_TOPIC != '' }}    # GitHub validator rejects
+      if: ${{ env.NTFY_TOPIC != '' }}        # step-level env not available
+    """
     src = _wf_text()
-    # The broken pattern: `if: ${{ env.NTFY_TOPIC != '' }}`
+    # Phase-88 bug: env.NTFY_TOPIC in if
     assert "if: ${{ env.NTFY_TOPIC" not in src, (
         "Phase-88 BUG: `if: env.NTFY_TOPIC` is broken — step-level env "
-        "is not available to step-level if. Use `secrets.NTFY_TOPIC` "
-        "directly in the if-condition."
+        "is not available to step-level if."
     )
-    # Correct pattern must be present: secrets.NTFY_TOPIC in if OR inline
-    correct = ("if: ${{ secrets.NTFY_TOPIC" in src or
-               "NTFY_T=\"${{ secrets.NTFY_TOPIC }}\"" in src or
-               'NTFY_T="${{ secrets.NTFY_TOPIC }}"' in src)
-    assert correct, (
-        "workflow must reference secrets.NTFY_TOPIC directly (not via env)"
+    # Phase-90 bug: secrets in if (validator-rejected)
+    # Filter out YAML comment lines so we don't trip on docstring
+    # that DESCRIBES the bug.
+    code_lines = [ln for ln in src.splitlines()
+                   if not ln.lstrip().startswith("#")]
+    code_only = "\n".join(code_lines)
+    assert "if: ${{ secrets." not in code_only, (
+        "Phase-90 BUG: secrets.* in step-level `if:` causes GitHub "
+        "workflow VALIDATION FAILURE (event=push runs fail with 0 jobs). "
+        "Use env: block to expose the secret as $VAR, then test in run:."
+    )
+    # Must still actually use the secret somewhere
+    assert "secrets.NTFY_TOPIC" in src, (
+        "workflow must reference secrets.NTFY_TOPIC (in env: or inline run:)"
     )
 
 

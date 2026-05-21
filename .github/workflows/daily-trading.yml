@@ -63,19 +63,30 @@ jobs:
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
 
       - name: Startup ntfy — confirm cloud bot armed
-        # Phase-88 (2026-05-21) BUG FIX: the previous `if: env.NTFY_TOPIC
-        # != ''` was ALWAYS FALSE because step-level env is NOT available
-        # to step-level `if:` (GitHub Actions evaluation order). Result:
-        # NO startup push EVER fired in 3 days of cloud runs. Now use
-        # secrets directly in the `if:` and inline in the command.
-        if: ${{ secrets.NTFY_TOPIC != '' }}
+        # Phase-90 (2026-05-21) BUG FIX #2: Phase-88's
+        # `if: ${{ secrets.NTFY_TOPIC != '' }}` caused workflow VALIDATION
+        # FAILURES on every push (event=push, conclusion=failure, 0 jobs,
+        # 0 sec). GitHub Actions FORBIDS the `secrets` context in
+        # step-level `if:` expressions — only env, github, inputs are
+        # allowed. Phase-88 commit + Phase-89 commit both triggered
+        # failing push-validation runs (visible in user's GitHub email).
+        # Fix: drop the `if:` entirely; do the empty-check INSIDE run:
+        # via bash. Step always succeeds (|| true) but only curls when
+        # secret actually has a value.
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          STRATEGY: ${{ github.event.inputs.strategy_variant || 'ultra' }}
+          SKIP: ${{ github.event.inputs.skip_hard_flat || '1' }}
+          RUN_ID: ${{ github.run_id }}
         run: |
-          STRATEGY="${{ github.event.inputs.strategy_variant || 'ultra' }}"
-          SKIP="${{ github.event.inputs.skip_hard_flat || '1' }}"
-          curl -s -H "Title: GitHub Cloud — bot starting" \
-               -H "Priority: default" \
-               -d "Run ${{ github.run_id }} armed. Mode=$STRATEGY skip_hard_flat=$SKIP. NY-open 13:30 UTC. EOD ntfy ~21:55 Berlin." \
-               "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}" || true
+          if [ -n "$NTFY_TOPIC" ]; then
+            curl -s -H "Title: GitHub Cloud — bot starting" \
+                 -H "Priority: default" \
+                 -d "Run $RUN_ID armed. Mode=$STRATEGY skip_hard_flat=$SKIP. NY-open 13:30 UTC. EOD ntfy ~21:55 Berlin." \
+                 "https://ntfy.sh/$NTFY_TOPIC" || true
+          else
+            echo "NTFY_TOPIC empty/missing — skipping startup push"
+          fi
 
       - name: Run bot in daemon mode (loose-mode full-day trading)
         timeout-minutes: 340
