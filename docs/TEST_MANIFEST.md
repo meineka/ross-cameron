@@ -4,14 +4,14 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 ## Summary
 
-- **Total files**: 98
-- **Total `def test_*` functions**: 1104
+- **Total files**: 99
+- **Total `def test_*` functions**: 1113
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 620 |
+| critical | 629 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 914 |
+| not_reviewed | 923 |
 | partially_reviewed | 90 |
 | reviewed | 100 |
 
@@ -80,6 +80,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 - `test_phase_82_alert_hygiene.py`
 - `test_phase_85_cloud_deployment_contract.py`
 - `test_phase_89_test_call_isolation.py`
+- `test_phase_91_minute_heartbeat.py`
 - `test_postmortem_20260512.py`
 - `test_pump_dump_filter_bugs.py`
 - `test_review_fixes_p0.py`
@@ -162,6 +163,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_phase_82_alert_hygiene.py` | 11 | critical | yes | not_reviewed | Phase-82 (2026-05-19): alert hygiene + postmortem-trades-bug + rich BUY. |
 | `test_phase_85_cloud_deployment_contract.py` | 24 | critical | yes | not_reviewed | Phase-85 (2026-05-20): cloud-deployment + ntfy + loose-mode contract. |
 | `test_phase_89_test_call_isolation.py` | 4 | critical | yes | not_reviewed | Phase-89 (2026-05-21): isolate test-source calls from production logs + ntfy. |
+| `test_phase_91_minute_heartbeat.py` | 9 | critical | yes | not_reviewed | Phase-91 (2026-05-21): every-minute heartbeat ntfy with watchlist. |
 | `test_pilot_baseline.py` | 3 | replay | no | partially_reviewed | Pilot-Stats Regression: Backtest-Output darf nicht von Baseline abweichen. |
 | `test_position_recovery_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 6 (2026-05-12): position_recovery.recover_or_flatten robustness. |
 | `test_position_size_multipliers.py` | 12 | unit | no | not_reviewed | Audit-Iter 15 (2026-05-12): compute_position_size multiplier stacking. |

@@ -2665,6 +2665,54 @@ class Bot:
                 except asyncio.CancelledError:
                     return
 
+        # Phase-91 (2026-05-21): user request "alle 60 sekunden ein
+        # lebenszeichen + welche symbole auf dem radar". Pushes ntfy
+        # every 60s with current watchlist + bar count + positions +
+        # day PnL — so the operator's phone shows the bot is alive
+        # even when no trades fire.
+        async def minute_heartbeat():
+            import time as _t
+            log.info("Phase-91 minute_heartbeat started (60s interval)")
+            tick = 0
+            while True:
+                tick += 1
+                try:
+                    syms = sorted(self.tickers.keys())
+                    n_pos = sum(1 for ts in self.tickers.values()
+                                  if getattr(ts, "in_position", False))
+                    bars = self.day.bars_received
+                    pnl = self.day.realized_pnl
+                    last_bar = self.day.last_ws_bar_ts or "n/a"
+                    last_no_trade = (self.day.last_no_trade_reason or
+                                     "(no events yet)")[:80]
+                    body = (
+                        f"watchlist ({len(syms)}): {', '.join(syms[:10])}\n"
+                        f"bars_received: {bars}\n"
+                        f"positions_open: {n_pos}\n"
+                        f"day_pnl: ${pnl:+.2f}\n"
+                        f"last_bar_ts: {last_bar}\n"
+                        f"last_no_trade: {last_no_trade}"
+                    )
+                    title = f"🟢 HEARTBEAT t={tick}m"
+                    alerter = getattr(self, "alerter", None)
+                    if alerter is not None:
+                        try:
+                            alerter.send("info", title, body=body, force=True)
+                        except Exception as e:
+                            log.debug("heartbeat ntfy failed: %s", e)
+                    # Also log to bot.log
+                    log.info("HEARTBEAT t=%dm  syms=%d (%s)  bars=%d  "
+                             "pos=%d  pnl=$%+.2f  last_no_trade=%s",
+                             tick, len(syms), ",".join(syms[:6]),
+                             bars, n_pos, pnl, last_no_trade[:40])
+                except Exception as e:
+                    log.warning("heartbeat tick failed: %s", e)
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    log.info("minute_heartbeat cancelled")
+                    return
+
         # Review-fix 2026-05-13: explicit task management statt asyncio.gather.
         # Vorher: time_and_health_loop returnt nach HARD_FLAT, aber ws_loop
         # läuft weiter → bot blockt bis WS-disconnect oder externe Kill.
@@ -2672,12 +2720,14 @@ class Bot:
         ws_task = asyncio.create_task(ws_loop(), name="ws_loop")
         time_task = asyncio.create_task(time_and_health_loop(), name="time_loop")
         pos_task = asyncio.create_task(position_monitor(), name="pos_monitor")
+        hb_task = asyncio.create_task(minute_heartbeat(), name="heartbeat")
         try:
             done, pending = await asyncio.wait(
                 {ws_task, time_task}, return_when=asyncio.FIRST_COMPLETED,
             )
-            # Always cancel position monitor on shutdown
+            # Always cancel position monitor + heartbeat on shutdown
             pos_task.cancel()
+            hb_task.cancel()
             for t in pending:
                 t.cancel()
                 try:
@@ -2688,6 +2738,10 @@ class Bot:
                 await asyncio.wait_for(pos_task, timeout=2.0)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
+            try:
+                await asyncio.wait_for(hb_task, timeout=2.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
             # If ws_task finished first (=critical exit), trigger flatten
             if ws_task in done and not (time_task in done):
                 log.warning("ws_loop ended first — emergency flatten")
@@ -2695,13 +2749,13 @@ class Bot:
                 self._log_day_summary()
         except KeyboardInterrupt:
             log.info("KeyboardInterrupt — closing all positions")
-            for t in (ws_task, time_task, pos_task):
+            for t in (ws_task, time_task, pos_task, hb_task):
                 t.cancel()
             self.executor.market_close_all()
             self._log_day_summary()
         except Exception as e:
             log.error("Bot.run unhandled error: %s", e, exc_info=True)
-            for t in (ws_task, time_task, pos_task):
+            for t in (ws_task, time_task, pos_task, hb_task):
                 t.cancel()
             self.executor.market_close_all()
             self._log_day_summary()
