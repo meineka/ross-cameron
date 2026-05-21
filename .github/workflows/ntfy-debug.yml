@@ -1,0 +1,112 @@
+name: NTFY Debug Smoke Test
+
+# Phase-92 (2026-05-21): isolated cloud-only ntfy push test.
+# Goal: produce a GitHub Actions log that proves whether the workflow
+# can push to ntfy.sh from inside a runner — independent of bot.py.
+#
+# Acceptance criteria (per user 2026-05-21):
+#   topic_present=true
+#   http_status=2xx
+#   curl_exit=0
+# AND the test push must arrive on the user's phone.
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: "Custom message body"
+        required: false
+        default: "ntfy debug smoke test"
+
+jobs:
+  ntfy-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: NTFY smoke test (full diagnostic)
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          MSG: ${{ github.event.inputs.message }}
+        run: |
+          set +e   # don't abort on errors, we want to print every step
+          echo "=================================================="
+          echo "NTFY DEBUG SMOKE TEST"
+          echo "UTC timestamp: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "Run ID:        ${{ github.run_id }}"
+          echo "Commit:        ${{ github.sha }}"
+          echo "=================================================="
+          echo ""
+
+          # 1. Topic-presence check (without revealing the secret value)
+          if [ -z "$NTFY_TOPIC" ]; then
+            echo "topic_present=false"
+            echo "ERROR: NTFY_TOPIC secret is EMPTY or not set in the env block."
+            echo "GitHub-side causes:"
+            echo "  - Secret not configured (gh secret list)"
+            echo "  - Secret named differently (case-sensitive)"
+            echo "  - Environment Protection rules blocking access"
+            echo "  - Workflow's env: block missing the secret reference"
+            exit 1
+          fi
+          echo "topic_present=true"
+          echo "topic_length=${#NTFY_TOPIC} chars"
+          # Print prefix only — never the full value
+          echo "topic_prefix=${NTFY_TOPIC:0:6}***${NTFY_TOPIC: -4}"
+          echo ""
+
+          # 2. Compose the message
+          BODY="$MSG @ $(date -u +'%Y-%m-%dT%H:%M:%SZ') from GH run ${{ github.run_id }}"
+          echo "message_body=$BODY"
+          echo ""
+
+          # 3. Actual POST with full verbose logging
+          echo "--- CURL VERBOSE LOG ---"
+          curl_output=$(mktemp)
+          curl_headers=$(mktemp)
+          curl -sS -v \
+               -X POST \
+               -H "Title: NTFY DEBUG SMOKE TEST" \
+               -H "Priority: high" \
+               -H "Tags: rotating_light,white_check_mark" \
+               -d "$BODY" \
+               -D "$curl_headers" \
+               -o "$curl_output" \
+               -w "HTTP_STATUS=%{http_code}\nTIME_TOTAL=%{time_total}s\n" \
+               "https://ntfy.sh/$NTFY_TOPIC" 2>&1
+          CURL_EXIT=$?
+          echo ""
+
+          # 4. Extract and report each acceptance-criterion value
+          echo "=================================================="
+          echo "RESULTS:"
+          echo "=================================================="
+          echo "curl_exit=$CURL_EXIT"
+
+          # Parse HTTP status from response headers
+          HTTP_STATUS=$(grep -i "^HTTP/" "$curl_headers" | tail -1 | awk '{print $2}')
+          echo "http_status=$HTTP_STATUS"
+
+          # Response body (ntfy.sh returns JSON with id/time/expires/...)
+          echo ""
+          echo "response_headers:"
+          cat "$curl_headers"
+          echo ""
+          echo "response_body:"
+          cat "$curl_output"
+          echo ""
+
+          # 5. Acceptance verdict
+          echo "=================================================="
+          if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_STATUS" =~ ^2[0-9][0-9]$ ]]; then
+            echo "VERDICT: ntfy.sh ACCEPTED the message (server-side OK)"
+            echo "Next check: did the push arrive on the phone?"
+            echo "  YES -> ntfy fully works in cloud; bug must be in bot.py alerter"
+            echo "  NO  -> phone-side issue: app not subscribed, notifications blocked"
+            exit 0
+          else
+            echo "VERDICT: ntfy.sh REJECTED or curl FAILED"
+            echo "  curl_exit=$CURL_EXIT (0=ok, 6=DNS, 7=connect-refused, 28=timeout)"
+            echo "  http_status=$HTTP_STATUS"
+            echo "Investigate response_body above for ntfy.sh error text"
+            exit 1
+          fi
