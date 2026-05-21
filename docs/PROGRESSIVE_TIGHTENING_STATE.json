@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "_doc": "Phase-84 progressive tightening state. The 5-min cron loop reads this, evaluates the latest GitHub Actions run, and tightens STRATEGY_VARIANT when thresholds are met. STAGES go from MOST OPEN to MOST RESTRICTIVE.",
-  "current_stage": "loose",
-  "current_stage_started_at": "2026-05-20T05:15:00Z",
+  "current_stage": "ultra",
+  "current_stage_started_at": "2026-05-21T06:00:00Z",
   "cumulative_clean_trades": 0,
   "stage_clean_trades": 0,
   "stage_history": [],

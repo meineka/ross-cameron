@@ -86,22 +86,34 @@ def test_workflow_scheduled_before_ny_open():
 
 # ─── C. Strategy default is LOOSE (user request) ────────────────────────
 
-def test_default_strategy_is_loose():
-    """User: 'bot soll im loose modus starten'.
-    Workflow_dispatch default + env-fallback must both be loose."""
+def test_default_strategy_is_loose_or_ultra():
+    """User initially asked for 'loose modus', then switched to 'ultra'
+    after seeing 3-month backtest results (ultra: $18,399 vs loose $4,354).
+    Either is acceptable; strict/force/relaxed forbidden because:
+      - strict makes 0-2 trades/day (user wants more activity)
+      - force is chaos mode (no pattern, paper-only stress test)
+      - relaxed has Cameron-strict entries (same as strict for trade count)."""
     src = _wf_text()
-    # Look for "default: \"loose\"" near strategy_variant input
     m = re.search(
-        r"strategy_variant:[\s\S]{0,200}default:\s*['\"]?loose['\"]?",
+        r"strategy_variant:[\s\S]{0,200}default:\s*['\"]?(\w+)['\"]?",
         src,
     )
-    assert m, "workflow_dispatch input default for strategy_variant must be 'loose'"
+    assert m, "workflow_dispatch input default for strategy_variant missing"
+    default = m.group(1).lower()
+    assert default in ("loose", "ultra"), (
+        f"default '{default}' not in (loose, ultra) — these are the only "
+        f"variants with realistic trade frequency for daily cloud trading"
+    )
     # Env fallback when manual not provided
     m2 = re.search(
-        r"STRATEGY_VARIANT:.*\|\|\s*['\"]?loose['\"]?",
+        r"STRATEGY_VARIANT:.*\|\|\s*['\"]?(\w+)['\"]?",
         src,
     )
-    assert m2, "STRATEGY_VARIANT env fallback must default to 'loose'"
+    assert m2, "STRATEGY_VARIANT env fallback missing"
+    fb = m2.group(1).lower()
+    assert fb in ("loose", "ultra"), (
+        f"env fallback '{fb}' not in (loose, ultra)"
+    )
 
 
 def test_default_strategy_not_strict_or_force():
@@ -241,13 +253,15 @@ def test_progressive_state_file_exists():
     assert STATE_FILE.exists()
 
 
-def test_progressive_state_starts_at_loose():
-    """User wants the tightening journey to BEGIN at loose, not at
-    force (which was yesterday's test) or strict (zero trades)."""
+def test_progressive_state_starts_at_loose_or_ultra():
+    """Tightening journey begins at the chosen default mode. After
+    Phase-86 3-month backtest, user switched to ultra (4x more PnL
+    than loose). Either accepted, but never strict/force/relaxed
+    (those produce too few trades for cloud trading)."""
     import json
     state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-    assert state["current_stage"] == "loose", (
-        f"start stage must be 'loose', got '{state['current_stage']}'"
+    assert state["current_stage"] in ("loose", "ultra"), (
+        f"start stage must be 'loose' or 'ultra', got '{state['current_stage']}'"
     )
 
 
