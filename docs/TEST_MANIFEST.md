@@ -5,13 +5,13 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 ## Summary
 
 - **Total files**: 97
-- **Total `def test_*` functions**: 1099
+- **Total `def test_*` functions**: 1100
 
 ### Tests per category
 
 | Category | Tests |
 |---|---|
-| critical | 615 |
+| critical | 616 |
 | integration | 71 |
 | replay | 25 |
 | slow | 3 |
@@ -22,7 +22,7 @@ Phase-20 (ChatGPT-09:02 Task 2): machine-readable inventory of every test in `te
 
 | Status | Tests |
 |---|---|
-| not_reviewed | 909 |
+| not_reviewed | 910 |
 | partially_reviewed | 90 |
 | reviewed | 100 |
 
@@ -159,7 +159,7 @@ Tests that rely on `read_text` / `inspect.getsource` / hard string scanning rath
 | `test_phase_80_spread_in_backtest.py` | 16 | critical | yes | not_reviewed | Phase-80 (2026-05-19): realistic bid/ask spread in backtest. |
 | `test_phase_81_position_monitor.py` | 12 | critical | yes | not_reviewed | Phase-81 (2026-05-19): position monitor task — logs entries + exits. |
 | `test_phase_82_alert_hygiene.py` | 11 | critical | yes | not_reviewed | Phase-82 (2026-05-19): alert hygiene + postmortem-trades-bug + rich BUY. |
-| `test_phase_85_cloud_deployment_contract.py` | 23 | critical | yes | not_reviewed | Phase-85 (2026-05-20): cloud-deployment + ntfy + loose-mode contract. |
+| `test_phase_85_cloud_deployment_contract.py` | 24 | critical | yes | not_reviewed | Phase-85 (2026-05-20): cloud-deployment + ntfy + loose-mode contract. |
 | `test_pilot_baseline.py` | 3 | replay | no | partially_reviewed | Pilot-Stats Regression: Backtest-Output darf nicht von Baseline abweichen. |
 | `test_position_recovery_bugs.py` | 9 | unit | no | not_reviewed | Audit-Iter 6 (2026-05-12): position_recovery.recover_or_flatten robustness. |
 | `test_position_size_multipliers.py` | 12 | unit | no | not_reviewed | Audit-Iter 15 (2026-05-12): compute_position_size multiplier stacking. |

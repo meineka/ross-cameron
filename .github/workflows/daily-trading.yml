@@ -63,20 +63,19 @@ jobs:
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
 
       - name: Startup ntfy — confirm cloud bot armed
-        if: ${{ env.NTFY_TOPIC != '' }}
-        env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        # Phase-88 (2026-05-21) BUG FIX: the previous `if: env.NTFY_TOPIC
+        # != ''` was ALWAYS FALSE because step-level env is NOT available
+        # to step-level `if:` (GitHub Actions evaluation order). Result:
+        # NO startup push EVER fired in 3 days of cloud runs. Now use
+        # secrets directly in the `if:` and inline in the command.
+        if: ${{ secrets.NTFY_TOPIC != '' }}
         run: |
-          # Phase-85: push at workflow-start so user sees the cloud-bot
-          # is alive BEFORE the 8h sleep until market open. If no push
-          # arrives now, the topic / secret is misconfigured — easier
-          # to debug than waiting for first trade.
-          STRATEGY="${{ github.event.inputs.strategy_variant || 'loose' }}"
+          STRATEGY="${{ github.event.inputs.strategy_variant || 'ultra' }}"
           SKIP="${{ github.event.inputs.skip_hard_flat || '1' }}"
           curl -s -H "Title: GitHub Cloud — bot starting" \
                -H "Priority: default" \
-               -d "Run ${{ github.run_id }} armed. Mode=$STRATEGY skip_hard_flat=$SKIP. Bot wakes at NY-open. EOD ntfy at 21:55 Berlin." \
-               "https://ntfy.sh/$NTFY_TOPIC" || true
+               -d "Run ${{ github.run_id }} armed. Mode=$STRATEGY skip_hard_flat=$SKIP. NY-open 13:30 UTC. EOD ntfy ~21:55 Berlin." \
+               "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}" || true
 
       - name: Run bot in daemon mode (loose-mode full-day trading)
         timeout-minutes: 340
@@ -150,12 +149,17 @@ jobs:
             echo "CRITICAL:    $(grep -c CRITICAL 06_live_bot/bot.log)" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
           fi
-          # ntfy push the summary to user's phone (Phase-83)
-          if [ -n "${{ secrets.NTFY_TOPIC }}" ]; then
+          # ntfy push the summary to user's phone (Phase-83 + Phase-88 fix)
+          # Phase-88: inline-secret in bash if-test — works regardless of
+          # whether step-level env block evaluates secrets in time.
+          NTFY_T="${{ secrets.NTFY_TOPIC }}"
+          if [ -n "$NTFY_T" ]; then
             FORCE_COUNT=$(grep -c FORCE-ENTRY 06_live_bot/bot.log 2>/dev/null || echo 0)
             FILLED_COUNT=$(grep -c 'FILLED @' 06_live_bot/bot.log 2>/dev/null || echo 0)
+            BUY_COUNT=$(grep -c 'BRACKET-BUY.*FILLED' 06_live_bot/bot.log 2>/dev/null || echo 0)
             ERR_COUNT=$(grep -c ' ERROR ' 06_live_bot/bot.log 2>/dev/null || echo 0)
+            CRIT_COUNT=$(grep -c ' CRITICAL ' 06_live_bot/bot.log 2>/dev/null || echo 0)
             curl -s -H "Title: GitHub Cloud Day Summary" \
-                 -d "force_entries=$FORCE_COUNT filled=$FILLED_COUNT errors=$ERR_COUNT — see workflow run for full log" \
-                 "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}" || true
+                 -d "force_entries=$FORCE_COUNT  filled=$FILLED_COUNT  BUYs=$BUY_COUNT  errors=$ERR_COUNT  critical=$CRIT_COUNT — see workflow run for full log" \
+                 "https://ntfy.sh/$NTFY_T" || true
           fi

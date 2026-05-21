@@ -173,6 +173,31 @@ def test_workflow_has_startup_ntfy_step():
     )
 
 
+def test_workflow_ntfy_if_condition_uses_secrets_directly():
+    """Phase-88 BUG FIX: the `if: env.NTFY_TOPIC != ''` pattern is
+    BROKEN in GitHub Actions because step-level env is NOT available
+    to step-level if-expressions. Result: every ntfy step was ALWAYS
+    SKIPPED. Must reference secrets directly in the `if:` condition,
+    NOT via env indirection.
+
+    The bug cost 3 days of no notifications. Test pins the fix
+    so it can never regress."""
+    src = _wf_text()
+    # The broken pattern: `if: ${{ env.NTFY_TOPIC != '' }}`
+    assert "if: ${{ env.NTFY_TOPIC" not in src, (
+        "Phase-88 BUG: `if: env.NTFY_TOPIC` is broken — step-level env "
+        "is not available to step-level if. Use `secrets.NTFY_TOPIC` "
+        "directly in the if-condition."
+    )
+    # Correct pattern must be present: secrets.NTFY_TOPIC in if OR inline
+    correct = ("if: ${{ secrets.NTFY_TOPIC" in src or
+               "NTFY_T=\"${{ secrets.NTFY_TOPIC }}\"" in src or
+               'NTFY_T="${{ secrets.NTFY_TOPIC }}"' in src)
+    assert correct, (
+        "workflow must reference secrets.NTFY_TOPIC directly (not via env)"
+    )
+
+
 def test_workflow_has_eod_ntfy_step():
     """End-of-day summary push so user sees the day's outcome
     (force_entries, filled, errors) even without checking GH UI."""
