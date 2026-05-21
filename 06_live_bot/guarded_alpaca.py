@@ -42,16 +42,31 @@ ALPACA_API_CALLS_LOG = HERE / "alpaca_api_calls.jsonl"
 _log_lock = Lock()
 
 
+# Phase-89 (2026-05-21): guard against test-call pollution of production
+# log. The storm-regression test in test_phase_53_guarded_alpaca.py fires
+# 205 calls with source="test" to verify the guard fails closed. Those
+# calls were leaking into alpaca_api_calls.jsonl and triggering the
+# "ALPACA RATE-LIMITED 250/min" ntfy push during CI. Now: any call with
+# source starting "test" OR running under pytest is logged to a SEPARATE
+# file and NEVER triggers state-transition push.
+import os as _os89
+_RUNNING_UNDER_PYTEST = bool(_os89.environ.get("PYTEST_CURRENT_TEST"))
+
+
 def _log_call(*, source: str, method: str, status: str,
               latency_ms: float, blocked_ms: float,
               error_class: str | None = None,
               extra: dict | None = None) -> None:
     """Append one row to alpaca_api_calls.jsonl. Schema is stable so
-    operators / dashboards can grep + aggregate."""
+    operators / dashboards can grep + aggregate.
+
+    Phase-89: test-sourced calls go to a separate file
+    `alpaca_api_calls_test.jsonl` so they don't pollute the production
+    log used for rate-limit analysis."""
     rec = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "schema_version": 1,
-        "source": source,           # "alpaca-trading" | "alpaca-data"
+        "source": source,           # "alpaca-trading" | "alpaca-data" | "test"
         "method": method,           # e.g. "get_account", "submit_order"
         "status": status,           # "ok" | "error"
         "latency_ms": round(latency_ms, 2),
@@ -60,9 +75,19 @@ def _log_call(*, source: str, method: str, status: str,
         "extra": extra or {},
     }
     line = json.dumps(rec, ensure_ascii=False) + "\n"
+    # Phase-89: ONLY redirect when source starts with "test" — the storm-
+    # regression test in test_phase_53 fires 205 calls with source="test"
+    # which were polluting the production rate-limit analysis. Real bot
+    # calls (source="alpaca-trading"/"alpaca-data") still write to the
+    # configured ALPACA_API_CALLS_LOG (which tests monkeypatch to a
+    # temp path for assertions, so we MUST honor the configured path).
+    if source.startswith("test"):
+        target_file = HERE / "alpaca_api_calls_test.jsonl"
+    else:
+        target_file = ALPACA_API_CALLS_LOG
     try:
         with _log_lock:
-            with open(ALPACA_API_CALLS_LOG, "a", encoding="utf-8") as f:
+            with open(target_file, "a", encoding="utf-8") as f:
                 f.write(line)
     except Exception as e:
         # never crash the live trading thread because logging failed
@@ -106,7 +131,17 @@ def _maybe_push_state_transition(new_state: str, source: str,
 
     Phase-61: debounced — a second transition within
     STATE_TRANSITION_DEBOUNCE_SEC of the prior one is logged but NOT
-    pushed. Prevents alert-fatigue during flapping conditions."""
+    pushed. Prevents alert-fatigue during flapping conditions.
+
+    Phase-89: NEVER push ntfy from a test context. Tests intentionally
+    drive the guard into 'blocked' state to verify behavior; pushing
+    real notifications would spam the operator's phone with false
+    positives. Detect via source-prefix only (don't use
+    _RUNNING_UNDER_PYTEST — tests use monkeypatch to assert the push
+    DOES fire for real-source calls)."""
+    # Phase-89: suppress test-driven transitions
+    if source.startswith("test"):
+        return
     global _rate_limit_state, _rate_limit_state_changed_ts
     if new_state == _rate_limit_state:
         return  # no transition
