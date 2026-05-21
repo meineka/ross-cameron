@@ -26,7 +26,7 @@ on:
       strategy_variant:
         description: "Strategy variant (strict|relaxed|loose|ultra|force)"
         required: false
-        default: "ultra"
+        default: "loose"
       skip_hard_flat:
         description: "Skip HARD_FLAT (allow afternoon trading) — 0 or 1"
         required: false
@@ -99,15 +99,16 @@ jobs:
         env:
           APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
           APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
-          # Phase-86 (2026-05-21): switch default to ULTRA mode based on
-          # 3-month backtest results:
-          #   strict   174 trades  $+2,742  PF 2.01
-          #   moderate 236 trades  $+4,202  PF 2.19
-          #   loose    244 trades  $+4,354  PF 2.19
-          #   ULTRA   1885 trades  $+18,399 PF 1.63   <- 4x more PnL!
-          # ultra = Phase-72 thresholds (pole 1%, retrace 90%, vol 1.0x,
-          # VWAP/MACD/FBO vetos disabled). ~20 trades/day vs ~3 in loose.
-          STRATEGY_VARIANT: ${{ github.event.inputs.strategy_variant || 'ultra' }}
+          # Phase-94 (2026-05-21): revert default to LOOSE — best
+          # risk-adjusted return per 3-month backtest:
+          #   strict   174 trades  PF 2.01  Calmar 8.3
+          #   moderate 236 trades  PF 2.19  Calmar 11.0
+          #   LOOSE    244 trades  PF 2.19  Calmar 11.1   <- best PF
+          #   ultra   1885 trades  PF 1.63  Calmar 20.5   (max abs, more DD)
+          # Loose = real Cameron pattern detector with relaxed thresholds
+          # (pole 2.5%, retrace 70%, vol 1.2x). User-confirmed: best-
+          # tested algo for tomorrow's cloud run.
+          STRATEGY_VARIANT: ${{ github.event.inputs.strategy_variant || 'loose' }}
           SKIP_HARD_FLAT_TODAY: ${{ github.event.inputs.skip_hard_flat || '1' }}
           # ntfy push — user-controlled topic via GitHub Secret
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

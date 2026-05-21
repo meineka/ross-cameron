@@ -2693,7 +2693,8 @@ class Bot:
                         f"last_bar_ts: {last_bar}\n"
                         f"last_no_trade: {last_no_trade}"
                     )
-                    title = f"🟢 HEARTBEAT t={tick}m"
+                    # Phase-94: 15-min cadence; tick * 15 = minutes alive
+                    title = f"🟢 HEARTBEAT t={tick*15}m alive"
                     alerter = getattr(self, "alerter", None)
                     if alerter is not None:
                         try:
@@ -2708,7 +2709,10 @@ class Bot:
                 except Exception as e:
                     log.warning("heartbeat tick failed: %s", e)
                 try:
-                    await asyncio.sleep(60)
+                    # Phase-94 (2026-05-21): heartbeat 60s -> 900s (15min).
+                    # 60s spammed ~360 pushes/day; 15min = 24 pushes/day,
+                    # enough for "is bot alive?" without phone noise.
+                    await asyncio.sleep(900)
                 except asyncio.CancelledError:
                     log.info("minute_heartbeat cancelled")
                     return

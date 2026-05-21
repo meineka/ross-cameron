@@ -34,16 +34,22 @@ def test_minute_heartbeat_task_defined():
     assert "minute_heartbeat started" in src
 
 
-def test_heartbeat_60s_interval():
-    """User requested 60s heartbeat. asyncio.sleep(60) must be present
-    inside the heartbeat loop."""
+def test_heartbeat_interval_60s_or_15min():
+    """Phase-91 was 60s; Phase-94 bumped to 900s (15 min) at user
+    request to reduce phone-spam. Either value valid; we just forbid
+    the never-sleeping case OR > 30min stale silence."""
     src = _bot_src()
     import re
     block = re.search(
-        r"minute_heartbeat\(\)[\s\S]{0,3000}?await asyncio\.sleep\(\s*60\s*\)",
+        r"minute_heartbeat\(\)[\s\S]{0,3000}?await asyncio\.sleep\(\s*(\d+)\s*\)",
         src,
     )
-    assert block, "minute_heartbeat must sleep 60s between pushes"
+    assert block, "minute_heartbeat must call asyncio.sleep"
+    seconds = int(block.group(1))
+    assert 60 <= seconds <= 1800, (
+        f"heartbeat interval {seconds}s out of range "
+        f"[60s, 1800s=30min]"
+    )
 
 
 def test_heartbeat_includes_watchlist():
