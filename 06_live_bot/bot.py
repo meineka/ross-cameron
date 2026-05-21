@@ -4005,6 +4005,16 @@ async def daemon_run(api_key: str, api_secret: str, dry_run: bool = False):
                 log.error("Trading day errored (resume): %s", e, exc_info=True)
             log.info("Resume-Session done. Looping.")
             continue
+        # Phase-87 (2026-05-21): if started AFTER trading window closed
+        # today (e.g. GitHub-cron fired 7h late post-market), exit cleanly
+        # instead of sleeping 13h until tomorrow's pre-market — that
+        # 13h sleep gets killed by 6h GitHub job timeout WITHOUT trading.
+        # Exit lets the next scheduled cron try fresh.
+        if ny_now.weekday() < 5 and ny_now.time() >= TIME_HARD_FLAT:
+            log.info("POST-MARKET START: bot started %s NY but trading already "
+                     "closed (HARD_FLAT %s). Exiting — next cron will retry.",
+                     ny_now.strftime("%H:%M"), TIME_HARD_FLAT.strftime("%H:%M"))
+            return
         next_start = next_premarket_start()
         ny_now = datetime.now(NY_TZ)
         wait_sec = (next_start - ny_now).total_seconds()

@@ -7,10 +7,20 @@ name: Daily Cameron-Bot Trading
 
 on:
   schedule:
-    # 13:25 UTC = 15:25 CEST = 09:25 ET = 5 min before NY market open.
-    # Avoid 0/30 minute marks (GitHub-Schedule-Trigger gets delayed at
-    # top-of-hour from server-load spikes — see GitHub docs).
-    - cron: '23 13 * * 1-5'
+    # Phase-87 (2026-05-21): MULTIPLE cron entries for redundancy.
+    # GitHub Actions free-tier delays scheduled triggers up to 7+ hours
+    # under load (confirmed 2026-05-20: cron set to 13:23 UTC actually
+    # fired at 20:59 UTC = 7h36m late → bot started after market close).
+    # By firing 4 times before/during NY market hours, at least ONE
+    # should hit close to the intended time. The bot's process-lock
+    # prevents duplicate trading; only the first one to acquire bot.pid
+    # actually trades, others see the lock and exit gracefully.
+    - cron: '23 13 * * 1-5'   # 15:23 Berlin = 09:23 ET = primary, 7m pre-market
+    - cron: '47 14 * * 1-5'   # 16:47 Berlin = 10:47 ET = backup 1h17m into mkt
+    - cron: '23 16 * * 1-5'   # 18:23 Berlin = 12:23 ET = backup mid-day
+    - cron: '47 17 * * 1-5'   # 19:47 Berlin = 13:47 ET = backup late-mkt
+    # Off-the-half-hour minute (3/7/23/47) avoids the top-of-hour
+    # server-load spike where GitHub queues scheduled triggers most.
   workflow_dispatch:
     inputs:
       strategy_variant:
